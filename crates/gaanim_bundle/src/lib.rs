@@ -104,7 +104,8 @@ pub const FORMAT: &str = "gaanim-bundle";
 /// 10 the images that fill outlines in the 3D world and the shadows and
 /// blurs of 3D content, version 11 normal maps and morph targets on
 /// imported models' meshes and the weights of those targets each frame, and
-/// version 12 how translucent 3D content blends.
+/// version 12 how translucent 3D content blends, the cones of spot lights
+/// and the depth of field that blurs 3D content.
 pub const VERSION: u32 = 12;
 /// Oldest version this build still reads: bundles published in other pages
 /// keep playing when the hosted players move to a newer version.
@@ -2574,7 +2575,8 @@ mod tests {
     /// An imported model's mesh comes back with its texture, normal map,
     /// alpha mode, sides, skin weights and morph targets, stored once, and
     /// each frame with the palette of its joints and its targets' weights,
-    /// and how its translucent content blends.
+    /// how its translucent content blends, its lights' cones and its depth
+    /// of field.
     #[test]
     fn imported_meshes_and_their_palettes_and_weights_round_trip() {
         use gaanim_core::peniko::{Blob, ImageAlphaType, ImageData, ImageFormat};
@@ -2674,15 +2676,35 @@ mod tests {
         let identity = gaanim_core::glam::Mat4::IDENTITY.to_cols_array();
         let moved =
             gaanim_core::glam::Mat4::from_translation(gaanim_core::glam::Vec3::X).to_cols_array();
+        let light = |spot: bool| gaanim_renderer::three_d::Light {
+            position: gaanim_core::glam::DVec3::new(0.0, 4.0, 2.0),
+            directional: false,
+            color: [1.0, 0.5, 0.25],
+            spot: spot.then_some(gaanim_renderer::three_d::Spot {
+                direction: gaanim_core::glam::DVec3::NEG_Y,
+                cos_inner: 0.95,
+                cos_outer: 0.9,
+            }),
+        };
+        let focused = gaanim_scene::DepthOfField {
+            focus: 0.8,
+            aperture: 0.2,
+            max_blur: 0.3,
+        };
         let mut writer = BundleWriter::new(std::io::Cursor::new(Vec::new()), "test");
         for (index, palette) in [identity, moved].into_iter().enumerate() {
             let mut captured = frame(index as f64 / 60.0);
-            // The first frame peels its translucent surfaces, the second
-            // blends them as layers.
-            let layers = if index == 0 { 5 } else { 0 };
+            // The first frame peels its translucent surfaces, under a spot
+            // light and out of focus; the second blends them as layers,
+            // under a point light and in focus.
+            let first = index == 0;
             captured.capture.three_d = Some(gaanim_renderer::pipeline::CapturedThreeD {
                 sources: vec![source(palette, &weights[index])],
-                transparency: gaanim_scene::Transparency3D { layers },
+                transparency: gaanim_scene::Transparency3D {
+                    layers: if first { 5 } else { 0 },
+                },
+                lights: vec![light(first)],
+                depth_of_field: if first { focused } else { Default::default() },
                 ..Default::default()
             });
             writer.push_frame(&captured, [0; 32]).unwrap();
@@ -2698,7 +2720,14 @@ mod tests {
         for (index, palette) in [identity, moved].into_iter().enumerate() {
             let decoded = bundle.frame(index).unwrap();
             let three_d = decoded.capture.three_d.unwrap();
-            assert_eq!(three_d.transparency.layers, if index == 0 { 5 } else { 0 });
+            let first = index == 0;
+            assert_eq!(three_d.transparency.layers, if first { 5 } else { 0 });
+            assert_eq!(three_d.lights, [light(first)]);
+            let in_focus = gaanim_scene::DepthOfField::default();
+            assert_eq!(
+                three_d.depth_of_field,
+                if first { focused } else { in_focus }
+            );
             let back = &three_d.sources[0];
             let back_mesh = back.mesh.as_deref().unwrap();
             assert_eq!(back_mesh.vertices, mesh.vertices, "frame {index}");

@@ -1518,14 +1518,15 @@ scene.geometry.transparency_3d("order_independent", layers=6)
 #api-entry(
   name: "Geometry.light_3d",
   kind: "factory",
-  signature: "light_3d(kind=\"point\", *, color=None, intensity=1.0) -> Drawable",
-  desc: [Una luz para las primitivas con material, en el origen. No dibuja nada; es un dibujable, así que `move_to_3d` la coloca y `animate`, los grupos y `follow` la mueven. Una luz `"point"` alumbra desde su posición en todas direcciones; una `"directional"`, con rayos paralelos desde la dirección de su posición vista desde el origen, como el sol. Mientras la escena muestra luces, sustituyen a la luz principal fija de `lighting_3d`, cuya luz del cielo y del suelo se mantiene, y cada una alumbra en su `color` (blanco por defecto) con su `intensity`, atenuada por su opacidad: `fade_in` y `fade_out` la encienden y la apagan. Con `lighting_3d("none")` solo alumbran las luces. Las cuatro primeras luces que muestra la escena proyectan sombra (ver `lighting_3d`). Las superficies sin material, los gráficos 3D y las líneas no reciben luz. Una `intensity` negativa o no finita, u otro `kind`, lanzan `ValueError`.],
+  signature: "light_3d(kind=\"point\", *, color=None, intensity=1.0, target=(0, 0, 0), angle=0.5, softness=0.25) -> Drawable",
+  desc: [Una luz para las primitivas con material, en el origen. No dibuja nada; es un dibujable, así que `move_to_3d` la coloca y `animate`, los grupos y `follow` la mueven. Una luz `"point"` alumbra desde su posición en todas direcciones; una `"directional"`, con rayos paralelos desde la dirección de su posición vista desde el origen, como el sol; una `"spot"` (un foco), desde su posición hacia el punto del mundo `target`, en un cono de `angle` radianes a cada lado de esa línea (1.4 como mucho) que se apaga en la parte exterior `softness` del ángulo (0 para un borde duro, 1 para un degradado desde el centro). Al moverlo, el foco sigue apuntando a `target`, así que barre su cono por la escena. Mientras la escena muestra luces, sustituyen a la luz principal fija de `lighting_3d`, cuya luz del cielo y del suelo se mantiene, y cada una alumbra en su `color` (blanco por defecto) con su `intensity`, atenuada por su opacidad: `fade_in` y `fade_out` la encienden y la apagan. Con `lighting_3d("none")` solo alumbran las luces. Las cuatro primeras luces que muestra la escena proyectan sombra (ver `lighting_3d`); un foco, dentro de su cono. Las superficies sin material, los gráficos 3D y las líneas no reciben luz. Una `intensity` negativa o no finita, otro `kind`, un `target` no finito, un `angle` fuera de (0, 1.4] o una `softness` fuera de 0 a 1 lanzan `ValueError`. `target`, `angle` y `softness` solo cuentan para los focos.],
 )[
 ```python
 >>>from gaanim import *
 >>>scene = Scene(frame=(16, 9))
 lamp = scene.geometry.light_3d(color=GOLD, intensity=1.5).move_to_3d(3, 2, 4)
 scene.play([lamp.animate.move_to_3d(-3, 2, 4).duration(2.0)])
+spot = scene.geometry.light_3d("spot", target=(0, 0, 0), angle=0.3).move_to_3d(0, 4, 2)
 ```
 ]
 

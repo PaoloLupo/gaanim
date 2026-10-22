@@ -238,6 +238,8 @@ Primitives, arrows and tubes, extrusion, axonometric drawings and 3D axes.
 | [Glow on 3D content](3d/glow_3d.py) | A halo around what the camera sees of a sphere, a 3D line and a walking glTF model, grown and faded with animate.glow, and hidden where a solid in front covers it. |
 | [Shadows and blurs on 3D content](3d/soft_effects_3d.py) | Drop shadows cast by a sphere and by a text placed in 3D, a blurred cube that the timeline sharpens, and a blurred ring that a sharp solid in front of it hides. |
 | [Order-independent transparency](3d/transparency_3d.py) | Translucent panels that cross, a ball passing through a panel, nested shells, a ring in a box, a knot and a Möbius strip, each surface blended in the order it lies at each pixel. |
+| [Spot lights](3d/spot_lights_3d.py) | Cones of light of three widths and three softnesses over a cube, a sphere and a cone, and a spot that sweeps across the stage while the shadows turn away from it. |
+| [Depth of field in 3D](3d/depth_of_field_3d.py) | A row of solids going away from the camera, blurred by their distance from the focus as it racks from the nearest to the farthest, as the aperture opens and as the blur is capped. |
 | [Images and Lottie in 3D](3d/media_in_3d.py) | An image and a Lottie scene placed in the 3D world with in_3d(), and an image kept facing the camera with billboard(), each hidden pixel by pixel by a ball passing in front. |
 | [Lines 3d](3d/lines_3d.py) | Polylines through 3D points with solid colors and color maps, and paths traced behind moving objects that fade, cap or thin. |
 | [Axes 3d](3d/axes_3d.py) | 3D axes with their grid planes, box sizes, linear, log, symlog and power scales, layers that animate apart, and planes and axes that take the sides the camera shows. |

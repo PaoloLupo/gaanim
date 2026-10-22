@@ -793,6 +793,14 @@ puntos se reproducen a la frecuencia de la pantalla.
   tiene detrás. Los objetos translúcidos se dibujan de atrás hacia delante,
   ordenados por su centro, así que dos que se cruzan se mezclan en el mismo
   orden a los dos lados del cruce.
+- Con `scene.camera.depth_of_field(...)`, la imagen 3D se desenfoca al
+  final, con brillos y sombras, según la profundidad de cada píxel: primero a
+  lo ancho y luego a lo alto, y cada píxel se extiende sobre sus vecinos con
+  su propio desenfoque. Lo que queda detrás no se extiende sobre lo que está
+  delante más de lo que este se desenfoca, así que un borde nítido delante
+  de un fondo desenfocado conserva su borde. Solo los fotogramas
+  desenfocados construyen sus pipelines. Ver el ejemplo
+  `3d/depth_of_field_3d`.
 - Con `scene.geometry.transparency_3d("order_independent")`, cada
   superficie translúcida se mezcla en el orden en que está en cada píxel
   (_depth peeling_): el pase 3D separa, de la más cercana a la más lejana,
@@ -804,8 +812,9 @@ puntos se reproducen a la frecuencia de la pantalla.
   `3d/transparency_3d`.
 - Una línea sobre una superficie en el mismo plano, como la rejilla del
   suelo bajo un gráfico, queda debajo de la superficie.
-- Las sombras salen de mapas de sombra: uno por luz direccional y seis
-  (un cubo) por luz puntual, que cubren todas las mallas. Proyectan sombra
+- Las sombras salen de mapas de sombra: uno por luz direccional, uno en
+  perspectiva por foco (`light_3d("spot")`, un poco más ancho que su cono) y
+  seis (un cubo) por luz puntual, que cubren todas las mallas. Proyectan sombra
   las mallas opacas y los objetos 2D con `.in_3d()`, donde son al menos
   medio opacos; no las mallas translúcidas, las líneas ni lo que brilla
   (`Material3D.emissive`), que puede contener la luz que lo hace brillar.

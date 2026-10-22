@@ -6509,22 +6509,28 @@ class Camera:
         aperture: Optional[float] = None,
         max_blur: Optional[float] = None,
     ) -> Camera:
-        """Set the depth of field of parallax layers at the cursor; returns the camera.
+        """Set the depth of field of parallax layers and 3D content at the cursor; returns the camera.
 
         Each layer created with ``Scene.layer`` blurs by its circle of
         confusion, ``aperture * |1 - focus / depth|`` scene units, at most
         ``max_blur``: layers at the ``focus`` depth stay sharp and the blur
         grows with the distance from it in either direction (a layer at
         ``math.inf`` blurs by ``aperture``). Depths are those of the layers,
-        so ``focus=1`` keeps the scene plane sharp. Omitted values keep
-        their current value; at first focus is 1, aperture 0 (no blur) and
-        max_blur 0.5. Drawables outside layers, and HUD drawables inside
+        so ``focus=1`` keeps the scene plane sharp. 3D content blurs the same
+        way pixel by pixel while the camera stands away from its ``look_at``
+        target: a point's depth is its distance along the view in units of
+        the camera's distance to the target, so ``focus=1`` keeps the
+        target's depth sharp and ``focus=0.5`` what lies halfway to the
+        camera. What lies behind a sharp edge does not spread over it, and
+        translucent content blurs by what lies behind it. Omitted values
+        keep their current value; at first focus is 1, aperture 0 (no blur)
+        and max_blur 0.5. Drawables outside layers, and HUD drawables inside
         them, never blur. A layer is blurred
         as one image, through a shader effect on its root that replaces any
         ``shader_effect`` set on the layer itself; drawn offscreen, a blurred
-        layer costs more. A focus that is not a finite positive depth, or a
-        negative or non-finite ``aperture`` or ``max_blur``, raise
-        ``ValueError``.
+        layer costs more, and so does a blurred 3D image. A focus that is not
+        a finite positive depth, or a negative or non-finite ``aperture`` or
+        ``max_blur``, raise ``ValueError``.
 
         Example:
             scene.camera.depth_of_field(focus=1.0, aperture=0.12)
@@ -7096,7 +7102,7 @@ class CameraAnimation:
         aperture: Optional[float] = None,
         max_blur: Optional[float] = None,
     ) -> Anim:
-        """Animate the depth of field of parallax layers; see ``Camera.depth_of_field``.
+        """Animate the depth of field of parallax layers and 3D content; see ``Camera.depth_of_field``.
 
         The focus moves in inverse depth, so a rack focus passes evenly
         through near and far layers; aperture and max_blur change linearly.
@@ -9343,10 +9349,13 @@ class Geometry:
         ...
     def light_3d(
         self,
-        kind: Literal["point", "directional"] = "point",
+        kind: Literal["point", "directional", "spot"] = "point",
         *,
         color: Optional[ColorLike] = None,
         intensity: float = 1.0,
+        target: tuple[float, float, float] = (0.0, 0.0, 0.0),
+        angle: float = 0.5,
+        softness: float = 0.25,
     ) -> Drawable:
         """Create a light for lit 3D primitives at the origin and return it.
 
@@ -9354,19 +9363,27 @@ class Geometry:
         and ``animate``, groups and ``follow`` move it. A ``"point"`` light
         shines from its position in every direction; a ``"directional"`` one
         shines along parallel rays from the direction of its position seen
-        from the origin, as the sun does. While the scene shows lights they
+        from the origin, as the sun does; a ``"spot"`` one shines from its
+        position toward the world point ``target``, in a cone ``angle``
+        radians wide on each side of that line (at most 1.4), fading out over
+        the outer ``softness`` of the angle (0 for a hard edge, 1 for a fade
+        from the middle). Moving a spot keeps it aimed at ``target``, so it
+        sweeps the cone across the scene. While the scene shows lights they
         replace the fixed key light of ``lighting_3d``, whose sky and ground
         light stays, and each shines in ``color`` (white by default) at
         ``intensity``, dimmed by the light's opacity: ``fade_in`` and
         ``fade_out`` switch it on and off. With ``lighting_3d("none")`` only
         the lights light the scene. The first four lights a scene shows cast
-        shadows (see ``lighting_3d``). Surfaces, 3D plots and lines are unlit.
-        A negative or non-finite ``intensity`` or another ``kind`` raises
-        ``ValueError``.
+        shadows (see ``lighting_3d``): a spot casts them within its cone.
+        Surfaces, 3D plots and lines are unlit. A negative or non-finite
+        ``intensity``, another ``kind``, a non-finite ``target``, an
+        ``angle`` outside (0, 1.4] or a ``softness`` outside 0 to 1 raise
+        ``ValueError``. ``target``, ``angle`` and ``softness`` apply to spots.
 
         Example:
             lamp = scene.geometry.light_3d(color=GOLD, intensity=1.5).move_to_3d(3, 2, 4)
             scene.play([lamp.animate.move_to_3d(-3, 2, 4).duration(2.0)])
+            spot = scene.geometry.light_3d("spot", target=(0, 0, 0), angle=0.3).move_to_3d(0, 4, 2)
         """
         ...
     def rect(self, width: float, height: float) -> Drawable:

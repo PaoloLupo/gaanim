@@ -46,16 +46,44 @@ use wgpu::util::DeviceExt;
 
 use crate::effects::{DropShadow, GaussianBlur, Glow};
 
+mod focus;
 mod glow;
 mod peel;
 
 /// A light as shading uses it: where it is in the world and its linear
-/// color, scaled by its intensity and its entity's opacity.
+/// color, scaled by its intensity and its entity's opacity, and a spot
+/// light's cone.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Light {
     pub position: DVec3,
     pub directional: bool,
     pub color: [f32; 3],
+    pub spot: Option<Spot>,
+}
+
+/// The cone a spot light shines in: its direction, a unit vector, and the
+/// cosines of the angles from it within which it shines fully and beyond
+/// which it gives no light.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Spot {
+    pub direction: DVec3,
+    pub cos_inner: f32,
+    pub cos_outer: f32,
+}
+
+impl Spot {
+    /// The cone `cone` gives a spot at `position`; `None` when it aims at
+    /// itself.
+    fn new(cone: &gaanim_scene::SpotCone, position: DVec3) -> Option<Self> {
+        let direction = (cone.target - position).try_normalize()?;
+        let outer = cone.angle.clamp(1e-3, gaanim_scene::SpotCone::MAX_ANGLE);
+        let inner = outer * (1.0 - cone.softness.clamp(0.0, 1.0));
+        Some(Self {
+            direction,
+            cos_inner: inner.cos(),
+            cos_outer: outer.cos(),
+        })
+    }
 }
 
 impl Light {
@@ -65,21 +93,28 @@ impl Light {
         let strength = light.intensity.max(0.0) * opacity.clamp(0.0, 1.0);
         let [r, g, b, a] = to_linear(light.color);
         let color = [r, g, b].map(|channel| channel * a * strength);
+        let spot = match &light.kind {
+            LightKind3D::Spot(cone) => Some(Spot::new(cone, position)?),
+            _ => None,
+        };
         (strength > 0.0 && position.is_finite()).then_some(Self {
             position,
             directional: light.kind == LightKind3D::Directional,
             color,
+            spot,
         })
     }
 }
 
 /// How lit 3D content is lit in a frame: the scene's [`Lighting3D`] and the
-/// lights it shows; and how its translucent content blends.
+/// lights it shows; how its translucent content blends; and the camera's
+/// depth of field, which blurs it by depth (see [`focus`]).
 #[derive(Debug, Clone, Default)]
 pub struct Illumination {
     pub lighting: Lighting3D,
     pub lights: Vec<Light>,
     pub transparency: Transparency3D,
+    pub depth_of_field: gaanim_scene::DepthOfField,
 }
 
 /// One drawable's 3D content, as the ECS holds it.
@@ -169,7 +204,7 @@ const CASTER_BYTES: usize = 64;
 /// normal matrix and its linear base color (`VertexIn` in [`SHADER`]).
 const INSTANCE_BYTES: usize = 128;
 /// Bytes of the frame uniforms (`Frame` in [`SHADER`]).
-const FRAME_BYTES: usize = 2336;
+const FRAME_BYTES: usize = 2592;
 /// Bytes of one draw's uniforms (`Draw` in [`SHADER`]), and their stride in
 /// the draw buffer, the minimum uniform offset alignment.
 const DRAW_BYTES: usize = 240;
@@ -1076,6 +1111,8 @@ pub struct GpuMeshFrame {
     /// [`peel`]), 0 when translucent draws blend as layers from back to
     /// front.
     peel: u8,
+    /// How the image blurs by depth, when it is out of focus.
+    focus: Option<focus::FocusDraw>,
     digest: u64,
 }
 
@@ -1133,6 +1170,11 @@ impl GpuMeshFrame {
         }
         update(&self.joints);
         update(&[self.peel]);
+        if let Some(focus) = &self.focus {
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            focus.hash(&mut hasher);
+            update(&hasher.finish().to_le_bytes());
+        }
     }
 }
 
@@ -1453,6 +1495,26 @@ impl<'a> GpuMeshes<'a> {
             .collect();
         // Pixels of the image per scene unit, which line widths scale by.
         let pixels_per_unit = self.placement.determinant().abs().sqrt();
+        // How far along the view the content lies, which bounds its blur.
+        let forward = camera.rotation * DVec3::NEG_Z;
+        let depths = self
+            .pending
+            .iter()
+            .map(|pending| {
+                let (center, radius) = world_sphere(pending);
+                let distance = forward.dot(center - camera.position);
+                (distance - radius, distance + radius)
+            })
+            .filter(|(near, far)| near.is_finite() && far.is_finite())
+            .reduce(|(a, b), (c, d)| (a.min(c), b.max(d)));
+        let focus = depths.and_then(|depths| {
+            focus::FocusDraw::new(
+                &illumination.depth_of_field,
+                camera,
+                pixels_per_unit,
+                depths,
+            )
+        });
 
         // Opaque draws first, near ones first so that the depth test skips
         // what they hide; translucent ones after them, from back to front.
@@ -1611,6 +1673,7 @@ impl<'a> GpuMeshes<'a> {
             instances.hash(&mut hasher);
             joints.hash(&mut hasher);
             illumination.transparency.layers.hash(&mut hasher);
+            focus.hash(&mut hasher);
             for draw in &draws {
                 (Arc::as_ptr(&draw.source) as usize).hash(&mut hasher);
                 draw.culled.hash(&mut hasher);
@@ -1636,6 +1699,7 @@ impl<'a> GpuMeshes<'a> {
                     shadow_layers: Arc::clone(&shadow_layers),
                     joints: joints.into(),
                     peel: illumination.transparency.layers,
+                    focus,
                     digest: hasher.finish(),
                 },
             ));
@@ -1774,40 +1838,61 @@ fn shadows(illumination: &Illumination, pending: &[Pending]) -> Shadows {
     if !(radius.is_finite() && radius > 1e-9) {
         return shadows;
     }
-    let casters: Vec<(Option<usize>, DVec3, bool)> = if illumination.lights.is_empty() {
+    let key = Light {
+        position: KEY_LIGHT,
+        directional: true,
+        color: [1.0; 3],
+        spot: None,
+    };
+    let casters: Vec<(Option<usize>, Light)> = if illumination.lights.is_empty() {
         let lit = lighting.enabled && lighting.intensity > 0.0;
-        lit.then_some((None, KEY_LIGHT, true)).into_iter().collect()
+        lit.then_some((None, key)).into_iter().collect()
     } else {
         illumination
             .lights
             .iter()
             .take(MAX_SHADOW_LIGHTS)
             .enumerate()
-            .map(|(index, light)| (Some(index), light.position, light.directional))
+            .map(|(index, light)| (Some(index), *light))
             .collect()
     };
+    // A cube of six around a point light, one map for the others.
     let layers: usize = casters
         .iter()
-        .map(|(.., directional)| if *directional { 1 } else { 6 })
+        .map(|(_, light)| {
+            if light.directional || light.spot.is_some() {
+                1
+            } else {
+                6
+            }
+        })
         .sum();
     shadows.size = match layers {
         1 => SHADOW_SIZE,
         ..=12 => SHADOW_SIZE_SHARED,
         _ => SHADOW_SIZE_MANY,
     };
-    for (light, position, directional) in casters {
+    for (index, light) in casters {
         let first = shadows.layers.len();
-        if directional {
-            match directional_shadow(position, center, radius, shadows.size) {
+        if light.directional {
+            match directional_shadow(light.position, center, radius, shadows.size) {
                 Some(layer) => shadows.layers.push(layer),
                 None => continue,
             }
+        } else if let Some(spot) = &light.spot {
+            shadows.layers.push(spot_shadow(
+                light.position,
+                spot,
+                center,
+                radius,
+                shadows.size,
+            ));
         } else {
             shadows
                 .layers
-                .extend(point_shadows(position, center, radius, shadows.size));
+                .extend(point_shadows(light.position, center, radius, shadows.size));
         }
-        match light {
+        match index {
             None => shadows.key = Some(first),
             Some(index) => shadows.lights[index] = Some(first),
         }
@@ -1872,6 +1957,29 @@ fn point_shadows(position: DVec3, center: DVec3, radius: f64, size: u32) -> [Sha
         near,
         far,
     })
+}
+
+/// The shadow map of a spot light at `position` over the sphere at `center`
+/// with `radius`, `size` texels on a side: a perspective view along its
+/// direction, a little wider than its cone.
+fn spot_shadow(position: DVec3, spot: &Spot, center: DVec3, radius: f64, size: u32) -> ShadowLayer {
+    let distance = position.distance(center);
+    let near = ((distance - radius) * 0.5).max(radius * 1e-3).max(1e-4);
+    let far = (distance + radius) * 1.01;
+    let half = (f64::from(spot.cos_outer).acos() * 1.05 + 0.02).min(1.5);
+    let projection = directx::perspective(2.0 * half, 1.0, near, far);
+    let up = if spot.direction.cross(DVec3::Y).length_squared() > 1e-6 {
+        DVec3::Y
+    } else {
+        DVec3::Z
+    };
+    ShadowLayer {
+        view_proj: projection * view::look_at_mat4(position, position + spot.direction, up),
+        perspective: true,
+        texel: 2.0 * half.tan() / f64::from(size),
+        near,
+        far,
+    }
 }
 
 /// The frame uniforms: `camera`, the map `ndc_map` from its NDC to the
@@ -1972,8 +2080,23 @@ fn frame_uniforms(
                         layer(shadows.lights[index]),
                     ],
                 );
+                // A spot light's direction and cone; none for the others.
+                let (direction, cos_outer, cos_inner) =
+                    light.spot.map_or((DVec3::ZERO, 0.0, 0.0), |spot| {
+                        (spot.direction, spot.cos_outer, spot.cos_inner)
+                    });
+                push_f32s(
+                    &mut uniforms,
+                    &[
+                        direction.x as f32,
+                        direction.y as f32,
+                        direction.z as f32,
+                        cos_outer,
+                    ],
+                );
+                push_f32s(&mut uniforms, &[cos_inner, 0.0, 0.0, 0.0]);
             }
-            None => push_f32s(&mut uniforms, &[0.0; 8]),
+            None => push_f32s(&mut uniforms, &[0.0; 16]),
         }
     }
     for index in 0..MAX_SHADOW_LAYERS {
@@ -3504,6 +3627,10 @@ pub struct GpuThreeD {
     /// textures they peel into, which bind the scratch targets.
     peel: Option<peel::PeelPipelines>,
     peel_targets: Option<peel::PeelTargets>,
+    /// Built the first time a frame is out of focus, and the textures it
+    /// blurs in.
+    focus: Option<focus::FocusPipelines>,
+    focus_targets: Option<focus::FocusTargets>,
     uploads: HashMap<usize, Uploaded>,
     /// Models' and filled outlines' textures by the id of their pixels and
     /// whether they are read as they are (normal maps), and their samplers.
@@ -3616,19 +3743,19 @@ impl GpuThreeD {
             target.drawn = Some(frame.digest);
             renderer.mark_override_image_dirty(&target.image);
             changed = true;
-            let target_view = target.resolved_view.clone();
-            self.draw(device, queue, frame, &target_view);
+            let resolved = (target.resolved.clone(), target.resolved_view.clone());
+            self.draw(device, queue, frame, (&resolved.0, &resolved.1));
         }
         changed
     }
 
-    /// Draw `frame` and resolve it into `target`.
+    /// Draw `frame` and resolve it into `target`, a view of `resolved`.
     fn draw(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         frame: &GpuMeshFrame,
-        target: &wgpu::TextureView,
+        (resolved, target): (&wgpu::Texture, &wgpu::TextureView),
     ) {
         let pipelines = self.pipelines.get_or_insert_with(|| Pipelines::new(device));
         let size = (frame.image.width, frame.image.height);
@@ -4236,8 +4363,9 @@ impl GpuThreeD {
                         depth_ops: Some(wgpu::Operations {
                             load: wgpu::LoadOp::Clear(0.0),
                             // The translucent layers read the opaque depth,
-                            // and the glows test their silhouettes against it.
-                            store: if opaque && (!last || glows) {
+                            // the glows test their silhouettes against it and
+                            // the depth of field blurs by it.
+                            store: if opaque && (!last || glows || frame.focus.is_some()) {
                                 wgpu::StoreOp::Store
                             } else {
                                 wgpu::StoreOp::Discard
@@ -4406,6 +4534,33 @@ impl GpuThreeD {
                 &|pass: &mut wgpu::RenderPass<'_>, first, end| draw_one(pass, first, end, true),
             );
         }
+        // Last, the image blurs by depth, glows and all.
+        if let Some(focus) = &frame.focus {
+            let pipelines = self
+                .focus
+                .get_or_insert_with(|| focus::FocusPipelines::new(device));
+            if self
+                .focus_targets
+                .as_ref()
+                .is_none_or(|targets| targets.size() != (frame.image.width, frame.image.height))
+            {
+                self.focus_targets = Some(focus::FocusTargets::new(
+                    device,
+                    (frame.image.width, frame.image.height),
+                ));
+            }
+            let targets = self.focus_targets.as_ref().expect("focus targets are set");
+            focus::draw_focus(
+                device,
+                &mut encoder,
+                pipelines,
+                targets,
+                focus,
+                resolved,
+                target,
+                &scratch.depth,
+            );
+        }
         queue.submit(Some(encoder.finish()));
     }
 }
@@ -4417,6 +4572,15 @@ struct Light {
     position: vec4<f32>,
     // Linear color, and its shadow's first layer plus one (0 for none).
     color: vec4<f32>,
+    // A spot light's direction, the way it shines, and the cosine of its
+    // cone's edge; zero for other lights.
+    spot: vec4<f32>,
+    // The cosine of the angle within which a spot light shines fully.
+    cone: vec4<f32>,
+}
+
+fn is_spot(light: Light) -> bool {
+    return dot(light.spot.xyz, light.spot.xyz) > 0.5;
 }
 
 // A shadow map layer: its view-projection, the size of its texels (in scene
@@ -4646,16 +4810,19 @@ fn shadowed(light: Light, point: vec3<f32>, normal: vec3<f32>, pixel: vec2<f32>)
     var layer = u32(light.color.w - 0.5);
     var toward = light.position.xyz;
     if light.position.w < 0.5 {
-        // A point light's cube face: the one its ray to the point leaves by.
         let ray = point - light.position.xyz;
-        let size = abs(ray);
-        var face = select(5u, 4u, ray.z > 0.0);
-        if size.x >= size.y && size.x >= size.z {
-            face = select(1u, 0u, ray.x > 0.0);
-        } else if size.y >= size.z {
-            face = select(3u, 2u, ray.y > 0.0);
+        // A point light's cube face: the one its ray to the point leaves by;
+        // a spot light's one map.
+        if !is_spot(light) {
+            let size = abs(ray);
+            var face = select(5u, 4u, ray.z > 0.0);
+            if size.x >= size.y && size.x >= size.z {
+                face = select(1u, 0u, ray.x > 0.0);
+            } else if size.y >= size.z {
+                face = select(3u, 2u, ray.y > 0.0);
+            }
+            layer += face;
         }
-        layer += face;
         toward = -ray;
     }
     let shadow = frame.shadows[layer];
@@ -4754,7 +4921,12 @@ fn shade(
     var keyed = vec3<f32>(0.0);
     var highlight = vec3<f32>(0.0);
     for (var i = 0u; i < count; i = i + 1u) {
-        var light = Light(vec4<f32>(KEY_LIGHT, 1.0), vec4<f32>(1.0, 1.0, 1.0, frame.params.z));
+        var light = Light(
+            vec4<f32>(KEY_LIGHT, 1.0),
+            vec4<f32>(1.0, 1.0, 1.0, frame.params.z),
+            vec4<f32>(0.0),
+            vec4<f32>(0.0),
+        );
         if !fixed {
             light = frame.lights[i];
         }
@@ -4770,6 +4942,10 @@ fn shade(
         let key = max((dot(normal, toward_light) + KEY_WRAP) / (1.0 + KEY_WRAP), 0.0);
         let half = normalize_or_zero(toward_light + viewer);
         let shine = pow(max(dot(normal, half), 0.0), shininess) * polish * min(key, 1.0);
+        // A spot light fades out toward the edge of its cone.
+        if is_spot(light) {
+            lit *= smoothstep(light.spot.w, light.cone.x, dot(-toward_light, light.spot.xyz));
+        }
         keyed += KEY_STRENGTH * key * light.color.rgb * lit;
         highlight += shine * light.color.rgb * lit;
     }
@@ -5660,6 +5836,7 @@ mod tests {
             position,
             directional,
             color: [1.0; 3],
+            spot: None,
         };
         illumination.lights = vec![
             light(DVec3::new(0.0, 0.0, 3.0), false),
@@ -5908,6 +6085,7 @@ mod tests {
                 position: DVec3::new(1.0, 0.0, 1.0),
                 directional: true,
                 color: [1.0; 3],
+                spot: None,
             }],
             ..Default::default()
         };
@@ -6020,6 +6198,7 @@ mod tests {
                 position: DVec3::new(1.0, 0.0, 1.0),
                 directional: true,
                 color: [1.0; 3],
+                spot: None,
             }],
             ..Default::default()
         };
@@ -6206,6 +6385,7 @@ mod tests {
             position: DVec3::new(1.5, 0.0, 3.0),
             directional: false,
             color: [1.0; 3],
+            spot: None,
         }]) else {
             return;
         };
@@ -6745,6 +6925,21 @@ mod tests {
         meshes: &[(TriangleMeshData, DMat4, f32)],
         transparency: Transparency3D,
     ) -> Option<(Vec<u8>, bool)> {
+        let illumination = Illumination {
+            transparency,
+            ..Default::default()
+        };
+        let (pixels, three_d) = draw_illuminated(meshes, &illumination)?;
+        Some((pixels, three_d.peel.is_some()))
+    }
+
+    /// The RGBA pixels of `meshes`, each placed by its matrix and at its
+    /// opacity, drawn as [`draw_meshes`] draws them under `illumination`,
+    /// and what drew them.
+    fn draw_illuminated(
+        meshes: &[(TriangleMeshData, DMat4, f32)],
+        illumination: &Illumination,
+    ) -> Option<(Vec<u8>, GpuThreeD)> {
         let mut gpu = crate::background::test_gpu::test_gpu()?;
         let mut camera = Camera::ortho_2d_frame(4.0, 4.0, 64, 64);
         camera.position = DVec3::new(0.0, 0.0, 10.0);
@@ -6787,12 +6982,8 @@ mod tests {
                 },
             );
         }
-        let illumination = Illumination {
-            transparency,
-            ..Default::default()
-        };
         let frames: Vec<GpuMeshFrame> = pending
-            .finish(&camera, ndc_to_canvas, line_width, &illumination)
+            .finish(&camera, ndc_to_canvas, line_width, illumination)
             .into_iter()
             .map(|(_, frame)| frame)
             .collect();
@@ -6802,7 +6993,92 @@ mod tests {
         three_d.prepare(&gpu.device, &gpu.queue, &mut gpu.renderer, &frames);
         let target = gpu.target(64, 64);
         gpu.render(&scene, &target);
-        Some((gpu.read(&target), three_d.peel.is_some()))
+        Some((gpu.read(&target), three_d))
+    }
+
+    /// A white quad in focus on the left and one farther away on the right:
+    /// out of focus, the far one's edge spreads over several pixels while
+    /// the near one's stays sharp, and in focus both are sharp.
+    #[test]
+    fn the_depth_of_field_blurs_what_lies_away_from_the_focus() {
+        let white = quad(peniko::Color::WHITE);
+        // 16 pixels per unit; the camera stands 10 units in front of its
+        // target, so the far quad lies at 1.5 times its distance.
+        let near = DMat4::from_translation(DVec3::new(-1.0, 0.0, 0.0))
+            * DMat4::from_scale(DVec3::splat(0.5));
+        let far = DMat4::from_translation(DVec3::new(1.0, 0.0, -5.0))
+            * DMat4::from_scale(DVec3::splat(0.5));
+        let meshes = [(white.clone(), near, 1.0), (white, far, 1.0)];
+        let blurred = Illumination {
+            depth_of_field: gaanim_scene::DepthOfField {
+                focus: 1.0,
+                aperture: 1.0,
+                max_blur: 1.0,
+            },
+            ..Default::default()
+        };
+        let Some((sharp, three_d)) = draw_illuminated(&meshes, &Illumination::default()) else {
+            return;
+        };
+        assert!(three_d.focus.is_none(), "a frame in focus builds no blur");
+        let (out, three_d) = draw_illuminated(&meshes, &blurred).unwrap();
+        assert!(three_d.focus.is_some());
+        // The near quad spans pixels 8 to 24 across, the far one 40 to 56.
+        let alpha = |pixels: &[u8], x| pixel(pixels, x, 32)[3];
+        assert_eq!((alpha(&sharp, 23), alpha(&sharp, 25)), (255, 0));
+        assert_eq!((alpha(&sharp, 40), alpha(&sharp, 38)), (255, 0));
+        assert_eq!(alpha(&out, 23), 255, "in focus");
+        assert!(alpha(&out, 25) <= 2, "in focus: {}", alpha(&out, 25));
+        // A third of a unit of blur: 5 pixels of sigma.
+        let (inside, edge, outside) = (alpha(&out, 48), alpha(&out, 40), alpha(&out, 36));
+        assert!(inside > 150, "{inside}");
+        assert!((40..200).contains(&edge), "{edge}");
+        assert!((5..130).contains(&outside), "{outside}");
+    }
+
+    /// A spot light lights the floor within its cone and leaves the rest
+    /// to the sky and ground light, where a point light at its place lights
+    /// all of it.
+    #[test]
+    fn a_spot_light_lights_only_within_its_cone() {
+        let position = DVec3::new(-0.6, 0.6, 3.0);
+        let target = DVec3::new(-0.6, 0.6, 0.0);
+        let cone = gaanim_scene::SpotCone {
+            target,
+            angle: 0.25,
+            softness: 0.2,
+        };
+        let spot = Light {
+            position,
+            directional: false,
+            color: [1.0; 3],
+            spot: Spot::new(&cone, position),
+        };
+        assert!(spot.spot.is_some());
+        let point = Light { spot: None, ..spot };
+        let Some(spotted) = floor_and_card(vec![spot]) else {
+            return;
+        };
+        let lit = floor_and_card(vec![point]).unwrap();
+        // At 16 pixels per unit: the cone's middle at (-0.6, 0.6), and the
+        // floor well outside it at (0.75, -0.75).
+        let (within, beyond) = (spotted[22 * 64 + 22], spotted[44 * 64 + 44]);
+        assert!(
+            u16::from(beyond) + 40 < u16::from(within),
+            "within {within}, beyond {beyond}"
+        );
+        assert!(
+            lit[44 * 64 + 44] > beyond + 40,
+            "{} {beyond}",
+            lit[44 * 64 + 44]
+        );
+        assert!(within.abs_diff(lit[22 * 64 + 22]) < 4);
+        // A spot that aims at itself gives no light.
+        let aimless = gaanim_scene::SpotCone {
+            target: position,
+            ..cone
+        };
+        assert!(Spot::new(&aimless, position).is_none());
     }
 
     /// Two translucent quads that cross, red nearer on the left and blue on
@@ -7769,7 +8045,7 @@ mod tests {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         frame: &GpuMeshFrame,
-        view: &wgpu::TextureView,
+        view: (&wgpu::Texture, &wgpu::TextureView),
     ) -> f64 {
         const ROUNDS: u64 = 100;
         let buffer = |size, usage| {
@@ -8012,9 +8288,10 @@ mod tests {
                 })),
                 ..Default::default()
             };
-            let view = Target::new(&device, &empty.image).resolved_view;
-            let base_gpu = gpu_ms(&mut three_d, &device, &queue, &empty, &view);
-            let base_3d = per_frame(&device, || three_d.draw(&device, &queue, &empty, &view));
+            let target = Target::new(&device, &empty.image);
+            let view = (&target.resolved, &target.resolved_view);
+            let base_gpu = gpu_ms(&mut three_d, &device, &queue, &empty, view);
+            let base_3d = per_frame(&device, || three_d.draw(&device, &queue, &empty, view));
             let base_vello = vello_ms(&vello::Scene::new(), &mut renderer);
             println!(
                 "empty frame: 3D pass {base_gpu:.3} ms on the GPU, {base_3d:.3} ms wall; Vello {base_vello:.3} ms wall"
@@ -8051,9 +8328,9 @@ mod tests {
                     },
                     true,
                 );
-                let gpu = gpu_ms(&mut three_d, &device, &queue, &frame, &view) - base_gpu;
+                let gpu = gpu_ms(&mut three_d, &device, &queue, &frame, view) - base_gpu;
                 let wall =
-                    per_frame(&device, || three_d.draw(&device, &queue, &frame, &view)) - base_3d;
+                    per_frame(&device, || three_d.draw(&device, &queue, &frame, view)) - base_3d;
                 let mut scene = vello::Scene::new();
                 for glyph in &fill.glyphs {
                     scene.fill(

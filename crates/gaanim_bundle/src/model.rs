@@ -1499,8 +1499,21 @@ fn write_three_d(
     // Then how translucent content blends (format 12): the surfaces each
     // pixel blends in depth order, 0 when drawables blend as layers.
     let peeled = three_d.transparency.layers;
+    // Then the cones of spot lights (format 12): by light, its direction and
+    // the cosines of its cone's edges.
+    let spots: Vec<(usize, &gaanim_renderer::three_d::Spot)> = three_d
+        .lights
+        .iter()
+        .enumerate()
+        .filter_map(|(index, light)| light.spot.as_ref().map(|spot| (index, spot)))
+        .collect();
+    // Last, the depth of field that blurs the content (format 12): its
+    // focus, aperture and largest blur, when it blurs.
+    let depth_of_field = three_d.depth_of_field;
     // Each section is written when it or a later one holds something.
-    let after_morphs = peeled > 0;
+    let after_spots = depth_of_field.aperture > 0.0;
+    let after_transparency = !spots.is_empty() || after_spots;
+    let after_morphs = peeled > 0 || after_transparency;
     let after_blurs = !blurs.is_empty() || !morphs.is_empty() || after_morphs;
     let after_images = !images.is_empty() || !shadows.is_empty() || after_blurs;
     let later = !palettes.is_empty()
@@ -1712,6 +1725,22 @@ fn write_three_d(
     if after_morphs {
         w.u8(peeled);
     }
+    if after_transparency {
+        w.len(spots.len());
+        for (index, spot) in spots {
+            w.len(index);
+            for value in spot.direction.to_array() {
+                w.f64(value);
+            }
+            w.f32(spot.cos_inner);
+            w.f32(spot.cos_outer);
+        }
+    }
+    if after_spots {
+        w.f64(depth_of_field.focus);
+        w.f64(depth_of_field.aperture);
+        w.f64(depth_of_field.max_blur);
+    }
 }
 
 /// The 3D content of camera views a frame's 3D block holds, by the key of
@@ -1737,6 +1766,7 @@ fn read_three_d(
             position: DVec3::new(r.f64()?, r.f64()?, r.f64()?),
             directional: r.bool()?,
             color: [r.f32()?, r.f32()?, r.f32()?],
+            spot: None,
         });
     }
     let opacity_fallback = r.rect()?;
@@ -2033,6 +2063,30 @@ fn read_three_d(
     if !r.is_empty() {
         transparency.layers = r.u8()?.min(gaanim_scene::Transparency3D::MAX_LAYERS);
     }
+    if !r.is_empty() {
+        for _ in 0..r.len()? {
+            let index = r.len()?;
+            let direction = DVec3::new(r.f64()?, r.f64()?, r.f64()?);
+            let spot = gaanim_renderer::three_d::Spot {
+                direction,
+                cos_inner: r.f32()?,
+                cos_outer: r.f32()?,
+            };
+            lights
+                .get_mut(index)
+                .ok_or_else(|| corrupt("the cone of no light"))?
+                .spot = Some(spot);
+        }
+    }
+    // Without one, nothing blurs: the aperture is 0.
+    let mut depth_of_field = gaanim_scene::DepthOfField::default();
+    if !r.is_empty() {
+        depth_of_field = gaanim_scene::DepthOfField {
+            focus: r.f64()?,
+            aperture: r.f64()?,
+            max_blur: r.f64()?,
+        };
+    }
     for (index, glyphs) in fills {
         sources[index].fill = Some(Arc::new(gaanim_scene::PlaneFillData { glyphs }));
     }
@@ -2041,6 +2095,7 @@ fn read_three_d(
             lighting,
             lights,
             transparency,
+            depth_of_field,
             opacity_fallback,
             sources,
         },

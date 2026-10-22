@@ -574,6 +574,16 @@ title = "Order-independent transparency"
 description = "Translucent panels that cross, a ball passing through a panel, nested shells, a ring in a box, a knot and a Möbius strip, each surface blended in the order it lies at each pixel."
 
 [[example]]
+path = "3d/spot_lights_3d.py"
+title = "Spot lights"
+description = "Cones of light of three widths and three softnesses over a cube, a sphere and a cone, and a spot that sweeps across the stage while the shadows turn away from it."
+
+[[example]]
+path = "3d/depth_of_field_3d.py"
+title = "Depth of field in 3D"
+description = "A row of solids going away from the camera, blurred by their distance from the focus as it racks from the nearest to the farthest, as the aperture opens and as the blur is capped."
+
+[[example]]
 path = "3d/media_in_3d.py"
 title = "Images and Lottie in 3D"
 description = "An image and a Lottie scene placed in the 3D world with in_3d(), and an image kept facing the camera with billboard(), each hidden pixel by pixel by a ball passing in front."

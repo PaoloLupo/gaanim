@@ -50,7 +50,10 @@ This file guides repository work; model selection belongs to the calling client.
     `gaanim_scene::Transparency3D` (`transparency_3d`), translucent surfaces
     are depth-peeled (`three_d/peel.rs`): each pass keeps the nearest
     surface behind the last layer and draws its color under the layers
-    before, built only when a frame first peels. A camera
+    before, built only when a frame first peels. The camera's
+    `gaanim_scene::DepthOfField` also blurs the 3D image by depth
+    (`three_d/focus.rs`), last, across then down, each pixel spread by the
+    blur of what colors it. A camera
     view snapshot (`effects::CameraSnapshot`) shows what the view showed at
     one instant: `gaanim_api::runtime` builds the scene a second time, seeks
     it to each snapshot and freezes what the view drew into

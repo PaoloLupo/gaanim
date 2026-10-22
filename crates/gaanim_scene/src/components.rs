@@ -816,13 +816,31 @@ impl Transparency3D {
 }
 
 /// Where a [`Light3D`] shines from.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum LightKind3D {
     /// From the entity's position, in every direction.
     Point,
     /// Along parallel rays, from the direction of the entity's position seen
     /// from the origin, as the sun does.
     Directional,
+    /// From the entity's position, in a cone around the line toward a point.
+    Spot(SpotCone),
+}
+
+/// The cone of a spot light: around the line from the light toward `target`
+/// (world coordinates), `angle` radians wide on each side of it, and fading
+/// out over the outer `softness` of that angle.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SpotCone {
+    pub target: gaanim_core::glam::DVec3,
+    pub angle: f32,
+    pub softness: f32,
+}
+
+impl SpotCone {
+    /// The widest cone a spot shines in, on each side of its line: below a
+    /// right angle, so that one perspective shadow map covers it.
+    pub const MAX_ANGLE: f32 = 1.4;
 }
 
 /// A light for lit 3D content, at the position of the entity that carries

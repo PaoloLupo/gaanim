@@ -5706,8 +5706,16 @@ impl PyGeometry {
         Py::new(py, PyPrimitive3D::initializer(handle))
     }
 
-    #[pyo3(signature = (kind="point", *, color=None, intensity=1.0))]
-    fn light_3d(&self, kind: &str, color: Option<PyColor>, intensity: f32) -> PyResult<PyDrawable> {
+    #[pyo3(signature = (kind="point", *, color=None, intensity=1.0, target=(0.0, 0.0, 0.0), angle=0.5, softness=0.25))]
+    fn light_3d(
+        &self,
+        kind: &str,
+        color: Option<PyColor>,
+        intensity: f32,
+        target: (f64, f64, f64),
+        angle: f32,
+        softness: f32,
+    ) -> PyResult<PyDrawable> {
         crate::custom::ensure_authoring_allowed()?;
         if !intensity.is_finite() || intensity < 0.0 {
             return Err(pyo3::exceptions::PyValueError::new_err(
@@ -5717,9 +5725,33 @@ impl PyGeometry {
         let kind = match kind {
             "point" => gaanim_scene::LightKind3D::Point,
             "directional" => gaanim_scene::LightKind3D::Directional,
+            "spot" => {
+                let target = gaanim_core::glam::DVec3::new(target.0, target.1, target.2);
+                if !target.is_finite() {
+                    return Err(pyo3::exceptions::PyValueError::new_err(
+                        "target must be finite",
+                    ));
+                }
+                let widest = gaanim_scene::SpotCone::MAX_ANGLE;
+                if !(angle > 0.0 && angle <= widest) {
+                    return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                        "angle must be above 0 and at most {widest} radians"
+                    )));
+                }
+                if !(0.0..=1.0).contains(&softness) {
+                    return Err(pyo3::exceptions::PyValueError::new_err(
+                        "softness must be between 0 and 1",
+                    ));
+                }
+                gaanim_scene::LightKind3D::Spot(gaanim_scene::SpotCone {
+                    target,
+                    angle,
+                    softness,
+                })
+            }
             _ => {
                 return Err(pyo3::exceptions::PyValueError::new_err(
-                    "kind must be 'point' or 'directional'",
+                    "kind must be 'point', 'directional' or 'spot'",
                 ));
             }
         };

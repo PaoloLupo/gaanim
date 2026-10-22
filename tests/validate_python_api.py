@@ -1754,6 +1754,25 @@ def validate_transparency_3d_contract(module: object) -> list[str]:
     return failures
 
 
+def validate_spot_light_contract(module: object) -> list[str]:
+    """Aim spot lights and reject cones they cannot shine in."""
+    failures: list[str] = []
+    scene = module.Scene(frame=(16, 9))
+    spot = scene.geometry.light_3d("spot", target=(0, -1, 0), angle=0.4, softness=0.5)
+    if not isinstance(spot.move_to_3d(0, 4, 2), module.Drawable):
+        failures.append("a spot light does not move as a drawable")
+    for operation in (
+        lambda: scene.geometry.light_3d("spot", angle=0.0),
+        lambda: scene.geometry.light_3d("spot", angle=1.5),
+        lambda: scene.geometry.light_3d("spot", softness=1.5),
+        lambda: scene.geometry.light_3d("spot", target=(0, float("nan"), 0)),
+        lambda: scene.geometry.light_3d("lamp"),
+    ):
+        if not raises_error(ValueError, operation):
+            failures.append("a light_3d call did not raise ValueError")
+    return failures
+
+
 def validate_in_3d_contract(module: object) -> list[str]:
     """Exercise 2D drawables placed in the 3D world."""
     failures: list[str] = []
@@ -3815,6 +3834,7 @@ def main() -> int:
     missing.extend(validate_gltf_contract(module))
     missing.extend(validate_in_3d_contract(module))
     missing.extend(validate_transparency_3d_contract(module))
+    missing.extend(validate_spot_light_contract(module))
     missing.extend(validate_deg_contract(module))
     missing.extend(validate_matrix_contract(module))
     missing.extend(validate_matrix_logical_units(module))

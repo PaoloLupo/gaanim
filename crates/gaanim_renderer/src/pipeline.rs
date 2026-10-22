@@ -1367,6 +1367,7 @@ impl Freezer<'_> {
                     lighting: own.three_d.lighting,
                     lights: own.three_d.lights.clone(),
                     transparency: own.three_d.transparency,
+                    depth_of_field: own.three_d.depth_of_field,
                     opacity_fallback: own.three_d.opacity_fallback,
                     sources,
                 },
@@ -1420,6 +1421,7 @@ impl Freezer<'_> {
                     lighting: three_d.lighting,
                     lights: three_d.lights.clone(),
                     transparency: three_d.transparency,
+                    depth_of_field: three_d.depth_of_field,
                     opacity_fallback: three_d.opacity_fallback,
                     sources,
                 },
@@ -4276,10 +4278,11 @@ type LightData = (
 type LightQuery<'w, 's> = Query<'w, 's, LightData, With<Visible>>;
 
 /// The lighting of lit 3D content: the scene's preset and the lights shown;
-/// and how its translucent content blends.
+/// how its translucent content blends; and the depth of field it blurs by.
 fn illumination<'a>(
     lighting: Option<&gaanim_scene::Lighting3D>,
     transparency: Option<&gaanim_scene::Transparency3D>,
+    depth_of_field: Option<&gaanim_scene::DepthOfField>,
     lights: impl Iterator<
         Item = (
             &'a gaanim_scene::Light3D,
@@ -4299,6 +4302,7 @@ fn illumination<'a>(
             })
             .collect(),
         transparency: transparency.copied().unwrap_or_default(),
+        depth_of_field: depth_of_field.copied().unwrap_or_default(),
     }
 }
 /// Query of the tips drawn on strokes.
@@ -4402,6 +4406,7 @@ fn extract_three_d(
     let lighting = illumination(
         world.get_resource::<gaanim_scene::Lighting3D>(),
         world.get_resource::<gaanim_scene::Transparency3D>(),
+        world.get_resource::<gaanim_scene::DepthOfField>(),
         lights.iter(world),
     );
     let mut content = world.query_filtered::<ThreeDData, ThreeDFilter>();
@@ -4516,6 +4521,7 @@ pub struct CapturedThreeD {
     pub lighting: gaanim_scene::Lighting3D,
     pub lights: Vec<crate::three_d::Light>,
     pub transparency: gaanim_scene::Transparency3D,
+    pub depth_of_field: gaanim_scene::DepthOfField,
     /// Layer bounds of the elements of an opaque drawable.
     pub opacity_fallback: kurbo::Rect,
     pub sources: Vec<CapturedThreeDSource>,
@@ -4609,6 +4615,7 @@ fn captured_gpu_three_d(
         lighting: captured.lighting,
         lights: captured.lights.clone(),
         transparency: captured.transparency,
+        depth_of_field: captured.depth_of_field,
     };
     match crate::three_d::GpuMeshes::new(sources, target.size, target.placement, target.slot).map(
         |gpu| {
@@ -4751,6 +4758,7 @@ fn own_view_three_d(views: &[&ExtractedCameraView], captured: &CapturedThreeD) {
                 lighting: captured.lighting,
                 lights: captured.lights.clone(),
                 transparency: captured.transparency,
+                depth_of_field: captured.depth_of_field,
                 opacity_fallback: captured.opacity_fallback,
                 sources,
             },
@@ -4897,6 +4905,7 @@ fn three_d_elements<'a>(
         capture.lighting = lighting.lighting;
         capture.lights = lighting.lights.clone();
         capture.transparency = lighting.transparency;
+        capture.depth_of_field = lighting.depth_of_field;
         capture.opacity_fallback = opacity_fallback;
         capture.sources = sources
             .iter()
@@ -6894,7 +6903,7 @@ pub fn gaanim_render_system(
         tip_query,
         backdrop_query,
         three_d_query,
-        (lighting, light_query, glow_query, transparency),
+        (lighting, light_query, glow_query, transparency, depth_of_field),
         opacity_query,
         effect_query,
         signal_query,
@@ -6913,6 +6922,7 @@ pub fn gaanim_render_system(
             LightQuery,
             Query<SoftEffectsData, SoftEffectsFilter>,
             Option<Res<gaanim_scene::Transparency3D>>,
+            Option<Res<gaanim_scene::DepthOfField>>,
         ),
         Query<&GlobalOpacity>,
         Query<&crate::object_effects::ShaderEffect>,
@@ -7532,6 +7542,7 @@ pub fn gaanim_render_system(
             &illumination(
                 lighting.as_deref(),
                 transparency.as_deref(),
+                depth_of_field.as_deref(),
                 light_query.iter(),
             ),
             three_d_query.iter().map(three_d_source),
@@ -7830,6 +7841,7 @@ mod tests {
         let lit = illumination(
             None,
             None,
+            None,
             [(&light, &transform, &GlobalOpacity(0.5))].into_iter(),
         );
         assert_eq!(lit.lights.len(), 1);
@@ -7841,6 +7853,7 @@ mod tests {
         assert!(!shown.directional);
         assert!((shown.color[0] - 1.0).abs() < 1e-6, "{shown:?}");
         let hidden = illumination(
+            None,
             None,
             None,
             [(&light, &transform, &GlobalOpacity(0.0))].into_iter(),

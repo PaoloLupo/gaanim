@@ -17,8 +17,9 @@ Sin publicar. Una malla 3D se transforma en otra con `animate.transform_to`,
 `points_3d` e `instances` dibujan miles de puntos o copias de una malla
 como un solo objeto, las imágenes, las escenas Lottie, las sombras y los
 desenfoques también viven en el mundo 3D, los modelos glTF traen sus
-morph targets y sus mapas de normales, y el contenido 3D translúcido puede
-mezclarse en el orden en que está en cada píxel.
+morph targets y sus mapas de normales, el contenido 3D translúcido puede
+mezclarse en el orden en que está en cada píxel, hay focos, y la
+profundidad de campo de la cámara desenfoca también el contenido 3D.
 
 == Morph entre mallas 3D
 
@@ -118,14 +119,35 @@ mezclarse en el orden en que está en cada píxel.
   `transparency_3d` no hacen nada nuevo.
 - Nuevo ejemplo, `3d/transparency_3d`.
 
+== Focos y profundidad de campo en 3D
+
+- `light_3d("spot", target=(x, y, z), angle=0.5, softness=0.25)` crea un
+  foco: alumbra desde su posición hacia `target` en un cono de `angle`
+  radianes a cada lado, que se apaga en la parte exterior `softness` del
+  ángulo, y proyecta sombra dentro de su cono. Al moverlo sigue apuntando a
+  `target`, así que barre la escena. Ver
+  #link("/referencia/geometria/#api-geometry-light-3d")[Geometría].
+- `scene.camera.depth_of_field(...)` y `animate.focus_to(...)` desenfocan
+  ahora también el contenido 3D, píxel a píxel según su profundidad,
+  mientras la cámara está apartada de su objetivo de `look_at`: `focus=1`
+  deja nítido el objetivo. Lo que queda detrás de un borde nítido no se
+  extiende sobre él. Ver
+  #link("/referencia/scene/#profundidad-campo")[Escena].
+- Nuevos ejemplos, `3d/spot_lights_3d` y `3d/depth_of_field_3d`.
+
 == Al actualizar
 
 - Los paquetes `.gaanim` pasan al formato 12, que guarda los morphs 3D, las
   copias de mallas, las imágenes de los objetos en el mundo 3D, la sombra y
   el desenfoque de los objetos 3D, los morph targets y mapas de normales de
-  los modelos glTF y cómo se mezcla el contenido 3D translúcido. Gaanim
-  sigue abriendo los de formato 5 a 11; un Gaanim anterior no abre los
-  nuevos, así que actualiza los reproductores que los publican.
+  los modelos glTF, cómo se mezcla el contenido 3D translúcido, los conos de
+  los focos y la profundidad de campo del contenido 3D. Gaanim sigue
+  abriendo los de formato 5 a 11; un Gaanim anterior no abre los nuevos, así
+  que actualiza los reproductores que los publican.
+- Una escena que desenfoca sus capas de parallax con
+  `camera.depth_of_field` mientras una cámara 3D está apartada de su
+  objetivo desenfoca ahora también su contenido 3D, que antes quedaba
+  nítido.
 - Un modelo glTF con morph targets o mapas de normales se ve ahora como en
   Blender: antes se dibujaba con la malla de reposo y las normales de sus
   vértices.
