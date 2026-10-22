@@ -3883,6 +3883,16 @@ impl SceneModel {
                     {
                         builder.commands.entity(state.entity).insert(in_3d);
                     }
+                    // Facing the camera, whatever it is: an image, a video or
+                    // a Lottie scene as well as a shape or a text.
+                    if spec.billboard
+                        && let Some(state) = builder.states.get(actual.id)
+                    {
+                        builder
+                            .commands
+                            .entity(state.entity)
+                            .insert((gaanim_scene::Billboard, bevy::prelude::Transform::default()));
+                    }
                     if let Some(depth) = spec.parallax_depth
                         && let Some(state) = builder.states.get(actual.id)
                     {
@@ -13070,19 +13080,6 @@ impl SceneModel {
                 commands.insert(shadow.clone());
             }
         }
-        // Billboard / HUD chaining (.billboard() / .hud())
-        if spec.billboard
-            && let Some(state) = builder.states.get(id)
-        {
-            builder
-                .commands
-                .entity(state.entity)
-                .insert(gaanim_scene::Billboard);
-            builder
-                .commands
-                .entity(state.entity)
-                .insert(bevy::prelude::Transform::default());
-        }
         // Glyphs go on their path before a layout measures the Text.
         if let Some(text_path) = &spec.text_path
             && let Some(path) = id_map.get(&text_path.path).copied()
@@ -21292,6 +21289,54 @@ mod tests {
         // Pixel (150, 25): x = -2 + 3 = 1, y = 1 - 0.5 = 0.5, then moved by (1, 1).
         assert!(at.distance(DVec3::new(2.0, 1.5, 0.0)) < 1e-9, "{at:?}");
         assert_eq!(corner.offset, DVec3::new(-2.0, 1.0, 0.0));
+    }
+
+    /// `billboard()` turns any drawable toward the camera: an image as
+    /// well as a shape.
+    #[test]
+    fn images_and_shapes_become_billboards() {
+        use bevy::prelude::App;
+        use gaanim_objects::primitives::ImageView;
+        let mut canvas = SceneModel::new(640, 360);
+        let image = gaanim_core::peniko::ImageData {
+            data: gaanim_core::peniko::Blob::new(std::sync::Arc::new(vec![255u8; 4 * 4])),
+            format: gaanim_core::peniko::ImageFormat::Rgba8,
+            alpha_type: gaanim_core::peniko::ImageAlphaType::Alpha,
+            width: 2,
+            height: 2,
+        };
+        let view = ImageView {
+            source_x: 0.0,
+            source_y: 0.0,
+            source_width: 2.0,
+            source_height: 2.0,
+            display_width: 1.0,
+            display_height: 1.0,
+            scale_x: 0.5,
+            scale_y: 0.5,
+            quality: gaanim_core::peniko::ImageQuality::Medium,
+        };
+        let picture = canvas
+            .spawn(SpawnKind::Image { image, view })
+            .billboard()
+            .move_to_3d(1.0, 0.0, -1.0);
+        let square = canvas.rect(1.0, 1.0).billboard();
+        let mut app = App::new();
+        app.add_plugins(bevy::prelude::MinimalPlugins)
+            .add_plugins(gaanim_scene::GaanimScenePlugin)
+            .add_plugins(gaanim_animation::GaanimAnimationPlugin)
+            .add_plugins(gaanim_timeline::GaanimTimelinePlugin)
+            .add_plugins(gaanim_text::GaanimTextPlugin)
+            .add_plugins(gaanim_renderer::GaanimDerivedGeometryPlugin);
+        app.finish();
+        app.cleanup();
+        app.update();
+        crate::runtime::replay_canvas_into(app.world_mut(), canvas);
+        app.update();
+        for handle in [&picture, &square] {
+            let entity = entity_of(app.world_mut(), handle);
+            assert!(app.world().get::<gaanim_scene::Billboard>(entity).is_some());
+        }
     }
 
     #[test]

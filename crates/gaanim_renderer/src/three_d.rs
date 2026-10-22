@@ -266,6 +266,21 @@ struct FillBuffers {
     bands: Vec<u8>,
     paints: Vec<u8>,
     ramps: Vec<u8>,
+    /// Runs of instances and the image they are filled with, bound with
+    /// the buffers for their draw.
+    runs: Vec<(std::ops::Range<u32>, Option<peniko::ImageBrush>)>,
+}
+
+impl FillBuffers {
+    /// What tells the runs' images apart: their pixels and sampling.
+    fn run_keys(&self) -> impl Iterator<Item = (u32, u32, u64, u8)> + '_ {
+        self.runs.iter().map(|(range, brush)| {
+            let (id, quality) = brush.as_ref().map_or((0, 0), |brush| {
+                (brush.image.data.id(), brush.sampler.quality as u8)
+            });
+            (range.start, range.end, id, quality)
+        })
+    }
 }
 
 /// What a source holds, which keys a drawable's uploads apart.
@@ -302,6 +317,9 @@ impl MeshSource {
             fill.bands.hash(&mut hasher);
             fill.paints.hash(&mut hasher);
             fill.ramps.hash(&mut hasher);
+            for key in fill.run_keys() {
+                key.hash(&mut hasher);
+            }
         }
         hasher.finish()
     }
@@ -624,6 +642,7 @@ impl MeshSource {
                 bands: built.bands,
                 paints: built.paints,
                 ramps: built.ramps,
+                runs: built.runs,
             }),
         })
     }
@@ -971,6 +990,12 @@ impl GpuMeshFrame {
                 update(&fill.bands);
                 update(&fill.paints);
                 update(&fill.ramps);
+                for (start, end, id, quality) in fill.run_keys() {
+                    update(&start.to_le_bytes());
+                    update(&end.to_le_bytes());
+                    update(&id.to_le_bytes());
+                    update(&[quality]);
+                }
             }
         }
         update(&self.joints);
@@ -2149,7 +2174,28 @@ impl Pipelines {
         };
         let fill_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("gaanim-3d-fill"),
-            entries: &[storage(0), storage(1), storage(2), storage(3)],
+            entries: &[
+                storage(0),
+                storage(1),
+                storage(2),
+                storage(3),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
         });
         let shadow_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("gaanim-3d-shadows"),
@@ -2835,6 +2881,68 @@ impl ModelPipelines {
     }
 }
 
+/// Draw the quads of `instances` of filled outlines, each run of them with
+/// its image bound.
+fn draw_runs(
+    pass: &mut wgpu::RenderPass<'_>,
+    runs: &[(std::ops::Range<u32>, wgpu::BindGroup)],
+    instances: &std::ops::Range<u32>,
+) {
+    for (range, group) in runs {
+        let (start, end) = (
+            range.start.max(instances.start),
+            range.end.min(instances.end),
+        );
+        if start < end {
+            pass.set_bind_group(2, group, &[]);
+            pass.draw(0..6, start..end);
+        }
+    }
+}
+
+/// One opaque white texel.
+fn white_texel() -> ImageData {
+    ImageData {
+        data: Blob::from(vec![255_u8; 4]),
+        format: ImageFormat::Rgba8,
+        alpha_type: ImageAlphaType::Alpha,
+        width: 1,
+        height: 1,
+    }
+}
+
+/// `image` as RGBA texels with straight alpha, as [`upload_texture`] takes
+/// them: itself when it already is.
+fn straight_rgba(image: &ImageData) -> std::borrow::Cow<'_, ImageData> {
+    if image.format == ImageFormat::Rgba8 && image.alpha_type == ImageAlphaType::Alpha {
+        return std::borrow::Cow::Borrowed(image);
+    }
+    let texels = image.width as usize * image.height as usize;
+    let bytes = image.data.data();
+    let mut converted = Vec::with_capacity(texels * 4);
+    for texel in bytes.chunks_exact(4).take(texels) {
+        let [mut r, g, mut b, a] = [texel[0], texel[1], texel[2], texel[3]];
+        if image.format == ImageFormat::Bgra8 {
+            std::mem::swap(&mut r, &mut b);
+        }
+        let straight = |value: u8| {
+            if image.alpha_type == ImageAlphaType::AlphaPremultiplied && a > 0 {
+                ((u32::from(value) * 255 + u32::from(a) / 2) / u32::from(a)).min(255) as u8
+            } else {
+                value
+            }
+        };
+        converted.extend([straight(r), straight(g), straight(b), a]);
+    }
+    std::borrow::Cow::Owned(ImageData {
+        data: Blob::from(converted),
+        format: ImageFormat::Rgba8,
+        alpha_type: ImageAlphaType::Alpha,
+        width: image.width,
+        height: image.height,
+    })
+}
+
 /// A view of `image`, uploaded with its mipmaps: sRGB texels that the
 /// shader reads in linear light.
 fn upload_texture(
@@ -3083,8 +3191,9 @@ struct Uploaded {
     vertices: wgpu::Buffer,
     indices: Option<wgpu::Buffer>,
     outline: Option<wgpu::Buffer>,
-    /// Binds the curves and bands of filled outlines.
-    fill: Option<wgpu::BindGroup>,
+    /// Binds the curves and bands of filled outlines, with the image of
+    /// each run of them.
+    fill: Option<Vec<(std::ops::Range<u32>, wgpu::BindGroup)>>,
     /// An imported model's UVs, joints and weights, and its texture.
     model: Option<(wgpu::Buffer, wgpu::BindGroup)>,
 }
@@ -3100,8 +3209,11 @@ pub struct GpuThreeD {
     glow: Option<glow::GlowPipelines>,
     glow_targets: Option<glow::GlowTargets>,
     uploads: HashMap<usize, Uploaded>,
-    /// Models' textures by the id of their pixels, and their samplers.
+    /// Models' and filled outlines' textures by the id of their pixels, and
+    /// their samplers.
     textures: HashMap<u64, wgpu::TextureView>,
+    /// The texel outlines filled otherwise bind in place of an image.
+    white: Option<wgpu::TextureView>,
     samplers: HashMap<([TextureWrap; 2], bool), wgpu::Sampler>,
     /// The frame's palettes, with room for that many bytes, and their bind
     /// group.
@@ -3174,8 +3286,20 @@ impl GpuThreeD {
             let shown: HashSet<u64> = frames
                 .iter()
                 .flat_map(|frame| frame.draws.iter())
-                .filter_map(|draw| draw.source.model.as_ref()?.texture.as_ref())
-                .map(|texture| texture.image.data.id())
+                .flat_map(|draw| {
+                    let model = draw
+                        .source
+                        .model
+                        .as_ref()
+                        .and_then(|model| model.texture.as_ref())
+                        .map(|texture| texture.image.data.id());
+                    let images = draw.source.fill.iter().flat_map(|fill| {
+                        fill.runs
+                            .iter()
+                            .filter_map(|(_, brush)| Some(brush.as_ref()?.image.data.id()))
+                    });
+                    model.into_iter().chain(images)
+                })
                 .collect();
             self.textures.retain(|id, _| shown.contains(id));
         }
@@ -3247,6 +3371,9 @@ impl GpuThreeD {
         }
         let textures = &mut self.textures;
         let samplers = &mut self.samplers;
+        let white = self
+            .white
+            .get_or_insert_with(|| upload_texture(device, queue, &white_texel()));
         for draw in frame.draws.iter() {
             self.uploads
                 .entry(Arc::as_ptr(&draw.source) as usize)
@@ -3319,19 +3446,58 @@ impl GpuThreeD {
                             buffer("gaanim-3d-fill-paints", &fill.paints),
                             buffer("gaanim-3d-fill-ramps", &fill.ramps),
                         ];
-                        let entries: Vec<wgpu::BindGroupEntry> = buffers
+                        // A group per image, which its runs share.
+                        let mut groups: HashMap<(u64, bool), wgpu::BindGroup> = HashMap::new();
+                        let mut group = |brush: Option<&peniko::ImageBrush>| {
+                            let nearest = brush.is_some_and(|brush| {
+                                brush.sampler.quality == peniko::ImageQuality::Low
+                            });
+                            let id = brush.map_or(0, |brush| brush.image.data.id());
+                            groups
+                                .entry((id, nearest))
+                                .or_insert_with(|| {
+                                    let view = match brush {
+                                        Some(brush) => &*textures.entry(id).or_insert_with(|| {
+                                            upload_texture(
+                                                device,
+                                                queue,
+                                                &straight_rgba(&brush.image),
+                                            )
+                                        }),
+                                        None => &*white,
+                                    };
+                                    let wrap = [TextureWrap::ClampToEdge; 2];
+                                    let sampler = samplers
+                                        .entry((wrap, nearest))
+                                        .or_insert_with(|| texture_sampler(device, wrap, nearest));
+                                    let mut entries: Vec<wgpu::BindGroupEntry> = buffers
+                                        .iter()
+                                        .enumerate()
+                                        .map(|(binding, buffer)| wgpu::BindGroupEntry {
+                                            binding: binding as u32,
+                                            resource: buffer.as_entire_binding(),
+                                        })
+                                        .collect();
+                                    entries.push(wgpu::BindGroupEntry {
+                                        binding: 4,
+                                        resource: wgpu::BindingResource::TextureView(view),
+                                    });
+                                    entries.push(wgpu::BindGroupEntry {
+                                        binding: 5,
+                                        resource: wgpu::BindingResource::Sampler(sampler),
+                                    });
+                                    device.create_bind_group(&wgpu::BindGroupDescriptor {
+                                        label: Some("gaanim-3d-fill"),
+                                        layout: &pipelines.fill_layout,
+                                        entries: &entries,
+                                    })
+                                })
+                                .clone()
+                        };
+                        fill.runs
                             .iter()
-                            .enumerate()
-                            .map(|(binding, buffer)| wgpu::BindGroupEntry {
-                                binding: binding as u32,
-                                resource: buffer.as_entire_binding(),
-                            })
-                            .collect();
-                        device.create_bind_group(&wgpu::BindGroupDescriptor {
-                            label: Some("gaanim-3d-fill"),
-                            layout: &pipelines.fill_layout,
-                            entries: &entries,
-                        })
+                            .map(|(range, brush)| (range.clone(), group(brush.as_ref())))
+                            .collect()
                     }),
                     _source: Arc::clone(&draw.source),
                 });
@@ -3530,13 +3696,12 @@ impl GpuThreeD {
                     else {
                         continue;
                     };
-                    if let Some(fill) = &uploaded.fill {
+                    if let Some(runs) = &uploaded.fill {
                         // A quad per outline, which tests its texels.
                         pass.set_pipeline(&pipelines.shadow_fill);
                         pass.set_bind_group(0, bind_group, &[(first * DRAW_STRIDE) as u32]);
-                        pass.set_bind_group(2, fill, &[]);
                         pass.set_vertex_buffer(0, uploaded.vertices.slice(..));
-                        pass.draw(0..6, draw.instances.clone());
+                        draw_runs(&mut pass, runs, &draw.instances);
                         continue;
                     }
                     let Some(indices) = &uploaded.indices else {
@@ -3630,17 +3795,16 @@ impl GpuThreeD {
                 let Some(uploaded) = self.uploads.get(&(Arc::as_ptr(&draw.source) as usize)) else {
                     return;
                 };
-                if let Some(fill) = &uploaded.fill {
+                if let Some(runs) = &uploaded.fill {
                     // A quad per outline.
                     pass.set_pipeline(&pipelines.fill);
                     pass.set_bind_group(0, bind_group, &[(first * DRAW_STRIDE) as u32]);
                     pass.set_bind_group(1, &shadow_maps.group, &[]);
-                    pass.set_bind_group(2, fill, &[]);
                     pass.set_vertex_buffer(0, uploaded.vertices.slice(..));
-                    pass.draw(0..6, draw.instances.clone());
+                    draw_runs(pass, runs, &draw.instances);
                     // Then its depth, which the translucent layers read.
                     pass.set_pipeline(&pipelines.fill_depth);
-                    pass.draw(0..6, draw.instances.clone());
+                    draw_runs(pass, runs, &draw.instances);
                     return;
                 }
                 let set = match (&uploaded.model, models, joints_group) {
@@ -5187,6 +5351,7 @@ mod tests {
                 color: peniko::Color::from_rgb8(255, 0, 0),
                 gradient: None,
                 clip: None,
+                image: None,
             }],
         };
         let above = placed(1.0, DVec3::new(0.0, 0.0, 1.0));
@@ -5279,6 +5444,7 @@ mod tests {
                 color: peniko::Color::from_rgb8(255, 0, 0),
                 gradient: None,
                 clip: None,
+                image: None,
             }],
         };
         let front = placed(1.0, DVec3::new(0.0, 0.0, 1.0));
@@ -6089,6 +6255,7 @@ mod tests {
                 color: peniko::Color::from_rgb8(255, 0, 0),
                 gradient: None,
                 clip: None,
+                image: None,
             }],
         };
         let at_origin = GlobalSpatialTransform::default();
@@ -6200,6 +6367,7 @@ mod tests {
                         offset: corner - contour_corner,
                         outside: align == crate::effects::StrokeAlign::Outside,
                     }),
+                    image: None,
                 }],
             };
             let mut sources = MeshSources::default();
@@ -6307,6 +6475,7 @@ mod tests {
                     color: red,
                     gradient: Some((Arc::new(gradient.clone()), kurbo::Affine::translate(corner))),
                     clip: None,
+                    image: None,
                 }],
             };
             let mut sources = MeshSources::default();
@@ -6371,6 +6540,110 @@ mod tests {
                         &expected[at..at + 4],
                     );
                 }
+            }
+        }
+    }
+
+    /// An outline filled with an image draws its texels where Vello draws
+    /// the image, the right way up, and nothing where the image is
+    /// transparent.
+    #[test]
+    fn image_fills_match_their_2d_drawing() {
+        let Some(mut gpu) = crate::background::test_gpu::test_gpu() else {
+            return;
+        };
+        let mut camera = Camera::ortho_2d_frame(4.0, 4.0, 64, 64);
+        camera.position = DVec3::new(0.0, 0.0, 10.0);
+        let (ndc_to_canvas, line_width) = canvas_projection(&camera).unwrap();
+        let placement = camera.to_vello_transform();
+        let opacity = GlobalOpacity(1.0);
+        let at_origin = GlobalSpatialTransform::default();
+        // A square 3 units on a side, 16 pixels per unit: pixels 8 to 56,
+        // filled with an image of 8 x 8 texels, 6 pixels each, its last
+        // column transparent.
+        let square = kurbo::Shape::to_path(&kurbo::Rect::new(-1.5, -1.5, 1.5, 1.5), 0.0);
+        let texels: Vec<u8> = (0..64_u32)
+            .flat_map(|at| {
+                let (column, row) = (at % 8, at / 8);
+                let alpha = if column == 7 { 0 } else { 255 };
+                [(column * 32) as u8, (row * 32) as u8, 128, alpha]
+            })
+            .collect();
+        let mut brush = peniko::ImageBrush::new(ImageData {
+            data: Blob::from(texels),
+            format: ImageFormat::Rgba8,
+            alpha_type: ImageAlphaType::Alpha,
+            width: 8,
+            height: 8,
+        });
+        brush.sampler.quality = peniko::ImageQuality::Low;
+        let to_local = kurbo::Affine::translate((-1.5, -1.5)) * kurbo::Affine::scale(3.0 / 8.0);
+        let corner = kurbo::Vec2::new(-1.5, -1.5);
+        let fill = PlaneFillData {
+            glyphs: vec![gaanim_scene::PlaneGlyph {
+                outline: Arc::new(kurbo::Affine::translate(-corner) * square.clone()),
+                placement: kurbo::Affine::translate(corner),
+                color: peniko::Color::WHITE,
+                gradient: None,
+                clip: None,
+                image: Some(gaanim_scene::PlaneImage {
+                    brush: brush.clone(),
+                    to_pixels: to_local.inverse() * kurbo::Affine::translate(corner),
+                }),
+            }],
+        };
+        let mut sources = MeshSources::default();
+        let mut meshes = GpuMeshes::new(&mut sources, (64, 64), placement, 0).unwrap();
+        assert!(meshes.push_fill(
+            0,
+            (1, 1),
+            None,
+            &Content {
+                transform: &at_origin,
+                opacity: &opacity,
+                mesh: None,
+                lines: None,
+                material: None,
+                line_width: None,
+                line_range: None,
+                fill: Some(&fill),
+                joints: None,
+                glow: None,
+                instances: None,
+            },
+        ));
+        let frames: Vec<GpuMeshFrame> = meshes
+            .finish(&camera, ndc_to_canvas, line_width, &Illumination::default())
+            .into_iter()
+            .map(|(_, frame)| frame)
+            .collect();
+        let mut scene = vello::Scene::new();
+        scene.append(&frames[0].scene(), Some(placement));
+        let mut three_d = GpuThreeD::default();
+        three_d.prepare(&gpu.device, &gpu.queue, &mut gpu.renderer, &frames);
+        let target = gpu.target(64, 64);
+        gpu.render(&scene, &target);
+        let drawn = gpu.read(&target);
+        let mut flat = vello::Scene::new();
+        flat.draw_image(&brush, placement * to_local);
+        let target = gpu.target(64, 64);
+        gpu.render(&flat, &target);
+        let expected = gpu.read(&target);
+        // The middle of each texel.
+        for row in 0..8 {
+            for column in 0..8 {
+                let (x, y) = (8 + column * 6 + 3, 8 + row * 6 + 3);
+                let at = (y * 64 + x) * 4;
+                let worst = (0..4)
+                    .map(|channel| drawn[at + channel].abs_diff(expected[at + channel]))
+                    .max()
+                    .unwrap();
+                assert!(
+                    worst <= 3,
+                    "texel ({column}, {row}): {:?} against {:?}",
+                    &drawn[at..at + 4],
+                    &expected[at..at + 4],
+                );
             }
         }
     }
@@ -6527,6 +6800,7 @@ mod tests {
                         color: peniko::Color::from_rgb8(20, 20, 30),
                         gradient: None,
                         clip: None,
+                        image: None,
                     });
                 }
                 x += advance * scale;

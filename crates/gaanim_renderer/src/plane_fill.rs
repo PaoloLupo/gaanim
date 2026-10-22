@@ -9,7 +9,10 @@
 //!
 //! An outline filled with a gradient reads it per pixel from a record of
 //! its geometry and a ramp of its colors, sampled as Vello samples them, so
-//! it matches the 2D drawing.
+//! it matches the 2D drawing. One filled with an image, as an image
+//! drawable is clipped to its outline, samples it through its mipmaps, over
+//! the image's rectangle only; the outlines filled with one image are drawn
+//! together, with it bound.
 //!
 //! Outlines cast shadows: the shadow maps hold the texels an outline covers
 //! at least half of, where it is at least half opaque.
@@ -28,7 +31,7 @@ use std::sync::Arc;
 use gaanim_core::glam::DVec3;
 use gaanim_core::kurbo::{self, Affine, BezPath, PathEl, Point};
 use gaanim_core::peniko;
-use gaanim_scene::PlaneFillData;
+use gaanim_scene::{PlaneFillData, PlaneImage};
 
 use crate::three_d::{push_f32s, to_linear};
 
@@ -44,8 +47,11 @@ const MAX_BANDS: usize = 16;
 const CUBIC_TOLERANCE: f64 = 1.0 / 4000.0;
 /// Colors of a gradient's ramp, as Vello samples them.
 const RAMP: usize = 512;
-/// `vec4<f32>` texels of a gradient's record (`fill_paints` in [`SHADER`]).
+/// `vec4<f32>` texels of a gradient's or an image's record (`fill_paints`
+/// in [`SHADER`]).
 const PAINT_TEXELS: usize = 4;
+/// The kind an image's record holds where a gradient's holds its own.
+const IMAGE_PAINT: f32 = 3.0;
 
 /// What the shader reads of a [`PlaneFillData`]: an instance per outline
 /// drawn, and the curves and bands of its distinct outlines.
@@ -60,11 +66,14 @@ pub(crate) struct Fill {
     /// texel of zeros when no outline has a gradient, as a binding needs one.
     pub(crate) paints: Vec<u8>,
     /// `u32` premultiplied sRGB colors of the gradients' ramps
-    /// (`fill_ramps`); one when none has.
+    /// (`fill_ramps`); one when no gradient has.
     pub(crate) ramps: Vec<u8>,
     /// The corners of the outlines' boxes in the plane.
     pub(crate) corners: Vec<DVec3>,
     pub(crate) opaque: bool,
+    /// Runs of consecutive instances and the image they are filled with,
+    /// which their draw binds; none for colors and gradients.
+    pub(crate) runs: Vec<(std::ops::Range<u32>, Option<peniko::ImageBrush>)>,
 }
 
 /// Where an outline's bands start and how it reads them.
@@ -96,6 +105,7 @@ pub(crate) fn build(fill: &PlaneFillData) -> Option<Fill> {
     let mut ramps: Vec<u32> = Vec::new();
     // Ramps by their stops, which the gradients of a text's letters share.
     let mut ramp_of: HashMap<Vec<u32>, u32> = HashMap::new();
+    let mut runs: Vec<(std::ops::Range<u32>, Option<peniko::ImageBrush>)> = Vec::new();
     let mut packed_of = |outline: &Arc<BezPath>| {
         *by_address.entry(Arc::as_ptr(outline)).or_insert_with(|| {
             let entries = known.entry(outline_hash(outline)).or_default();
@@ -134,16 +144,27 @@ pub(crate) fn build(fill: &PlaneFillData) -> Option<Fill> {
         }
         let [a, b, c, d, e, f] = placement.map(|value| value as f32);
         let color = to_linear(glyph.color);
-        // Its gradient's record, counted from 1; 0 for its color.
-        let paint = glyph.gradient.as_ref().and_then(|(gradient, to_gradient)| {
-            let record = paint_record(gradient, *to_gradient, &mut ramps, &mut ramp_of)?;
-            paints.extend(record);
-            opaque &= gradient
-                .stops
-                .iter()
-                .all(|stop| stop.color.components[3] >= 0.999);
-            Some((paints.len() / PAINT_TEXELS) as u32)
-        });
+        // Its image's or gradient's record, counted from 1; 0 for its color.
+        // An image that shows nothing leaves nothing to draw.
+        let paint = match &glyph.image {
+            Some(image) => {
+                let Some(record) = image_record(image) else {
+                    continue;
+                };
+                paints.extend(record);
+                opaque &= color[3] >= 0.999 && image_is_opaque(&image.brush.image);
+                Some((paints.len() / PAINT_TEXELS) as u32)
+            }
+            None => glyph.gradient.as_ref().and_then(|(gradient, to_gradient)| {
+                let record = paint_record(gradient, *to_gradient, &mut ramps, &mut ramp_of)?;
+                paints.extend(record);
+                opaque &= gradient
+                    .stops
+                    .iter()
+                    .all(|stop| stop.color.components[3] >= 0.999);
+                Some((paints.len() / PAINT_TEXELS) as u32)
+            }),
+        };
         if paint.is_none() {
             opaque &= color[3] >= 0.999;
         }
@@ -174,6 +195,11 @@ pub(crate) fn build(fill: &PlaneFillData) -> Option<Fill> {
             None => instances.resize(instances.len() + 32, 0),
         }
         debug_assert_eq!(instances.len() - start, GLYPH_BYTES);
+        let brush = glyph.image.as_ref().map(|image| &image.brush);
+        match runs.last_mut() {
+            Some((run, last)) if same_image(last.as_ref(), brush) => run.end = count + 1,
+            _ => runs.push((count..count + 1, brush.cloned())),
+        }
         count += 1;
     }
     if count == 0 {
@@ -187,8 +213,11 @@ pub(crate) fn build(fill: &PlaneFillData) -> Option<Fill> {
     for word in &bands {
         band_bytes.extend_from_slice(&word.to_le_bytes());
     }
+    // A binding needs a texel or a word, as images have no ramp.
     if paints.is_empty() {
         paints.push([0.0; 4]);
+    }
+    if ramps.is_empty() {
         ramps.push(0);
     }
     let mut paint_bytes = Vec::with_capacity(paints.len() * 16);
@@ -205,7 +234,66 @@ pub(crate) fn build(fill: &PlaneFillData) -> Option<Fill> {
         ramps: ramp_bytes,
         corners,
         opaque,
+        runs,
     })
+}
+
+/// Whether two runs' images draw alike: the same pixels, sampled alike.
+fn same_image(a: Option<&peniko::ImageBrush>, b: Option<&peniko::ImageBrush>) -> bool {
+    match (a, b) {
+        (None, None) => true,
+        (Some(a), Some(b)) => {
+            a.image.data.id() == b.image.data.id() && a.sampler.quality == b.sampler.quality
+        }
+        _ => false,
+    }
+}
+
+/// The record of `image` in `fill_paints` (see [`SHADER`]): the map from
+/// an outline's units to the image's, in fractions of its width and
+/// height (the linear part's columns, then the offset), and its kind.
+/// `None` for an image without pixels or a map that is not finite.
+fn image_record(image: &PlaneImage) -> Option<[[f32; 4]; PAINT_TEXELS]> {
+    let data = &image.brush.image;
+    if data.width == 0 || data.height == 0 {
+        return None;
+    }
+    let to_uv =
+        Affine::scale_non_uniform(1.0 / f64::from(data.width), 1.0 / f64::from(data.height))
+            * image.to_pixels;
+    let [a, b, c, d, e, f] = to_uv.as_coeffs().map(|value| value as f32);
+    let record = [[a, b, c, d], [e, f, IMAGE_PAINT, 0.0], [0.0; 4], [0.0; 4]];
+    record
+        .iter()
+        .flatten()
+        .all(|value| value.is_finite())
+        .then_some(record)
+}
+
+/// Whether every texel of `image` is opaque, remembered by its pixels' id
+/// for the images seen last, as their outlines are built again whenever
+/// their drawable changes.
+fn image_is_opaque(image: &peniko::ImageData) -> bool {
+    use std::sync::{Mutex, OnceLock};
+    static KNOWN: OnceLock<Mutex<HashMap<u64, bool>>> = OnceLock::new();
+    let known = KNOWN.get_or_init(Default::default);
+    let id = image.data.id();
+    if let Some(opaque) = known.lock().ok().and_then(|known| known.get(&id).copied()) {
+        return opaque;
+    }
+    let texels = image.width as usize * image.height as usize;
+    let bytes = image.data.data();
+    let opaque = bytes.len() >= texels * 4
+        && bytes[..texels * 4]
+            .chunks_exact(4)
+            .all(|texel| texel[3] == u8::MAX);
+    if let Ok(mut known) = known.lock() {
+        if known.len() >= 256 {
+            known.clear();
+        }
+        known.insert(id, opaque);
+    }
+    opaque
 }
 
 /// The record of `gradient` in `fill_paints` (see [`SHADER`]), mapped from
@@ -637,6 +725,12 @@ pub(crate) const SHADER: &str = r#"
 @group(2) @binding(2) var<storage, read> fill_paints: array<vec4<f32>>;
 // The gradients' ramps, 512 premultiplied sRGB colors each, as Vello's.
 @group(2) @binding(3) var<storage, read> fill_ramps: array<u32>;
+// The image the outlines drawn with this group are filled with (a white
+// texel for those filled otherwise), and how it is sampled. An image's
+// record in `fill_paints` holds the map from its outline's units to the
+// image's, in fractions of its size, and kind 3.
+@group(2) @binding(4) var fill_image: texture_2d<f32>;
+@group(2) @binding(5) var fill_image_sampler: sampler;
 
 struct FillIn {
     // The outline's box in its own units.
@@ -948,14 +1042,41 @@ fn fill_gradient(paint: u32, at: vec2<f32>) -> vec4<f32> {
     return vec4<f32>(fill_srgb_to_linear(color.rgb / color.a), color.a);
 }
 
+// The linear color of paint record `paint` at `at`, in the outline's
+// units, which change by `dx` and `dy` across a pixel; `color` for none. An
+// image covers its own rectangle only, and the color's alpha multiplies
+// its texels'.
+fn fill_paint(paint: u32, at: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>, color: vec4<f32>) -> vec4<f32> {
+    if paint == 0u {
+        return color;
+    }
+    let base = (paint - 1u) * 4u;
+    let o = fill_paints[base + 1u];
+    if u32(o.z) != 3u {
+        return fill_gradient(paint, at);
+    }
+    let m = fill_paints[base];
+    let uv = m.xy * at.x + m.zw * at.y + o.xy;
+    if any(uv < vec2<f32>(0.0)) || any(uv > vec2<f32>(1.0)) {
+        return vec4<f32>(0.0);
+    }
+    let texel = textureSampleGrad(
+        fill_image,
+        fill_image_sampler,
+        uv,
+        m.xy * dx.x + m.zw * dx.y,
+        m.xy * dy.x + m.zw * dy.y,
+    );
+    return vec4<f32>(texel.rgb, texel.a * color.a);
+}
+
 @fragment
 fn fragment_fill(in: FillOut) -> @location(0) vec4<f32> {
+    let dx = dpdx(in.outline);
+    let dy = dpdy(in.outline);
     let pixels = fill_pixels(in.outline);
     let coverage = fill_clipped(in.outline, in.band, in.glyph, in.clip_offset, in.clip_band, in.clip_glyph, pixels);
-    var color = in.color;
-    if in.glyph.w != 0u {
-        color = fill_gradient(in.glyph.w, in.outline);
-    }
+    var color = fill_paint(in.glyph.w, in.outline, dx, dy, in.color);
     if draw.material.z > 0.5 {
         // Lit as the plane, from the side the viewer sees.
         let viewer = toward_viewer(in.world);
@@ -1029,10 +1150,9 @@ fn vertex_fill_shadow(@builtin(vertex_index) index: u32, in: FillIn) -> FillShad
 // depth, as its edges blend over what lies behind them.
 @fragment
 fn fragment_fill_depth(in: FillOut) {
-    var alpha = in.color.a;
-    if in.glyph.w != 0u {
-        alpha = fill_gradient(in.glyph.w, in.outline).a;
-    }
+    let dx = dpdx(in.outline);
+    let dy = dpdy(in.outline);
+    let alpha = fill_paint(in.glyph.w, in.outline, dx, dy, in.color).a;
     let pixels = fill_pixels(in.outline);
     let coverage = fill_clipped(in.outline, in.band, in.glyph, in.clip_offset, in.clip_band, in.clip_glyph, pixels);
     if coverage * alpha * draw.emissive.w < 0.5 {
@@ -1044,10 +1164,9 @@ fn fragment_fill_depth(in: FillOut) {
 // of, at least half opaque, its drawable's opacity included.
 @fragment
 fn fragment_fill_shadow(in: FillShadowOut) {
-    var alpha = in.alpha;
-    if in.glyph.w != 0u {
-        alpha = fill_gradient(in.glyph.w, in.outline).a;
-    }
+    let dx = dpdx(in.outline);
+    let dy = dpdy(in.outline);
+    let alpha = fill_paint(in.glyph.w, in.outline, dx, dy, vec4<f32>(1.0, 1.0, 1.0, in.alpha)).a;
     let pixels = fill_pixels(in.outline);
     let coverage = fill_clipped(in.outline, in.band, in.glyph, in.clip_offset, in.clip_band, in.clip, pixels);
     if coverage * alpha * draw.emissive.w < 0.5 {
@@ -1077,6 +1196,7 @@ mod tests {
             color: red,
             gradient: gradient.map(|gradient| (gradient, Affine::translate((x, 0.0)))),
             clip: None,
+            image: None,
         };
         let fill = build(&PlaneFillData {
             glyphs: vec![
@@ -1122,6 +1242,7 @@ mod tests {
                     color: peniko::Color::WHITE,
                     gradient: None,
                     clip: None,
+                    image: None,
                 })
                 .collect(),
         };

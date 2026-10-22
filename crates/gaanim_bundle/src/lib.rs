@@ -100,8 +100,9 @@ pub const FORMAT: &str = "gaanim-bundle";
 /// version 7 (Gaanim 0.16) stored each frame of a 3D morph that way too,
 /// where version 8 (development builds of Gaanim 0.17) stores the two
 /// meshes a morph blends once and each frame as how far between them it
-/// lies; version 9 adds the copies of meshes drawn at many points.
-pub const VERSION: u32 = 9;
+/// lies; version 9 adds the copies of meshes drawn at many points, and
+/// version 10 the images that fill outlines in the 3D world.
+pub const VERSION: u32 = 10;
 /// Oldest version this build still reads: bundles published in other pages
 /// keep playing when the hosted players move to a newer version.
 pub const OLDEST_READABLE: u32 = 5;
@@ -2290,8 +2291,8 @@ mod tests {
     }
 
     /// Outlines filled in a 3D drawable's plane come back with their
-    /// outlines, placements, colors, gradients and clips, each outline
-    /// stored once.
+    /// outlines, placements, colors, gradients, clips and images, each
+    /// outline stored once.
     #[test]
     fn filled_outlines_of_3d_frames_round_trip() {
         use gaanim_core::kurbo::{Affine, Rect, Shape};
@@ -2303,6 +2304,7 @@ mod tests {
             color,
             gradient: None,
             clip: None,
+            image: None,
         };
         let (red, blue) = (Color::from_rgb8(255, 0, 0), Color::from_rgb8(0, 0, 255));
         let mut fill = gaanim_scene::PlaneFillData {
@@ -2320,6 +2322,18 @@ mod tests {
             outline: Arc::clone(&square),
             offset: gaanim_core::kurbo::Vec2::new(-0.25, 0.5),
             outside: true,
+        });
+        let mut brush = gaanim_core::peniko::ImageBrush::new(gaanim_core::peniko::ImageData {
+            data: gaanim_core::peniko::Blob::from(vec![10, 20, 30, 255, 40, 50, 60, 128]),
+            format: gaanim_core::peniko::ImageFormat::Rgba8,
+            alpha_type: gaanim_core::peniko::ImageAlphaType::Alpha,
+            width: 2,
+            height: 1,
+        });
+        brush.sampler.quality = gaanim_core::peniko::ImageQuality::Low;
+        fill.glyphs[0].image = Some(gaanim_scene::PlaneImage {
+            brush,
+            to_pixels: Affine::scale_non_uniform(2.0, -1.0) * Affine::translate((0.5, -1.0)),
         });
         let mut writer = BundleWriter::new(std::io::Cursor::new(Vec::new()), "test");
         let mut first = frame(0.0);
@@ -2357,8 +2371,19 @@ mod tests {
             Bundle::from_bytes(writer.finish(&scene).unwrap().into_inner().into()).unwrap();
         let decoded = bundle.frame(0).unwrap();
         let three_d = decoded.capture.three_d.unwrap();
-        let back = three_d.sources[0].fill.as_deref().unwrap();
-        assert_eq!(back, &fill);
+        let mut back = three_d.sources[0].fill.as_deref().unwrap().clone();
+        // An image comes back with its texels, sampling and map.
+        let (image, expected) = (
+            back.glyphs[0].image.take().unwrap(),
+            fill.glyphs[0].image.take().unwrap(),
+        );
+        assert_eq!(
+            image.brush.image.data.data(),
+            expected.brush.image.data.data()
+        );
+        assert_eq!(image.brush.sampler, expected.brush.sampler);
+        assert_eq!(image.to_pixels, expected.to_pixels);
+        assert_eq!(back, fill);
         // The three glyphs share one outline.
         assert!(Arc::ptr_eq(
             &back.glyphs[0].outline,

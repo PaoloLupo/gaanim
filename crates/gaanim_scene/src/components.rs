@@ -1239,6 +1239,19 @@ pub struct PlaneGlyph {
     /// A contour that keeps the part of it inside, or outside, as a stroke
     /// aligned inside or outside its shape is drawn.
     pub clip: Option<PlaneClip>,
+    /// An image it is filled with instead of its color, whose alpha the
+    /// color's multiplies, as an image drawable's clipped to its outline.
+    pub image: Option<PlaneImage>,
+}
+
+/// The image a [`PlaneGlyph`] is filled with: drawn over its own rectangle,
+/// with nothing beyond it, as Vello draws an image.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlaneImage {
+    /// Its pixels and how they are sampled.
+    pub brush: gaanim_core::peniko::ImageBrush,
+    /// From the glyph's outline's units to the image's pixels.
+    pub to_pixels: Affine,
 }
 
 /// The contour a [`PlaneGlyph`] is clipped to.

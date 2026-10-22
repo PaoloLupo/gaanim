@@ -1444,9 +1444,27 @@ fn write_three_d(
         .enumerate()
         .filter_map(|(index, source)| source.instances.as_ref().map(|copies| (index, copies)))
         .collect();
+    // After the copies, the images outlines are filled with instead of
+    // their color (format 10): by source, each glyph's index, its brush and
+    // the map from its outline's units to the image's pixels.
+    let images: Vec<(usize, Vec<(usize, &gaanim_scene::PlaneImage)>)> = fills
+        .iter()
+        .filter_map(|&(index, fill)| {
+            let glyphs: Vec<_> = fill
+                .glyphs
+                .iter()
+                .enumerate()
+                .filter_map(|(glyph, filled)| filled.image.as_ref().map(|image| (glyph, image)))
+                .collect();
+            (!glyphs.is_empty()).then_some((index, glyphs))
+        })
+        .collect();
     // Each section is written when it or a later one holds something.
-    let later =
-        !palettes.is_empty() || !glows.is_empty() || !views.is_empty() || !copies.is_empty();
+    let later = !palettes.is_empty()
+        || !glows.is_empty()
+        || !views.is_empty()
+        || !copies.is_empty()
+        || !images.is_empty();
     if !widths.is_empty()
         || !ranges.is_empty()
         || !outlines.is_empty()
@@ -1573,7 +1591,7 @@ fn write_three_d(
             }
         }
     }
-    if !glows.is_empty() || !views.is_empty() || !copies.is_empty() {
+    if !glows.is_empty() || !views.is_empty() || !copies.is_empty() || !images.is_empty() {
         w.len(glows.len());
         for (index, glow) in glows {
             w.len(index);
@@ -1586,7 +1604,7 @@ fn write_three_d(
     // what snapshots froze and what views with a 3D camera of their own
     // draw this frame. By screen, the camera it was drawn through, the
     // region and detail of its image, and its content, encoded as a frame's.
-    if !views.is_empty() || !copies.is_empty() {
+    if !views.is_empty() || !copies.is_empty() || !images.is_empty() {
         w.len(views.len());
         for &(screen, frozen) in views {
             w.var(u64::from(screen));
@@ -1598,13 +1616,27 @@ fn write_three_d(
             w.bytes(&content.into_bytes());
         }
     }
-    if !copies.is_empty() {
+    if !copies.is_empty() || !images.is_empty() {
         w.len(copies.len());
         for (index, instances) in copies {
             let key = keys.key(three_d.sources[index].entity);
             w.len(index);
             w.var(u64::from(tables.copies(&instances.copies, key)));
             w.f32(instances.reveal);
+        }
+    }
+    if !images.is_empty() {
+        w.len(images.len());
+        for (index, glyphs) in images {
+            w.len(index);
+            w.len(glyphs.len());
+            for (glyph, image) in glyphs {
+                w.len(glyph);
+                codec::write_image_brush(w, tables, &image.brush);
+                for value in image.to_pixels.as_coeffs() {
+                    w.f32(value as f32);
+                }
+            }
         }
     }
 }
@@ -1739,6 +1771,7 @@ fn read_three_d(
                     color,
                     gradient: None,
                     clip: None,
+                    image: None,
                 });
             }
             if index >= sources.len() {
@@ -1854,6 +1887,30 @@ fn read_three_d(
                 .get_mut(index)
                 .ok_or_else(|| corrupt("copies of no 3D source"))?
                 .instances = Some(gaanim_scene::MeshInstances { copies, reveal });
+        }
+    }
+    if !r.is_empty() {
+        for _ in 0..r.len()? {
+            let index = r.len()?;
+            let (_, glyphs) = fills
+                .iter_mut()
+                .find(|(filled, _)| *filled == index)
+                .ok_or_else(|| corrupt("images of no filled outlines"))?;
+            for _ in 0..r.len()? {
+                let glyph = r.len()?;
+                let brush = codec::read_image_brush(r, tables)?;
+                let mut to_pixels = [0.0; 6];
+                for value in &mut to_pixels {
+                    *value = f64::from(r.f32()?);
+                }
+                glyphs
+                    .get_mut(glyph)
+                    .ok_or_else(|| corrupt("an image of no filled outline"))?
+                    .image = Some(gaanim_scene::PlaneImage {
+                    brush,
+                    to_pixels: kurbo::Affine::new(to_pixels),
+                });
+            }
         }
     }
     for (index, glyphs) in fills {
