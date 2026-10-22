@@ -759,6 +759,42 @@ scene.play([giro.animate.set(-0.9)], duration=2)
 scene.render()
 ```
 
+=== Tomas en órbita
+
+Una toma 3D se piensa alrededor de un foco: desde qué lado se mira
+(azimut), desde qué altura (elevación) y cuánto mide un metro en la
+pantalla. `camera.state_orbit(target, azimuth, elevation, scale=)` la
+describe así, con ángulos en radianes alrededor de `up`; `distance=` fija
+la distancia del ojo en lugar de la escala, y `screen_offset=` deja el foco
+a un lado del encuadre. Con una elevación de un cuarto de vuelta la toma
+mira en planta y el azimut gira la vista.
+
+`camera.animate.to(toma, path="orbit")` pasa de una toma a otra rodeando el
+foco: el azimut gira por el camino corto, la elevación sube o baja, la
+distancia cambia en proporción y el foco, la lente y `screen_offset` se
+mueven con la misma curva. En línea recta (`path="linear"`, el valor por
+defecto) el ojo atravesaría el modelo entre dos tomas separadas 90°.
+
+```python
+# output: preview.webp
+import math
+from gaanim import Material3D, Scene
+
+scene = Scene(frame=(16, 9), background="#0f172a")
+scene.camera.perspective(0.6)
+for x in (-2, 2):
+    scene.geometry.cube(1, material=Material3D.matte("#e8a33d")).scale_to_3d(0.3, 3, 0.3).move_to_3d(x, 1.5, 0)
+scene.geometry.cube(1, material=Material3D.matte("#3aa76d")).scale_to_3d(4.3, 0.35, 0.35).move_to_3d(0, 3, 0)
+frente = scene.camera.state_orbit((0, 1.5, 0), 0.0, math.radians(10), scale=0.9, fov_y=0.6)
+esquina = scene.camera.state_orbit((0, 1.5, 0), math.radians(60), math.radians(30), scale=0.7, fov_y=0.6)
+planta = scene.camera.state_orbit((0, 1.5, 0), math.radians(60), math.pi / 2, scale=0.8, fov_y=0.6)
+scene.camera.to(frente)
+scene.wait(0.3)
+scene.play([scene.camera.animate.to(esquina, path="orbit")], duration=1.5)
+scene.play([scene.camera.animate.to(planta, path="orbit")], duration=1.5)
+scene.render()
+```
+
 == Ejes y superficies 3D
 
 `scene.viz.cartesian_3d` crea unos ejes 3D sobre los que puedes dibujar

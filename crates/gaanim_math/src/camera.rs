@@ -145,6 +145,119 @@ impl CameraPose {
         })
     }
 
+    /// A perspective pose that looks at `target` from `distance` away,
+    /// `azimuth` radians around `up` and `elevation` radians above the plane
+    /// across it (see [`orbit_direction`]). An elevation of a quarter turn
+    /// looks along `up`, its screen up turned by the azimuth.
+    #[allow(clippy::too_many_arguments)]
+    pub fn orbit_3d(
+        target: DVec3,
+        azimuth: f64,
+        elevation: f64,
+        distance: f64,
+        up: DVec3,
+        fov_y: f64,
+        near: f64,
+        far: f64,
+    ) -> Result<Self, CameraValidationError> {
+        if !target.is_finite() || !azimuth.is_finite() || !elevation.is_finite() {
+            return Err(CameraValidationError::NonFinite);
+        }
+        if !distance.is_finite() || distance <= 0.0 {
+            return Err(CameraValidationError::CoincidentEyeTarget);
+        }
+        let direction =
+            orbit_direction(up, azimuth, elevation).ok_or(CameraValidationError::InvalidUp)?;
+        Self::perspective_3d(target + direction * distance, target, up, fov_y, near, far)
+    }
+
+    /// The azimuth, elevation and distance of this pose's eye around its
+    /// target, about `up` (see [`orbit_direction`]); `None` when the eye is
+    /// on the target or `up` is zero. Looking along `up`, the azimuth is
+    /// where its screen up points away from.
+    pub fn orbit_angles(&self, up: DVec3) -> Option<(f64, f64, f64)> {
+        let (up, forward, right) = orbit_basis(up)?;
+        let offset = self.position - self.target;
+        let distance = offset.length();
+        if !distance.is_finite() || distance <= f64::EPSILON {
+            return None;
+        }
+        let direction = offset / distance;
+        let elevation = direction.dot(up).clamp(-1.0, 1.0).asin();
+        let mut across = direction - up * direction.dot(up);
+        if across.length_squared() <= 1e-18 {
+            // Straight along `up`: the screen up points away from the side.
+            across = -(self.rotation * DVec3::Y) * elevation.signum();
+        }
+        Some((
+            across.dot(right).atan2(across.dot(forward)),
+            elevation,
+            distance,
+        ))
+    }
+
+    /// [`Self::interpolate_in_frame`] around the target: the eye turns about
+    /// `to`'s up the shorter way, rises from one elevation to the other and
+    /// comes nearer or farther in proportion, while the target, the lens
+    /// and the lens shift ease; it never cuts across what it looks at. Poses
+    /// that are not both perspective, or whose eye is on their target,
+    /// interpolate as [`Self::interpolate_in_frame`] does.
+    pub fn orbit_in_frame(self, to: Self, t: f64, frame_height: f64) -> Self {
+        if t <= 0.0 {
+            return self;
+        }
+        if t >= 1.0 {
+            return to;
+        }
+        let linear = || self.interpolate_in_frame(to, t, frame_height);
+        let (
+            Projection::Perspective {
+                fov_y: from_fov,
+                near: from_near,
+                far: from_far,
+            },
+            Projection::Perspective {
+                fov_y: to_fov,
+                near: to_near,
+                far: to_far,
+            },
+        ) = (self.projection, to.projection)
+        else {
+            return linear();
+        };
+        let (
+            Some((from_azimuth, from_elevation, from_distance)),
+            Some((to_azimuth, to_elevation, to_distance)),
+        ) = (self.orbit_angles(to.up), to.orbit_angles(to.up))
+        else {
+            return linear();
+        };
+        let lerp = |a: f64, b: f64| a + (b - a) * t;
+        let turn = (to_azimuth - from_azimuth + std::f64::consts::PI)
+            .rem_euclid(std::f64::consts::TAU)
+            - std::f64::consts::PI;
+        let azimuth = from_azimuth + turn * t;
+        let elevation = lerp(from_elevation, to_elevation);
+        let distance = lerp(from_distance.ln(), to_distance.ln()).exp();
+        let target = self.target.lerp(to.target, t);
+        match Self::orbit_3d(
+            target,
+            azimuth,
+            elevation,
+            distance,
+            to.up,
+            lerp(from_fov, to_fov),
+            lerp(from_near, to_near),
+            lerp(from_far, to_far),
+        ) {
+            Ok(pose) => Self {
+                lens_shift: self.lens_shift.lerp(to.lens_shift, t),
+                ..pose
+            },
+            Err(_) => linear(),
+        }
+    }
+
     /// Validate all pose and projection invariants.
     pub fn validate(&self) -> Result<(), CameraValidationError> {
         if !self.position.is_finite()
@@ -309,6 +422,40 @@ impl CameraPose {
             lens_shift: self.lens_shift.lerp(to.lens_shift, t),
         }
     }
+}
+
+/// How far from what it looks at a camera stands to show `scale` scene units
+/// per world unit across the plane through it, with a lens `fov_y` radians
+/// tall on a frame `frame_height` scene units tall.
+pub fn orbit_distance(scale: f64, fov_y: f64, frame_height: f64) -> f64 {
+    frame_height / (2.0 * scale * (fov_y * 0.5).tan())
+}
+
+/// The unit direction from a target toward an eye `azimuth` radians around
+/// `up` and `elevation` radians above the plane across it. Azimuth 0 is the
+/// side the default camera looks from (+z with y up; -y with z up) and it
+/// turns toward the right of that view (+x). The elevation stays a hair
+/// short of a quarter turn, so a camera looking along `up` still knows
+/// which way its screen's top is: away from the azimuth's side. `None` for a
+/// zero or non-finite `up`.
+pub fn orbit_direction(up: DVec3, azimuth: f64, elevation: f64) -> Option<DVec3> {
+    let (up, forward, right) = orbit_basis(up)?;
+    let limit = std::f64::consts::FRAC_PI_2 - ORBIT_POLE_MARGIN;
+    let elevation = elevation.clamp(-limit, limit);
+    let across = right * azimuth.sin() + forward * azimuth.cos();
+    Some(across * elevation.cos() + up * elevation.sin())
+}
+
+/// How far from a pole an orbit's elevation stays, in radians.
+const ORBIT_POLE_MARGIN: f64 = 1e-6;
+
+/// `up` and the directions of azimuth 0 and of a quarter turn about it.
+fn orbit_basis(up: DVec3) -> Option<(DVec3, DVec3, DVec3)> {
+    let up = up.try_normalize()?;
+    let forward = (DVec3::Z - up * up.z)
+        .try_normalize()
+        .unwrap_or(DVec3::NEG_Y);
+    Some((up, forward, up.cross(forward)))
 }
 
 /// A dimension-agnostic camera supporting both 2D Vector (Vello) and 3D Raster (wgpu) rendering.
@@ -939,6 +1086,87 @@ impl Camera {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An orbit shot stands where its angles say, gives them back, and at
+    /// a quarter turn looks straight down, its screen's top turned away from
+    /// its azimuth.
+    #[test]
+    fn orbit_shots_stand_where_their_angles_say() {
+        let target = DVec3::new(1.0, 0.5, -2.0);
+        let pose = CameraPose::orbit_3d(target, 0.0, 0.0, 10.0, DVec3::Y, 0.6, 0.1, 100.0).unwrap();
+        assert!((pose.position - (target + DVec3::Z * 10.0)).length() < 1e-9);
+        let pose = CameraPose::orbit_3d(target, 0.7, 0.4, 8.0, DVec3::Y, 0.6, 0.1, 100.0).unwrap();
+        let (azimuth, elevation, distance) = pose.orbit_angles(DVec3::Y).unwrap();
+        assert!((azimuth - 0.7).abs() < 1e-9 && (elevation - 0.4).abs() < 1e-9);
+        assert!((distance - 8.0).abs() < 1e-9);
+        let quarter = std::f64::consts::FRAC_PI_2;
+        let plan =
+            CameraPose::orbit_3d(target, quarter, quarter, 8.0, DVec3::Y, 0.6, 0.1, 100.0).unwrap();
+        assert!(plan.validate().is_ok());
+        assert!((plan.position - (target + DVec3::Y * 8.0)).length() < 1e-4);
+        // Seen from +x's side, the top of the screen points to -x.
+        let top = plan.rotation * DVec3::Y;
+        assert!((top - DVec3::NEG_X).length() < 1e-4, "{top:?}");
+        let (azimuth, ..) = plan.orbit_angles(DVec3::Y).unwrap();
+        assert!((azimuth - quarter).abs() < 1e-6);
+        // With z up, azimuth 0 looks from -y.
+        let front =
+            CameraPose::orbit_3d(DVec3::ZERO, 0.0, 0.0, 5.0, DVec3::Z, 0.6, 0.1, 100.0).unwrap();
+        assert!((front.position - DVec3::NEG_Y * 5.0).length() < 1e-9);
+        // A scale of 1 shows a world unit as a scene unit: the frame's
+        // height spans that many world units on the target's plane.
+        let distance = orbit_distance(1.0, 0.6, 9.0);
+        assert!((2.0 * distance * (0.3_f64).tan() - 9.0).abs() < 1e-9);
+    }
+
+    /// Between two shots the eye goes around the target the shorter way,
+    /// never nearer than both, while a straight move cuts across.
+    #[test]
+    fn an_orbit_move_goes_around_the_target() {
+        let shot = |azimuth: f64, distance: f64| {
+            CameraPose::orbit_3d(
+                DVec3::ZERO,
+                azimuth,
+                0.3,
+                distance,
+                DVec3::Y,
+                0.6,
+                0.1,
+                100.0,
+            )
+            .unwrap()
+        };
+        let (from, to) = (shot(-1.2, 10.0), shot(1.4, 10.0));
+        for t in [0.25, 0.5, 0.75] {
+            let pose = from.orbit_in_frame(to, t, 9.0);
+            let (azimuth, elevation, distance) = pose.orbit_angles(DVec3::Y).unwrap();
+            assert!(
+                (azimuth - (-1.2 + 2.6 * t)).abs() < 1e-9,
+                "{azimuth} at {t}"
+            );
+            assert!((elevation - 0.3).abs() < 1e-9);
+            assert!((distance - 10.0).abs() < 1e-9);
+            assert!(pose.validate().is_ok());
+        }
+        let straight = from.interpolate_in_frame(to, 0.5, 9.0);
+        assert!((straight.position - straight.target).length() < 8.0);
+        // Across the back: from 170° to -170° turns 20°, not 340°.
+        let (from, to) = (
+            shot(170_f64.to_radians(), 4.0),
+            shot(-170_f64.to_radians(), 16.0),
+        );
+        let pose = from.orbit_in_frame(to, 0.5, 9.0);
+        let (azimuth, _, distance) = pose.orbit_angles(DVec3::Y).unwrap();
+        assert!(
+            azimuth.abs() > 179_f64.to_radians(),
+            "{}",
+            azimuth.to_degrees()
+        );
+        // The distance eases in proportion: halfway is the geometric mean.
+        assert!((distance - 8.0).abs() < 1e-9, "{distance}");
+        assert_eq!(from.orbit_in_frame(to, 0.0, 9.0), from);
+        assert_eq!(from.orbit_in_frame(to, 1.0, 9.0), to);
+    }
 
     #[test]
     fn camera_ortho_2d_default() {

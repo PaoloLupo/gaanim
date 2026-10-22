@@ -20,7 +20,7 @@ pub use arrow::ArrowShape;
 pub use bounds::Bounds3D;
 pub use camera::{
     Camera, CameraPose, CameraRigCamera, CameraValidationError, CameraViewOverride, CameraViewport,
-    Projection, ResolvedCamera,
+    Projection, ResolvedCamera, orbit_direction, orbit_distance,
 };
 pub use camera_motion::{TraumaShake, ZoomInterpolation, dolly_zoom};
 pub use easing::{EaseMode, EasingCurve, RateFunc, RepeatMode, StepJump};

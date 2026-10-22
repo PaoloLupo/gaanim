@@ -246,6 +246,8 @@ pub enum AnimationType {
     CameraState {
         from: gaanim_animation::CameraStateSource,
         to: gaanim_animation::CameraStateSource,
+        /// Turn about the target rather than ease the eye straight.
+        orbit: bool,
     },
     CameraPosition {
         to: DVec3,

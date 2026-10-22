@@ -1661,20 +1661,32 @@ impl Timeline {
     }
 
     /// The authored camera as the clips leave it just before `time`: the
-    /// camera of the last keyframe before it, with the camera clips since
-    /// then applied as a seek there applies them. The world's camera is
-    /// left as it was.
+    /// camera of the last snapshot before it (a segment checkpoint, when one
+    /// was captured, or a keyframe), with the camera clips since then
+    /// applied as a seek there applies them. The world's camera is left as
+    /// it was.
     fn camera_before(
         &self,
         world: &mut World,
         entity_map: &ObjectEntityMap,
         time: f64,
     ) -> Option<gaanim_math::Camera> {
-        let (keyframe, snapshot) = self.keyframes.range(..OrderedFloat(time)).next_back()?;
+        let (base_time, snapshot) = self
+            .keyframes
+            .range(..OrderedFloat(time))
+            .next_back()
+            .into_iter()
+            .chain(
+                self.checkpoints
+                    .snapshots
+                    .range(..OrderedFloat(time))
+                    .next_back(),
+            )
+            .max_by_key(|(at, _)| **at)?;
         let base = snapshot.camera?;
         let current = world.get_resource::<gaanim_math::Camera>().copied()?;
         world.insert_resource(base);
-        for clip in self.clips_in_range(keyframe.0, time) {
+        for clip in self.clips_in_range(base_time.0, time) {
             let ClipPayload::Animation(anim) = &clip.payload else {
                 continue;
             };
@@ -4926,7 +4938,7 @@ fn apply_lens_spec(
                 frame.progress = progress;
             }
         }
-        PropertyLensSpec::CameraState { from, to } => {
+        PropertyLensSpec::CameraState { from, to, orbit } => {
             let resolve = |source: &gaanim_animation::CameraStateSource| match source {
                 gaanim_animation::CameraStateSource::Concrete(pose) => Some(*pose),
                 gaanim_animation::CameraStateSource::Captured(id) => world
@@ -4938,7 +4950,11 @@ fn apply_lens_spec(
                     .get_resource::<gaanim_math::Camera>()
                     .map(|camera| camera.frame_height)
             {
-                let pose = from.interpolate_in_frame(to, t, frame_height);
+                let pose = if *orbit {
+                    from.orbit_in_frame(to, t, frame_height)
+                } else {
+                    from.interpolate_in_frame(to, t, frame_height)
+                };
                 if let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>() {
                     camera.position = pose.position;
                     camera.rotation = pose.rotation;
@@ -6378,6 +6394,7 @@ mod tests {
                 lens: PropertyLensSpec::CameraState {
                     from: gaanim_animation::CameraStateSource::Captured(12),
                     to: gaanim_animation::CameraStateSource::Captured(10),
+                    orbit: false,
                 },
                 rate_func: RateFunc::Linear,
                 delay: 0.0,

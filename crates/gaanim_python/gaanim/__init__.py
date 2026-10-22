@@ -186,6 +186,7 @@ from .sections import (
     SectionProgress,
     SectionStep,
     SectionTarget,
+    SegmentCamera,
 )
 from .templates import (
     comparison,
@@ -228,6 +229,7 @@ __all__ = [
     "SectionProgress",
     "SectionLike",
     "SectionTarget",
+    "SegmentCamera",
     "Agenda",
     "NavigationEntry",
     "NavigationState",

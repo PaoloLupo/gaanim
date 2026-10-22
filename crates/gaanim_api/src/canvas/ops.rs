@@ -46,6 +46,8 @@ pub(crate) struct CanvasState {
     pub next_id: u32,
     pub next_segment_id: u32,
     pub next_camera_binding_order: u64,
+    /// Camera constraints that let go as the next segment starts.
+    pub segment_camera_bindings: Vec<u64>,
     pub next_camera_state_id: u64,
     pub saved_camera_states: HashMap<String, gaanim_animation::CameraStateSource>,
     pub all_drawables: Vec<ObjectId>,
@@ -126,6 +128,7 @@ impl CanvasState {
             next_id: 1,
             next_segment_id: 1,
             next_camera_binding_order: 0,
+            segment_camera_bindings: Vec::new(),
             next_camera_state_id: 1,
             saved_camera_states: HashMap::new(),
             all_drawables: Vec::new(),
@@ -478,7 +481,6 @@ pub(crate) type SharedCanvasState = Arc<Authored<CanvasState>>;
 pub(crate) type SharedObjectSpec = Arc<Authored<ObjectSpec>>;
 
 pub(crate) type SharedCameraBindingSpec = Arc<Authored<CameraBindingSpec>>;
-
 
 /// Deferred, unresolved channels of a native camera binding.
 // Built once per scene or clip, not stored in bulk: boxing the large

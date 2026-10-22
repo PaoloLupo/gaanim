@@ -191,11 +191,13 @@ def validate_runtime_type_aliases(module: object) -> list[str]:
         failures.append("gaanim.Playable does not match Anim and Composition")
     if isinstance(1.0, playable):
         failures.append("gaanim.Playable accepted a non-playable value")
-    for name in ("NavigationState", "SectionLike", "SectionTarget"):
+    for name in ("NavigationState", "SectionLike", "SectionTarget", "SegmentCamera"):
         if getattr(package, name, None) is None or name not in package.__all__:
             failures.append(f"gaanim.{name} is not exported at runtime")
     if typing.get_args(getattr(package, "NavigationState", None)) != ("done", "current", "upcoming"):
         failures.append("gaanim.NavigationState does not list done, current and upcoming")
+    if typing.get_args(getattr(package, "SegmentCamera", None)) != ("keep", "reset"):
+        failures.append("gaanim.SegmentCamera does not list keep and reset")
     axonometric = getattr(package, "Axonometric", None)
     if axonometric is not module.Axonometric or "Axonometric" not in package.__all__:
         failures.append("gaanim.Axonometric is not exported at runtime")
@@ -1870,6 +1872,61 @@ def validate_camera_framing_contract(module: object) -> list[str]:
         try:
             call()
             failures.append(f"camera framing did not raise {error.__name__}")
+        except error:
+            pass
+    return failures
+
+
+def validate_camera_shots_contract(module: object) -> list[str]:
+    """Exercise orbit shots, orbit moves and cameras scoped to a segment."""
+    failures: list[str] = []
+    scene = module.Scene(frame=(16, 9))
+    camera = scene.camera
+    scene.segment("model")
+    plan = camera.state_orbit((0, 0, 0), 0.0, math.pi / 2, scale=0.6)
+    corner = camera.state_orbit(
+        (0, 1, 0), math.radians(35), math.radians(25), distance=12.0, screen_offset=(-3, 0)
+    )
+    for state in (plan, corner):
+        if not isinstance(state, module.CameraState):
+            failures.append("Camera.state_orbit did not return a CameraState")
+    x, y = camera.project((0, 1, 0), corner)
+    if abs(x + 3.0) > 1e-6 or abs(y) > 1e-6:
+        failures.append(f"an orbit shot's target is not at its screen offset: {(x, y)}")
+    if not isinstance(camera.animate.to(corner, path="orbit"), module.Anim):
+        failures.append("CameraAnimation.to(path='orbit') did not return an Anim")
+    rig = camera.bind_3d(eye=(6, 4, 10), target=(0, 0, 0), scope="segment")
+    if not isinstance(rig, module.CameraConstraint):
+        failures.append("Camera.bind_3d(scope='segment') did not return a CameraConstraint")
+    if camera.bind_2d(center=(1, 0), scope="segment") is None:
+        failures.append("Camera.bind_2d(scope='segment') did not return a CameraConstraint")
+    scene.wait(0.5)
+    scene.stop("model-end")
+    if scene.segment("flat", module.Transition.cross_fade(0.4), camera="reset") is None:
+        failures.append("Scene.segment(camera='reset') did not return a Segment")
+    scene.wait(0.5)
+    from gaanim import Section, SectionStep
+
+    step = SectionStep(name="one", build=lambda scene: scene.wait(0.2), camera="reset")
+    section = Section("shots", [step], camera="keep")
+    if step.camera != "reset" or section.camera != "keep":
+        failures.append("Section and SectionStep did not keep their camera")
+    if len(section.build(scene)) != 1:
+        failures.append("a Section with a camera did not build its step")
+    for call, error in (
+        (lambda: camera.state_orbit((0, 0, 0), 0.0, 0.2), ValueError),
+        (lambda: camera.state_orbit((0, 0, 0), 0.0, 0.2, distance=4.0, scale=1.0), ValueError),
+        (lambda: camera.state_orbit((0, 0, 0), 0.0, 0.2, scale=-1.0), ValueError),
+        (lambda: camera.state_orbit((0, 0, 0), 0.0, 0.2, distance=4.0, up=(0, 0, 0)), ValueError),
+        (lambda: camera.animate.to(corner, path="arc"), ValueError),
+        (lambda: camera.bind_3d(eye=(6, 4, 10), scope="slide"), ValueError),
+        (lambda: scene.segment("bad", camera="off"), ValueError),
+        (lambda: SectionStep(name="two", build=lambda scene: None, camera="off"), ValueError),
+        (lambda: Section("bad", [step], camera="off"), ValueError),
+    ):
+        try:
+            call()
+            failures.append(f"camera shots did not raise {error.__name__}")
         except error:
             pass
     return failures
@@ -3923,6 +3980,7 @@ def main() -> int:
     missing.extend(validate_spot_light_contract(module))
     missing.extend(validate_fields_3d_contract(module))
     missing.extend(validate_camera_framing_contract(module))
+    missing.extend(validate_camera_shots_contract(module))
     missing.extend(validate_deg_contract(module))
     missing.extend(validate_matrix_contract(module))
     missing.extend(validate_matrix_logical_units(module))

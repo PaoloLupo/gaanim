@@ -9455,7 +9455,7 @@ impl SceneModel {
         use gaanim_timeline::clip::PropertyLensSpec;
 
         match &anim.anim_type {
-            AnimationType::CameraState { from, to } => {
+            AnimationType::CameraState { from, to, orbit } => {
                 if let gaanim_animation::CameraStateSource::Captured(id) = from {
                     builder.timeline.add_clip(
                         builder.default_track,
@@ -9471,6 +9471,7 @@ impl SceneModel {
                     PropertyLensSpec::CameraState {
                         from: *from,
                         to: *to,
+                        orbit: *orbit,
                     },
                 );
                 if let gaanim_animation::CameraStateSource::Concrete(pose) = to {
@@ -16344,6 +16345,70 @@ mod tests {
         assert_eq!(camera_x(stops[0] + frame), 0.0);
         assert_eq!(camera_x(stops[1]), 0.0);
         assert_eq!(camera_x(stops[1] + frame), 120.0);
+    }
+
+    /// A constraint made for its segment holds to the segment's last stop
+    /// and lets go as the next segment starts; one made for the scene holds
+    /// on until a segment that starts by releasing the camera, which shows
+    /// the 2D view from its first frame.
+    #[test]
+    fn segment_cameras_let_go_as_the_next_segment_starts() {
+        let mut canvas = SceneModel::new(1280, 720);
+        let eye = DVec3::new(9.0, 5.0, 8.0);
+        let bind = |canvas: &mut SceneModel| {
+            canvas
+                .camera_bind_3d(
+                    Some(CanvasEndpoint::Static(eye)),
+                    Some(CanvasEndpoint::Static(DVec3::ZERO)),
+                    None,
+                    CanvasEndpoint::Static(DVec3::Y),
+                    None,
+                    ScalarSource::constant(1.0),
+                    true,
+                )
+                .unwrap()
+        };
+        canvas.segment("model", None).unwrap();
+        bind(&mut canvas).until_segment_end();
+        canvas.wait(1.0);
+        canvas.stop(None).unwrap();
+        canvas.segment("plain", None).unwrap();
+        canvas.wait(1.0);
+        canvas.stop(None).unwrap();
+        canvas.segment("again", None).unwrap();
+        let _kept = bind(&mut canvas);
+        canvas.wait(1.0);
+        canvas.stop(None).unwrap();
+        canvas.segment("flat", None).unwrap();
+        canvas.release_camera().unwrap();
+        canvas.wait(1.0);
+        let (mut world, mut timeline) = compile_camera_timeline(canvas);
+        let stops: Vec<f64> = timeline
+            .segments
+            .iter()
+            .flat_map(|segment| segment.stops.iter().map(|stop| stop.time))
+            .collect();
+        let mut rig_at = |time: f64| {
+            timeline.seek(&mut world, time);
+            world.insert_resource(std::mem::replace(&mut timeline, Timeline::new()));
+            gaanim_timeline::camera_binding_system(&mut world);
+            timeline = world.remove_resource::<Timeline>().unwrap();
+            world.resource::<gaanim_math::CameraRigCamera>().0
+        };
+        let bound = |camera: gaanim_math::Camera| (camera.position - eye).length() < 1e-9;
+        let frame = 1.0 / 60.0;
+        assert!(bound(rig_at(0.5)));
+        assert!(bound(rig_at(stops[0])), "{stops:?}");
+        assert!(!bound(rig_at(stops[0] + frame)));
+        assert!(bound(rig_at(stops[1] + 0.5)));
+        assert!(bound(rig_at(stops[2])));
+        let flat = rig_at(stops[2] + frame);
+        assert!(!bound(flat));
+        assert!(matches!(
+            flat.projection,
+            gaanim_math::Projection::Orthographic { zoom } if (zoom - 1.0).abs() < 1e-9
+        ));
+        assert!(flat.position.truncate().length() < 1e-9);
     }
 
     /// While a transition shows it, the outgoing segment keeps the camera it

@@ -6487,6 +6487,40 @@ class Camera:
         ``ValueError``.
         """
         ...
+    def state_orbit(
+        self,
+        target: tuple[float, float, float],
+        azimuth: float,
+        elevation: float,
+        *,
+        distance: Optional[float] = None,
+        scale: Optional[float] = None,
+        up: tuple[float, float, float] = (0.0, 1.0, 0.0),
+        fov_y: float = 0.7853981633974483,
+        near: float = 0.1,
+        far: float = 1000.0,
+        screen_offset: tuple[float, float] = (0.0, 0.0),
+    ) -> CameraState:
+        """A perspective camera state looking at ``target`` from around it.
+
+        ``azimuth`` turns the eye about ``up``, in radians, from the side
+        the default camera looks from (+z with y up) toward +x;
+        ``elevation`` raises it above the plane across ``up``, up to a
+        quarter turn, where it looks straight down and the azimuth turns the
+        view. Give ``distance``, the eye's distance in world units, or
+        ``scale``, the scene units one world unit spans across the plane
+        through ``target``, which sets the distance from ``fov_y`` and the
+        frame's height. ``screen_offset`` is as in ``state_3d``. Both or
+        neither of ``distance`` and ``scale``, a non-positive one, or a zero
+        ``up`` raise ``ValueError``.
+
+        Example:
+            plan = scene.camera.state_orbit((0, 0, 0), 0.0, math.pi / 2, scale=0.6)
+            corner = scene.camera.state_orbit((0, 1, 0), math.radians(35),
+                                              math.radians(25), scale=0.8)
+            scene.play([scene.camera.animate.to(corner, path="orbit")], duration=2)
+        """
+        ...
     def capture(self) -> CameraState: ...
     def project(self, point: tuple[float, float, float], state: CameraState) -> tuple[float, float]:
         """Where a camera in ``state`` draws the world ``point`` on the frame.
@@ -6579,7 +6613,22 @@ class Camera:
         Cuts to what ``CameraAnimation.screen_offset`` animates.
         """
         ...
-    def bind_2d(self, *, center: Optional[Endpoint] = None, zoom: Optional[ScalarSource] = None, rotation: Optional[ScalarSource] = None, influence: Optional[ScalarSource] = None, enabled: bool = True) -> CameraConstraint: ...
+    def bind_2d(
+        self,
+        *,
+        center: Optional[Endpoint] = None,
+        zoom: Optional[ScalarSource] = None,
+        rotation: Optional[ScalarSource] = None,
+        influence: Optional[ScalarSource] = None,
+        enabled: bool = True,
+        scope: Literal["scene", "segment"] = "scene",
+    ) -> CameraConstraint:
+        """Keep the orthographic camera on reactive inputs, every frame.
+
+        ``scope="segment"`` lets the constraint go as the next segment
+        starts, as ``bind_3d`` does.
+        """
+        ...
     def bind_3d(
         self,
         *,
@@ -6590,6 +6639,7 @@ class Camera:
         screen_offset: Optional[tuple[ScalarSource, ScalarSource]] = None,
         influence: Optional[ScalarSource] = None,
         enabled: bool = True,
+        scope: Literal["scene", "segment"] = "scene",
     ) -> CameraConstraint:
         """Keep the perspective camera on reactive inputs, every frame.
 
@@ -6603,6 +6653,12 @@ class Camera:
         scalars. A zero or non-finite ``up``
         raises ``ValueError``; one that a reactive input makes zero leaves
         the camera as it was on that frame.
+
+        The constraint holds until ``disable()``, or, with
+        ``scope="segment"``, until the next segment starts: the segment it
+        was made in keeps it to its last stop and while a transition shows
+        it leave, and the next one starts from the camera without it. Any
+        other ``scope`` raises ``ValueError``.
 
         Example:
             yaw = scene.viz.parameter(0.0)
@@ -6897,14 +6953,20 @@ class CameraAnimation:
     the same way; a trauma shake lasts until it decays and ``orthographic``
     switches at once, unless ``.duration()`` says otherwise.
     """
-    def to(self, state: CameraState) -> Anim:
+    def to(self, state: CameraState, *, path: Literal["linear", "orbit"] = "linear") -> Anim:
         """Animate to a reusable camera state and return a composable Anim.
 
         Between an orthographic and a perspective state the move stays in
         perspective, from or to the view that matches the orthographic pose,
         and turns orthographic only at its orthographic end, so 3D content
-        stays in front of the eye. A state owned by another Scene raises
-        ``ValueError``. Configure timing on the returned animation.
+        stays in front of the eye. With ``path="orbit"``, between two
+        perspective states, the eye goes around what it looks at instead:
+        it turns about the new state's ``up`` the shorter way, rises from
+        one elevation to the other and comes nearer or farther in
+        proportion, while the target, the lens and the screen offset ease
+        with the same curve. A state owned by another Scene or another
+        ``path`` raises ``ValueError``. Configure timing on the returned
+        animation.
         """
         ...
     def restore(self, name: str) -> Anim:
@@ -12142,6 +12204,7 @@ class Scene:
         post: Optional[PostProcess | Sequence[PostProcess] | Literal[False]] = None,
         target: Optional[float] = None,
         step_rate: Optional[float] = None,
+        camera: Literal["keep", "reset"] = "keep",
     ) -> Segment:
         """Create and activate a named structural segment.
 
@@ -12163,15 +12226,20 @@ class Scene:
         segment's end show their finished frame. Animations, updaters, the
         camera, video, particles and the time of shader backgrounds and
         post-processing all step; audio and the playhead keep running
-        smoothly. See ``Drawable.step_rate`` to step one drawable. Empty or
-        duplicate names, a transition on the first segment, a target that is
-        not a positive number of seconds, a step rate that is not a positive
-        number, and a narration script that cannot be read raise
-        ``ValueError``.
+        smoothly. See ``Drawable.step_rate`` to step one drawable.
+        ``camera="reset"`` starts the segment from the scene's 2D view: every
+        camera constraint lets go and the camera resets at once, after a
+        stop at that instant, while the segment before keeps its camera as a
+        transition shows it leave. Empty or duplicate names, a transition on
+        the first segment, a target that is not a positive number of
+        seconds, a step rate that is not a positive number, a ``camera``
+        other than ``"keep"`` or ``"reset"``, and a narration script that
+        cannot be read raise ``ValueError``.
 
         Example:
             result = scene.segment("example", background="#0f172a")
             collage = scene.segment("collage", step_rate=12)
+            summary = scene.segment("summary", Transition.cross_fade(0.4), camera="reset")
         """
         ...
     def link(self, from_: Segment, to: Segment, transition: Transition) -> None:

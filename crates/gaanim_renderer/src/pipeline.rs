@@ -2066,8 +2066,6 @@ fn fill_transition_background(
     pop_transition_mask(scene, mask);
 }
 
-/// Composite a run of elements. Without `views` (inside a camera view)
-/// screens draw their own paint but not what their cameras see.
 /// Draw `elements`, a side a transition takes away, through `view`, which
 /// shows its 2D drawables where the camera it keeps shows them; the images
 /// of its 3D content are drawn through that camera already.
@@ -2095,6 +2093,8 @@ fn append_viewed_run(
     }
 }
 
+/// Composite a run of elements. Without `views` (inside a camera view)
+/// screens draw their own paint but not what their cameras see.
 fn append_element_run(
     main_scene: &mut vello::Scene,
     elements: &[ExtractedElement],
