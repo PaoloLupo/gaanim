@@ -24,10 +24,14 @@ usvg = { version = "0.47", default-features = false, features = ["text", "system
 gltf = { version = "1.4", default-features = false, features = [
     "import",
     "names",
+    "extras",
     "utils",
     "KHR_materials_unlit",
     "KHR_materials_emissive_strength",
 ] }
+# Tangents of normal-mapped primitives that the file leaves out, as glTF
+# asks: MikkTSpace, as the tools that bake normal maps compute them.
+bevy_mikktspace = "1.0"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 base64 = "0.22"
 tracing = { workspace = true }

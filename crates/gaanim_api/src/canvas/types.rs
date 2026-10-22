@@ -1038,6 +1038,8 @@ pub struct ObjectSpec {
     pub(crate) gltf_pose: Option<gaanim_objects::gltf::NodePose>,
     /// The nodes and skins of an imported glTF model, on its root.
     pub(crate) gltf_rig: Option<crate::gltf::GltfRigSpec>,
+    /// The weights of a glTF primitive's morph targets, as declared.
+    pub(crate) morph_weights: Option<std::sync::Arc<[f32]>>,
     pub fill_level_cursor: Option<f64>,
     /// Typed state after queued typewriter/scramble motions, keyed by the
     /// Text spec version it applies to.
@@ -1225,6 +1227,7 @@ impl ObjectSpec {
             group_origin: None,
             gltf_pose: None,
             gltf_rig: None,
+            morph_weights: None,
             fill_level_cursor: None,
             repeat_count: None,
             typed_text: None,
@@ -1252,6 +1255,9 @@ pub struct Anim {
     /// Sound effect anchored to the animation's resolved start.
     sound: Option<gaanim_timeline::sound::SoundCue>,
     settle: Option<AnimSettle>,
+    /// The morph targets of the glTF node or model that `animate()` was
+    /// called on, which `morph` sets.
+    morph_targets: std::sync::Arc<[std::sync::Arc<super::drawable::GltfMorphTargets>]>,
 }
 
 /// Inertial bounce requested on an [`Anim`], appended once its duration,
@@ -1397,7 +1403,38 @@ impl Anim {
             repeat: None,
             sound: None,
             settle: None,
+            morph_targets: std::sync::Arc::new([]),
         }
+    }
+
+    /// This animation of a drawable whose morph targets are `targets`.
+    pub(crate) fn with_morph_targets(
+        mut self,
+        targets: std::sync::Arc<[std::sync::Arc<super::drawable::GltfMorphTargets>]>,
+    ) -> Self {
+        self.morph_targets = targets;
+        self
+    }
+
+    /// Animates the weight of the morph target `name` of a glTF node's
+    /// mesh, or of every node of a model that has one by that name, to
+    /// `weight` (see [`super::DrawableHandle::morph`]).
+    pub fn morph(self, name: &str, weight: f64) -> Result<Self, super::MorphTargetError> {
+        let entries: Vec<(ObjectId, usize)> =
+            super::drawable::morph_entries(&self.morph_targets, name, weight)?
+                .into_iter()
+                .map(|(primitive, _, index)| (primitive, index))
+                .collect();
+        Ok(self.update_properties(|properties| {
+            properties
+                .morph
+                .retain(|(primitive, index, _)| !entries.contains(&(*primitive, *index)));
+            properties.morph.extend(
+                entries
+                    .iter()
+                    .map(|(primitive, index)| (*primitive, *index, weight as f32)),
+            );
+        }))
     }
 
     pub(crate) fn properties(

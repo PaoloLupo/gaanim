@@ -34,7 +34,8 @@ pub use components::{
 };
 pub use hierarchy::{GaanimScenePlugin, SceneSet};
 pub use model::{
-    AlphaMode, MeshSkin, MeshSurface, MeshTexture, SkinPalette, SkinWeights, TextureWrap,
+    AlphaMode, MeshSkin, MeshSurface, MeshTexture, MorphTarget, MorphWeights, NormalMap,
+    SkinPalette, SkinWeights, TextureWrap,
 };
 pub use occlusion::Occlusion;
 

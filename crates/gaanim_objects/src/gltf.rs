@@ -2,20 +2,24 @@
 //!
 //! A model becomes plain scene content: a node per glTF node, with its rest
 //! transform, holding a [`TriangleMeshData`] per mesh primitive with its
-//! [`Material3D`], base-color texture, alpha mode and skin weights
-//! ([`MeshSurface`]). Skins list the nodes that move their vertices, and
-//! animations are sampled channels of node translations, rotations and
-//! scales ([`GltfAnimations`]), evaluated at any time without state, so
-//! seeks are exact. Recordings keep what this resolves, so players never
-//! read glTF.
+//! [`Material3D`], base-color texture, normal map, alpha mode, skin weights
+//! and morph targets ([`MeshSurface`]). Skins list the nodes that move their
+//! vertices, and animations are sampled channels of node translations,
+//! rotations, scales and morph target weights ([`GltfAnimations`]),
+//! evaluated at any time without state, so seeks are exact. Recordings keep
+//! what this resolves, so players never read glTF.
 //!
-//! Read: triangles (lists, strips and fans), positions, normals, the UVs of
-//! the base-color texture, `COLOR_0`, `JOINTS_0` and `WEIGHTS_0`; the
-//! metallic-roughness factors, emission (with `KHR_materials_emissive_strength`),
-//! `KHR_materials_unlit`, alpha modes and `doubleSided`; and `LINEAR`, `STEP`
-//! and `CUBICSPLINE` channels. Left out, for now: morph targets, normal,
-//! occlusion and metallic-roughness maps, texture transforms, and the file's
-//! cameras and lights.
+//! Read: triangles (lists, strips and fans), positions, normals, tangents,
+//! the UVs of the base-color texture and normal map, `COLOR_0`, `JOINTS_0`
+//! and `WEIGHTS_0`, and morph targets' position and normal displacements with
+//! their default weights and names (`targetNames` in the mesh's extras); the
+//! metallic-roughness factors, normal maps, emission (with
+//! `KHR_materials_emissive_strength`), `KHR_materials_unlit`, alpha modes and
+//! `doubleSided`; and `LINEAR`, `STEP` and `CUBICSPLINE` channels. A
+//! normal-mapped primitive without tangents gets MikkTSpace's, as glTF asks.
+//! Left out, for now: morph targets' tangent displacements, occlusion and
+//! metallic-roughness maps, texture transforms, a normal map read through
+//! other UVs than the base-color texture's, and the file's cameras and lights.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -25,7 +29,8 @@ use gaanim_core::glam::{DMat4, DQuat, DVec3};
 use gaanim_core::peniko::{self, Blob, Color, ImageAlphaType, ImageData, ImageFormat};
 use gaanim_math::Bounds3D;
 use gaanim_scene::{
-    AlphaMode, Material3D, MeshSurface, MeshTexture, SkinWeights, TextureWrap, TriangleMeshData,
+    AlphaMode, Material3D, MeshSurface, MeshTexture, MorphTarget, NormalMap, SkinWeights,
+    TextureWrap, TriangleMeshData,
 };
 
 /// Longest side of a texture once imported: larger images are scaled down,
@@ -105,6 +110,13 @@ pub struct GltfNode {
     pub primitives: Vec<GltfPrimitive>,
     /// The skin of its primitives, among [`GltfModel::skins`].
     pub skin: Option<usize>,
+    /// The names of its mesh's morph targets: the mesh's `targetNames`, as
+    /// Blender writes its shape keys, or `target<index>`; empty when its
+    /// mesh has none.
+    pub morph_targets: Vec<String>,
+    /// The weight of each morph target before an animation sets them: the
+    /// node's, else the mesh's, else 0.
+    pub weights: Vec<f64>,
 }
 
 /// The joints of a skin, as positions among [`GltfModel::nodes`], and the
@@ -132,6 +144,85 @@ pub enum ChannelTarget {
     Scale,
 }
 
+/// The keyframes of the morph target weights of one node's mesh.
+#[derive(Debug, Clone)]
+pub struct GltfWeightsChannel {
+    /// The node whose mesh it morphs, among [`GltfModel::nodes`].
+    pub node: usize,
+    pub interpolation: ChannelInterpolation,
+    pub times: Vec<f64>,
+    /// `count` weights per time, one per target; for cubic splines, three
+    /// rows per time: in-tangents, values, out-tangents.
+    pub values: Vec<f64>,
+    pub count: usize,
+}
+
+impl GltfWeightsChannel {
+    /// Write the weights at `time`, held at the first and last keyframes,
+    /// into `weights`, as many as both hold.
+    pub fn sample(&self, time: f64, weights: &mut [f64]) {
+        let count = self.count;
+        let keys = self.times.len();
+        if keys == 0 || count == 0 {
+            return;
+        }
+        let row = |row: usize| &self.values[row * count..(row + 1) * count];
+        let value = |key: usize| match self.interpolation {
+            ChannelInterpolation::CubicSpline => row(key * 3 + 1),
+            _ => row(key),
+        };
+        let mut write = |values: &mut dyn FnMut(usize) -> f64| {
+            for (index, weight) in weights.iter_mut().take(count).enumerate() {
+                *weight = values(index);
+            }
+        };
+        if keys == 1 || !(time > self.times[0]) {
+            let first = value(0);
+            return write(&mut |index| first[index]);
+        }
+        if time >= self.times[keys - 1] {
+            let last = value(keys - 1);
+            return write(&mut |index| last[index]);
+        }
+        let next = self.times.partition_point(|key| *key <= time);
+        let previous = next - 1;
+        let (t0, t1) = (self.times[previous], self.times[next]);
+        let span = t1 - t0;
+        if !(span > 0.0) {
+            let at = value(next);
+            return write(&mut |index| at[index]);
+        }
+        let s = (time - t0) / span;
+        match self.interpolation {
+            ChannelInterpolation::Step => {
+                let at = value(previous);
+                write(&mut |index| at[index]);
+            }
+            ChannelInterpolation::Linear => {
+                let (a, b) = (value(previous), value(next));
+                write(&mut |index| a[index] + (b[index] - a[index]) * s);
+            }
+            ChannelInterpolation::CubicSpline => {
+                let p0 = row(previous * 3 + 1);
+                let m0 = row(previous * 3 + 2);
+                let m1 = row(next * 3);
+                let p1 = row(next * 3 + 1);
+                let (s2, s3) = (s * s, s * s * s);
+                let h00 = 2.0 * s3 - 3.0 * s2 + 1.0;
+                let h10 = s3 - 2.0 * s2 + s;
+                let h01 = -2.0 * s3 + 3.0 * s2;
+                let h11 = s3 - s2;
+                write(&mut |index| {
+                    h00 * p0[index]
+                        + h10 * span * m0[index]
+                        + h01 * p1[index]
+                        + h11 * span * m1[index]
+                });
+            }
+        }
+    }
+}
+
 /// The keyframes of one property of one node.
 #[derive(Debug, Clone)]
 pub struct GltfChannel {
@@ -152,12 +243,17 @@ pub struct GltfClip {
     /// From time 0 to its last keyframe, in seconds.
     pub duration: f64,
     pub channels: Vec<GltfChannel>,
+    /// The channels of its morph target weights.
+    pub weights: Vec<GltfWeightsChannel>,
 }
 
 /// The rest pose of the nodes and the animations that move them.
 #[derive(Debug, Clone, Default)]
 pub struct GltfAnimations {
     pub rest: Vec<NodePose>,
+    /// The morph target weights of each node's mesh at rest, empty for a
+    /// node without them (see [`GltfNode::weights`]).
+    pub weights: Vec<Vec<f64>>,
     pub clips: Vec<GltfClip>,
 }
 
@@ -177,6 +273,29 @@ impl GltfAnimations {
         nodes.sort_unstable();
         nodes.dedup();
         nodes
+    }
+
+    /// The nodes whose morph target weights clip `clip` moves, sorted.
+    pub fn morphed_nodes(&self, clip: usize) -> Vec<usize> {
+        let mut nodes: Vec<usize> = self.clips[clip]
+            .weights
+            .iter()
+            .map(|channel| channel.node)
+            .collect();
+        nodes.sort_unstable();
+        nodes.dedup();
+        nodes
+    }
+
+    /// Write into `weights`, which holds the weights of each node's mesh,
+    /// those clip `clip` gives at `time` seconds into it, clamped to its
+    /// keyframes; nodes it does not morph keep what `weights` holds.
+    pub fn sample_weights(&self, clip: usize, time: f64, weights: &mut [Vec<f64>]) {
+        for channel in &self.clips[clip].weights {
+            if let Some(node) = weights.get_mut(channel.node) {
+                channel.sample(time, node);
+            }
+        }
     }
 
     /// Write into `pose`, which holds a pose per node, what clip `clip`
@@ -466,6 +585,29 @@ impl GltfModel {
                 Some(mesh) => reader.mesh(&mesh)?,
                 None => Vec::new(),
             };
+            let targets = primitives
+                .iter()
+                .filter_map(|primitive| primitive.mesh.surface.as_ref())
+                .map(|surface| surface.morph_targets.len())
+                .max()
+                .unwrap_or(0);
+            let (morph_targets, weights) = match node.mesh() {
+                Some(mesh) if targets > 0 => {
+                    let defaults = node.weights().or(mesh.weights()).unwrap_or_default();
+                    (
+                        target_names(&mesh, targets),
+                        (0..targets)
+                            .map(|target| {
+                                defaults
+                                    .get(target)
+                                    .map_or(0.0, |weight| f64::from(*weight))
+                            })
+                            .map(|weight| if weight.is_finite() { weight } else { 0.0 })
+                            .collect(),
+                    )
+                }
+                _ => (Vec::new(), Vec::new()),
+            };
             nodes.push(GltfNode {
                 index: node.index(),
                 name: node
@@ -477,6 +619,8 @@ impl GltfModel {
                 rest,
                 primitives,
                 skin: node.skin().map(|skin| skin.index()),
+                morph_targets,
+                weights,
             });
             let mut children: Vec<_> = node.children().map(|child| (child, Some(at))).collect();
             children.reverse();
@@ -561,10 +705,11 @@ impl GltfModel {
         }
 
         let rest: Vec<NodePose> = nodes.iter().map(|node| node.rest).collect();
+        let weights: Vec<Vec<f64>> = nodes.iter().map(|node| node.weights.clone()).collect();
         let clips = document
             .animations()
             .enumerate()
-            .map(|(index, animation)| reader.clip(&animation, index, &position))
+            .map(|(index, animation)| reader.clip(&animation, index, &position, &weights))
             .collect();
         let bounds = rest_bounds(&nodes, &skins);
         Ok(Self {
@@ -574,14 +719,18 @@ impl GltfModel {
                 .collect(),
             nodes,
             skins,
-            animations: Arc::new(GltfAnimations { rest, clips }),
+            animations: Arc::new(GltfAnimations {
+                rest,
+                weights,
+                clips,
+            }),
             bounds,
         })
     }
 }
 
-/// The box of the scene in its rest pose: each primitive's vertices placed
-/// by its node, or by its skin's bind pose.
+/// The box of the scene in its rest pose: each primitive's vertices, morphed
+/// by its node's weights, placed by its node or by its skin's bind pose.
 fn rest_bounds(nodes: &[GltfNode], skins: &[GltfSkin]) -> Bounds3D {
     let mut world = vec![DMat4::IDENTITY; nodes.len()];
     for (index, node) in nodes.iter().enumerate() {
@@ -597,8 +746,18 @@ fn rest_bounds(nodes: &[GltfNode], skins: &[GltfSkin]) -> Bounds3D {
                 .surface
                 .as_ref()
                 .and_then(|surface| surface.skin.as_ref());
+            let targets = primitive
+                .mesh
+                .surface
+                .as_ref()
+                .map_or(&[][..], |surface| &surface.morph_targets[..]);
             for (vertex, position) in primitive.mesh.vertices.iter().enumerate() {
-                let local = DVec3::from_array(position.map(f64::from));
+                let mut local = DVec3::from_array(position.map(f64::from));
+                for (target, weight) in targets.iter().zip(&node.weights) {
+                    if let Some(moved) = target.positions.get(vertex) {
+                        local += DVec3::from_array(moved.map(f64::from)) * *weight;
+                    }
+                }
                 let point = match (skin, weights) {
                     (Some(skin), Some(weights)) => {
                         let joint = weights.joints[vertex][0] as usize;
@@ -684,15 +843,69 @@ impl Reader<'_> {
             let material = primitive.material();
             let pbr = material.pbr_metallic_roughness();
             let texture_info = pbr.base_color_texture();
-            let uvs = texture_info
+            let normal_info = material.normal_texture();
+            // One set of UVs: the base-color texture's, else the normal map's.
+            let uv_set = texture_info
                 .as_ref()
-                .and_then(|info| read.read_tex_coords(info.tex_coord()))
+                .map(|info| info.tex_coord())
+                .or_else(|| normal_info.as_ref().map(|info| info.tex_coord()));
+            let uvs = uv_set
+                .and_then(|set| read.read_tex_coords(set))
                 .map(|uvs| uvs.into_f32().collect::<Vec<_>>())
                 .filter(|uvs| uvs.len() == count);
             let texture = match (&texture_info, &uvs) {
                 (Some(info), Some(_)) => self.texture(&info.texture())?,
                 _ => None,
             };
+            let normal_map = match (&normal_info, &uvs) {
+                (Some(info), Some(uvs)) if Some(info.tex_coord()) == uv_set => {
+                    match self.texture(&info.texture())? {
+                        Some(texture) => {
+                            let tangents = read
+                                .read_tangents()
+                                .map(|tangents| tangents.collect::<Vec<_>>())
+                                .filter(|tangents| tangents.len() == count)
+                                .unwrap_or_else(|| {
+                                    mikktspace_tangents(
+                                        &vertices,
+                                        normals.as_deref(),
+                                        uvs,
+                                        &indices,
+                                    )
+                                });
+                            let scale = info.scale();
+                            Some(NormalMap {
+                                texture,
+                                scale: if scale.is_finite() { scale } else { 1.0 },
+                                tangents,
+                            })
+                        }
+                        None => None,
+                    }
+                }
+                (Some(_), Some(_)) => {
+                    tracing::warn!(
+                        "glTF model '{}': a normal map of mesh '{}' is left out: it reads \
+                         other texture coordinates than its base-color texture",
+                        self.path.display(),
+                        mesh.name().unwrap_or_default()
+                    );
+                    None
+                }
+                _ => None,
+            };
+            let morph_targets: Vec<MorphTarget> = read
+                .read_morph_targets()
+                .map(|(positions, normals, _)| MorphTarget {
+                    positions: positions
+                        .map(|positions| positions.collect::<Vec<_>>())
+                        .filter(|positions| positions.len() == count)
+                        .unwrap_or_else(|| vec![[0.0; 3]; count]),
+                    normals: normals
+                        .map(|normals| normals.collect::<Vec<_>>())
+                        .filter(|normals| normals.len() == count),
+                })
+                .collect();
             let skin = match (read.read_joints(0), read.read_weights(0)) {
                 (Some(joints), Some(weights)) => {
                     let joints: Vec<[u16; 4]> = joints.into_u16().collect();
@@ -748,9 +961,11 @@ impl Reader<'_> {
                     material: lit.then_some(surface),
                     surface: Some(Arc::new(MeshSurface {
                         texture,
+                        normal_map,
                         alpha,
                         double_sided: material.double_sided(),
                         skin,
+                        morph_targets,
                     })),
                     blend: None,
                 },
@@ -863,15 +1078,18 @@ impl Reader<'_> {
             .map_err(|reason| error(format!("'{}': {reason}", file.display())))
     }
 
-    /// Animation `animation` with its channels on the scene's nodes;
-    /// channels on other nodes and on morph target weights are left out.
+    /// Animation `animation` with its channels on the scene's nodes, whose
+    /// meshes have `weights.len()` morph targets each; channels on other
+    /// nodes are left out.
     fn clip(
         &self,
         animation: &gltf::Animation<'_>,
         index: usize,
         position: &HashMap<usize, usize>,
+        weights: &[Vec<f64>],
     ) -> GltfClip {
         let mut channels = Vec::new();
+        let mut morphs = Vec::new();
         for channel in animation.channels() {
             let Some(&node) = position.get(&channel.target().node().index()) else {
                 continue;
@@ -880,7 +1098,19 @@ impl Reader<'_> {
                 gltf::animation::Property::Translation => ChannelTarget::Translation,
                 gltf::animation::Property::Rotation => ChannelTarget::Rotation,
                 gltf::animation::Property::Scale => ChannelTarget::Scale,
-                gltf::animation::Property::MorphTargetWeights => continue,
+                gltf::animation::Property::MorphTargetWeights => {
+                    if let Some(channel) = self.weights_channel(&channel, node, weights[node].len())
+                    {
+                        morphs.push(channel);
+                    } else {
+                        tracing::warn!(
+                            "glTF model '{}': skipped a malformed weights channel of animation \
+                             {index}",
+                            self.path.display()
+                        );
+                    }
+                    continue;
+                }
             };
             let interpolation = match channel.sampler().interpolation() {
                 gltf::animation::Interpolation::Step => ChannelInterpolation::Step,
@@ -933,7 +1163,9 @@ impl Reader<'_> {
         }
         let duration = channels
             .iter()
-            .filter_map(|channel| channel.times.last().copied())
+            .map(|channel| &channel.times)
+            .chain(morphs.iter().map(|channel| &channel.times))
+            .filter_map(|times| times.last().copied())
             .fold(0.0, f64::max);
         GltfClip {
             name: animation
@@ -942,8 +1174,177 @@ impl Reader<'_> {
                 .map_or_else(|| format!("animation{index}"), str::to_owned),
             duration,
             channels,
+            weights: morphs,
         }
     }
+
+    /// The weights channel `channel` on node `node`, whose mesh has
+    /// `count` morph targets; `None` when it is malformed or the mesh has
+    /// none.
+    fn weights_channel(
+        &self,
+        channel: &gltf::animation::Channel<'_>,
+        node: usize,
+        count: usize,
+    ) -> Option<GltfWeightsChannel> {
+        let interpolation = match channel.sampler().interpolation() {
+            gltf::animation::Interpolation::Step => ChannelInterpolation::Step,
+            gltf::animation::Interpolation::Linear => ChannelInterpolation::Linear,
+            gltf::animation::Interpolation::CubicSpline => ChannelInterpolation::CubicSpline,
+        };
+        let read = channel.reader(buffer_of(self.buffers));
+        let times: Vec<f64> = read.read_inputs()?.map(f64::from).collect();
+        let gltf::animation::util::ReadOutputs::MorphTargetWeights(values) = read.read_outputs()?
+        else {
+            return None;
+        };
+        let values: Vec<f64> = values.into_f32().map(f64::from).collect();
+        let per_key = if interpolation == ChannelInterpolation::CubicSpline {
+            3
+        } else {
+            1
+        };
+        let well_formed = count > 0
+            && !times.is_empty()
+            && values.len() == times.len() * per_key * count
+            && times.iter().all(|time| time.is_finite())
+            && times.windows(2).all(|pair| pair[0] <= pair[1])
+            && values.iter().all(|value| value.is_finite());
+        well_formed.then_some(GltfWeightsChannel {
+            node,
+            interpolation,
+            times,
+            values,
+            count,
+        })
+    }
+}
+
+/// The names of the `count` morph targets of `mesh`: its extras'
+/// `targetNames`, as Blender and other exporters write them, or
+/// `target<index>` for those it does not name.
+fn target_names(mesh: &gltf::Mesh<'_>, count: usize) -> Vec<String> {
+    let named: Vec<String> = mesh
+        .extras()
+        .as_ref()
+        .and_then(|extras| serde_json::from_str::<serde_json::Value>(extras.get()).ok())
+        .and_then(|extras| {
+            let names = extras.get("targetNames")?.as_array()?;
+            Some(
+                names
+                    .iter()
+                    .map(|name| name.as_str().unwrap_or_default().to_owned())
+                    .collect(),
+            )
+        })
+        .unwrap_or_default();
+    (0..count)
+        .map(|index| {
+            named
+                .get(index)
+                .filter(|name| !name.is_empty())
+                .cloned()
+                .unwrap_or_else(|| format!("target{index}"))
+        })
+        .collect()
+}
+
+/// A mesh's triangles as MikkTSpace reads them, and the tangents it writes.
+struct TangentSpace<'a> {
+    positions: &'a [[f32; 3]],
+    normals: &'a [[f32; 3]],
+    uvs: &'a [[f32; 2]],
+    indices: &'a [u32],
+    tangents: Vec<[f32; 4]>,
+}
+
+impl TangentSpace<'_> {
+    fn vertex(&self, face: usize, corner: usize) -> usize {
+        self.indices[face * 3 + corner] as usize
+    }
+}
+
+impl bevy_mikktspace::Geometry for TangentSpace<'_> {
+    fn num_faces(&self) -> usize {
+        self.indices.len() / 3
+    }
+
+    fn num_vertices_of_face(&self, _face: usize) -> usize {
+        3
+    }
+
+    fn position(&self, face: usize, corner: usize) -> [f32; 3] {
+        self.positions[self.vertex(face, corner)]
+    }
+
+    fn normal(&self, face: usize, corner: usize) -> [f32; 3] {
+        self.normals[self.vertex(face, corner)]
+    }
+
+    /// With v up: glTF's v runs down the image, and its normal maps' y up
+    /// it, which MikkTSpace's bitangent follows only along v.
+    fn tex_coord(&self, face: usize, corner: usize) -> [f32; 2] {
+        let [u, v] = self.uvs[self.vertex(face, corner)];
+        [u, 1.0 - v]
+    }
+
+    fn set_tangent(
+        &mut self,
+        tangent: Option<bevy_mikktspace::TangentSpace>,
+        face: usize,
+        corner: usize,
+    ) {
+        if let Some(tangent) = tangent {
+            let vertex = self.vertex(face, corner);
+            self.tangents[vertex] = tangent.tangent_encoded();
+        }
+    }
+}
+
+/// MikkTSpace tangents of the triangles `indices` over `positions`, with
+/// their `normals` (or, without them, those the renderer computes: the
+/// faces' around each vertex) and `uvs`, their bitangents up the image, as
+/// the normal maps' green channel. A vertex no triangle gives one gets the
+/// u axis.
+fn mikktspace_tangents(
+    positions: &[[f32; 3]],
+    normals: Option<&[[f32; 3]]>,
+    uvs: &[[f32; 2]],
+    indices: &[u32],
+) -> Vec<[f32; 4]> {
+    let count = positions.len();
+    let computed;
+    let normals = match normals {
+        Some(normals) => normals,
+        None => {
+            let mut sums = vec![DVec3::ZERO; count];
+            for triangle in indices.as_chunks::<3>().0 {
+                let [a, b, c] = triangle.map(|index| index as usize);
+                let point = |vertex: usize| DVec3::from_array(positions[vertex].map(f64::from));
+                let face = (point(b) - point(a)).cross(point(c) - point(a));
+                for vertex in [a, b, c] {
+                    sums[vertex] += face;
+                }
+            }
+            computed = sums
+                .iter()
+                .map(|sum| sum.normalize_or_zero().as_vec3().to_array())
+                .collect::<Vec<_>>();
+            &computed[..]
+        }
+    };
+    let mut space = TangentSpace {
+        positions,
+        normals,
+        uvs,
+        indices: &indices[..indices.len() / 3 * 3],
+        tangents: vec![[1.0, 0.0, 0.0, 1.0]; count],
+    };
+    let in_range = space.indices.iter().all(|index| (*index as usize) < count);
+    if in_range && bevy_mikktspace::generate_tangents(&mut space).is_err() {
+        return vec![[1.0, 0.0, 0.0, 1.0]; count];
+    }
+    space.tangents
 }
 
 /// The triangles of a primitive drawn in `mode` through `corners`.
@@ -1204,6 +1605,154 @@ mod tests {
             GltfModel::from_slice(&bytes, path, &GltfSceneSelector::Name("Other".into())),
             Err(GltfLoadError::UnknownSceneName { .. })
         ));
+    }
+
+    /// A triangle in the xy plane, its UVs running along x and down y, with
+    /// a normal map, a morph target named `Lift` that raises its second
+    /// corner by a unit, weighed 0.25 by its node over the mesh's 0.75, and
+    /// an animation that takes the weight from 0 to 1 in a second.
+    fn morphed_triangle() -> Vec<u8> {
+        use base64::Engine as _;
+        let mut bytes = Vec::new();
+        let floats = |bytes: &mut Vec<u8>, values: &[f32]| {
+            for value in values {
+                bytes.extend_from_slice(&value.to_le_bytes());
+            }
+        };
+        // Positions (0..36), normals (36..72), UVs (72..96), indices
+        // (96..102, padded to 104), the target's displacements (104..140),
+        // times (140..148) and weights (148..156).
+        floats(&mut bytes, &[0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0]);
+        floats(&mut bytes, &[0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0]);
+        floats(&mut bytes, &[0.0, 1.0, 1.0, 1.0, 0.0, 0.0]);
+        for index in [0_u16, 1, 2, 0] {
+            bytes.extend_from_slice(&index.to_le_bytes());
+        }
+        floats(&mut bytes, &[0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]);
+        floats(&mut bytes, &[0.0, 1.0]);
+        floats(&mut bytes, &[0.0, 1.0]);
+        let uri = base64::engine::general_purpose::STANDARD.encode(&bytes);
+        let mut png = Vec::new();
+        image::RgbaImage::from_pixel(1, 1, image::Rgba([128, 128, 255, 255]))
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+        let image = base64::engine::general_purpose::STANDARD.encode(&png);
+        format!(
+            r#"{{
+  "asset": {{"version": "2.0"}},
+  "scene": 0,
+  "scenes": [{{"nodes": [0]}}],
+  "nodes": [{{"name": "face", "mesh": 0, "weights": [0.25]}}],
+  "meshes": [{{
+    "primitives": [{{
+      "attributes": {{"POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2}},
+      "indices": 3,
+      "material": 0,
+      "targets": [{{"POSITION": 4}}]
+    }}],
+    "weights": [0.75],
+    "extras": {{"targetNames": ["Lift"]}}
+  }}],
+  "materials": [{{"normalTexture": {{"index": 0, "scale": 0.5}}}}],
+  "textures": [{{"source": 0}}],
+  "images": [{{"uri": "data:image/png;base64,{image}"}}],
+  "animations": [{{"name": "Raise", "channels": [{{"sampler": 0, "target": {{"node": 0, "path": "weights"}}}}],
+    "samplers": [{{"input": 5, "output": 6, "interpolation": "LINEAR"}}]}}],
+  "buffers": [{{"byteLength": {length}, "uri": "data:application/octet-stream;base64,{uri}"}}],
+  "bufferViews": [
+    {{"buffer": 0, "byteOffset": 0, "byteLength": 36}},
+    {{"buffer": 0, "byteOffset": 36, "byteLength": 36}},
+    {{"buffer": 0, "byteOffset": 72, "byteLength": 24}},
+    {{"buffer": 0, "byteOffset": 96, "byteLength": 6}},
+    {{"buffer": 0, "byteOffset": 104, "byteLength": 36}},
+    {{"buffer": 0, "byteOffset": 140, "byteLength": 8}},
+    {{"buffer": 0, "byteOffset": 148, "byteLength": 8}}
+  ],
+  "accessors": [
+    {{"bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3", "min": [0, 0, 0], "max": [1, 1, 0]}},
+    {{"bufferView": 1, "componentType": 5126, "count": 3, "type": "VEC3"}},
+    {{"bufferView": 2, "componentType": 5126, "count": 3, "type": "VEC2"}},
+    {{"bufferView": 3, "componentType": 5123, "count": 3, "type": "SCALAR"}},
+    {{"bufferView": 4, "componentType": 5126, "count": 3, "type": "VEC3", "min": [0, 0, 0], "max": [0, 0, 1]}},
+    {{"bufferView": 5, "componentType": 5126, "count": 2, "type": "SCALAR", "min": [0], "max": [1]}},
+    {{"bufferView": 6, "componentType": 5126, "count": 2, "type": "SCALAR"}}
+  ]
+}}"#,
+            length = bytes.len(),
+        )
+        .into_bytes()
+    }
+
+    #[test]
+    fn morph_targets_their_weights_and_normal_maps_are_read() {
+        let model = GltfModel::from_slice(
+            &morphed_triangle(),
+            Path::new("triangle.gltf"),
+            &GltfSceneSelector::Default,
+        )
+        .unwrap();
+        let node = &model.nodes[0];
+        assert_eq!(node.morph_targets, ["Lift"]);
+        // The node's weights win over the mesh's.
+        assert_eq!(node.weights, [0.25]);
+        assert_eq!(model.animations.weights, [vec![0.25]]);
+        let surface = node.primitives[0].mesh.surface.as_deref().unwrap();
+        assert_eq!(surface.morph_targets.len(), 1);
+        assert_eq!(surface.morph_targets[0].positions[1], [0.0, 0.0, 1.0]);
+        assert!(surface.morph_targets[0].normals.is_none());
+        // The normal map reads the mesh's UVs, with MikkTSpace's tangents:
+        // along x, where u grows, their bitangents along y, up the image.
+        let map = surface.normal_map.as_ref().unwrap();
+        assert_eq!(map.scale, 0.5);
+        assert_eq!(map.texture.image.data.data(), [128, 128, 255, 255]);
+        for [x, y, z, w] in &map.tangents {
+            assert!((x - 1.0).abs() < 1e-6 && y.abs() < 1e-6 && z.abs() < 1e-6);
+            assert_eq!(*w, 1.0);
+        }
+        // The box holds the corner the node's weight raises.
+        assert!(
+            (model.bounds.max.z - 0.25).abs() < 1e-9,
+            "{:?}",
+            model.bounds
+        );
+        // The animation takes the weight from 0 to 1 in a second.
+        assert_eq!(model.clips(), [("Raise".to_owned(), 1.0)]);
+        assert_eq!(model.animations.morphed_nodes(0), [0]);
+        assert!(model.animations.animated_nodes(0).is_empty());
+        let mut weights = model.animations.weights.clone();
+        model.animations.sample_weights(0, 0.5, &mut weights);
+        assert_eq!(weights, [vec![0.5]]);
+    }
+
+    #[test]
+    fn weights_channels_hold_their_ends_and_interpolate_between_keys() {
+        let channel = |interpolation, values: Vec<f64>| GltfWeightsChannel {
+            node: 0,
+            interpolation,
+            times: vec![0.0, 1.0],
+            values,
+            count: 2,
+        };
+        let linear = channel(ChannelInterpolation::Linear, vec![0.0, 1.0, 1.0, 0.0]);
+        let mut weights = [9.0; 2];
+        linear.sample(-1.0, &mut weights);
+        assert_eq!(weights, [0.0, 1.0]);
+        linear.sample(0.25, &mut weights);
+        assert_eq!(weights, [0.25, 0.75]);
+        linear.sample(2.0, &mut weights);
+        assert_eq!(weights, [1.0, 0.0]);
+        let step = channel(ChannelInterpolation::Step, vec![0.0, 1.0, 1.0, 0.0]);
+        step.sample(0.99, &mut weights);
+        assert_eq!(weights, [0.0, 1.0]);
+        // Flat tangents: an ease between the values.
+        let spline = channel(
+            ChannelInterpolation::CubicSpline,
+            vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
+        );
+        spline.sample(0.5, &mut weights);
+        assert!((weights[0] - 0.5).abs() < 1e-12 && (weights[1] - 0.5).abs() < 1e-12);
+        spline.sample(0.25, &mut weights);
+        assert!(weights[0] < 0.25 && weights[1] > 0.75);
     }
 
     #[test]

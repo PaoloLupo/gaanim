@@ -549,6 +549,16 @@ title = "glTF models"
 description = "A glTF model imported with scene.media.gltf: its rest pose, its animations played one after another with fades, and loops, speeds and reversed plays."
 
 [[example]]
+path = "3d/morph_targets_3d.py"
+title = "glTF morph targets"
+description = "A glTF model's morph targets, its shape keys: weights set with morph, mixed and pushed past either end, animated with animate.morph, and moved by the file's own animations."
+
+[[example]]
+path = "3d/normal_maps_3d.py"
+title = "glTF normal maps"
+description = "A flat brick panel whose normal map gives it the relief of its bricks under a passing light and as it turns, beside the same panel without the map."
+
+[[example]]
 path = "3d/glow_3d.py"
 title = "Glow on 3D content"
 description = "A halo around what the camera sees of a sphere, a 3D line and a walking glTF model, grown and faded with animate.glow, and hidden where a solid in front covers it."

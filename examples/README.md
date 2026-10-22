@@ -233,6 +233,8 @@ Primitives, arrows and tubes, extrusion, axonometric drawings and 3D axes.
 | [Shapes 3d](3d/shapes_3d.py) | Tori, arrows between two points, tubes along open, creased and closed paths, flat sheets of text, equations and shapes, and lit lines between points or the drawables they follow. |
 | [2D drawables in 3D](3d/drawables_in_3d.py) | Text, equations and shapes placed in the 3D world with in_3d(): turned, written, tilted by perspective, hidden by meshes and lit, beside billboard(). |
 | [glTF models](3d/models_3d.py) | A glTF model imported with scene.media.gltf: its rest pose, its animations played one after another with fades, and loops, speeds and reversed plays. |
+| [glTF morph targets](3d/morph_targets_3d.py) | A glTF model's morph targets, its shape keys: weights set with morph, mixed and pushed past either end, animated with animate.morph, and moved by the file's own animations. |
+| [glTF normal maps](3d/normal_maps_3d.py) | A flat brick panel whose normal map gives it the relief of its bricks under a passing light and as it turns, beside the same panel without the map. |
 | [Glow on 3D content](3d/glow_3d.py) | A halo around what the camera sees of a sphere, a 3D line and a walking glTF model, grown and faded with animate.glow, and hidden where a solid in front covers it. |
 | [Shadows and blurs on 3D content](3d/soft_effects_3d.py) | Drop shadows cast by a sphere and by a text placed in 3D, a blurred cube that the timeline sharpens, and a blurred ring that a sharp solid in front of it hides. |
 | [Images and Lottie in 3D](3d/media_in_3d.py) | An image and a Lottie scene placed in the 3D world with in_3d(), and an image kept facing the camera with billboard(), each hidden pixel by pixel by a ball passing in front. |

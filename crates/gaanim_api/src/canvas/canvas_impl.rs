@@ -1560,6 +1560,7 @@ fn animation_channels(anim: &Anim) -> Vec<String> {
             (properties.glow.is_some(), "glow"),
             (properties.blur.is_some(), "blur"),
             (properties.shadow.is_some(), "shadow"),
+            (!properties.morph.is_empty(), "morph"),
         ] {
             if present {
                 channels.push(format!("{prefix}{name}"));
@@ -5072,20 +5073,30 @@ impl SceneModel {
         let mut node_ids = vec![None; count];
         let mut parts = HashMap::new();
         let mut skins = Vec::new();
+        let mut morphs = Vec::new();
+        let mut morph_targets = Vec::new();
         // Children come after their parents: they are built first.
         for index in (0..count).rev() {
             let node = &model.nodes[index];
             let mut members = Vec::new();
+            let mut morphed = Vec::new();
+            let weights: Arc<[f32]> = node.weights.iter().map(|weight| *weight as f32).collect();
             for primitive in &node.primitives {
                 let handle =
                     self.spawn_registered(SpawnKind::Primitive3D(primitive.mesh.clone()), false);
-                let skinned = primitive
-                    .mesh
-                    .surface
-                    .as_ref()
-                    .is_some_and(|surface| surface.skin.is_some());
+                let surface = primitive.mesh.surface.as_ref();
+                let skinned = surface.is_some_and(|surface| surface.skin.is_some());
                 if skinned && let Some((joints, bind)) = node.skin.map(|skin| &skin_data[skin]) {
                     skins.push((handle.id, Arc::clone(joints), Arc::clone(bind)));
+                }
+                if surface.is_some_and(|surface| !surface.morph_targets.is_empty()) {
+                    handle
+                        .spec
+                        .lock()
+                        .expect("glTF primitive spec poisoned")
+                        .morph_weights = Some(Arc::clone(&weights));
+                    morphs.push((handle.id, index));
+                    morphed.push(handle.clone());
                 }
                 members.push(handle);
             }
@@ -5110,6 +5121,16 @@ impl SceneModel {
                 .lock()
                 .expect("glTF node spec poisoned")
                 .gltf_pose = Some(node.rest);
+            let handle = if morphed.is_empty() {
+                handle
+            } else {
+                let targets = Arc::new(super::drawable::GltfMorphTargets {
+                    names: node.morph_targets.iter().cloned().collect(),
+                    primitives: morphed,
+                });
+                morph_targets.push(Arc::clone(&targets));
+                handle.with_morph_targets(vec![targets])
+            };
             parts.insert(node.name.clone(), handle.clone());
             node_ids[index] = Some(handle.id);
             handles[index] = Some(handle);
@@ -5133,8 +5154,13 @@ impl SceneModel {
             Some(crate::gltf::GltfRigSpec {
                 nodes: node_ids.into_iter().flatten().collect(),
                 skins,
+                morphs,
             });
-        Ok(root.with_gltf(parts, Arc::clone(&model.animations)))
+        // The model's nodes, as the file lists them.
+        morph_targets.reverse();
+        Ok(root
+            .with_gltf(parts, Arc::clone(&model.animations))
+            .with_morph_targets(morph_targets))
     }
 
     /// Load an SVG as an animatable group of resolved vector paths.

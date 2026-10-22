@@ -15,8 +15,9 @@ instalar una versión nueva, sigue
 
 Sin publicar. Una malla 3D se transforma en otra con `animate.transform_to`,
 `points_3d` e `instances` dibujan miles de puntos o copias de una malla
-como un solo objeto, y las imágenes, las escenas Lottie, las sombras y los
-desenfoques también viven en el mundo 3D.
+como un solo objeto, las imágenes, las escenas Lottie, las sombras y los
+desenfoques también viven en el mundo 3D, y los modelos glTF traen sus
+morph targets y sus mapas de normales.
 
 == Morph entre mallas 3D
 
@@ -85,13 +86,33 @@ desenfoques también viven en el mundo 3D.
   distintos los fotogramas que recompone: los encuadra con la misma
   colocación que guarda el paquete, como al grabarlos.
 
+== Morph targets y mapas de normales de glTF
+
+- `scene.media.gltf(...)` importa los morph targets de un modelo (las shape
+  keys de Blender) con sus nombres y sus pesos por defecto, y las
+  animaciones del archivo que mueven esos pesos. Antes se ignoraban.
+- `morph_targets()` da sus nombres, `morph("Squash", 0.4)` fija un peso, en
+  un nodo o en todos los nodos del modelo que tengan ese morph target, y
+  `animate.morph("Squash", 1.0)` lo anima y se combina con otros destinos.
+  Ver #link("/referencia/medios/#modelos-gltf")[Medios].
+- El pase 3D sube los morph targets una vez: de un fotograma a otro solo
+  cambian los pesos, también en el paquete `.gaanim`.
+- Los mapas de normales se importan con las tangentes del archivo o, si no
+  las trae, con las de MikkTSpace, como las calculan Blender y three.js.
+- Nuevos ejemplos, `3d/morph_targets_3d` y `3d/normal_maps_3d`, con sus
+  modelos generados por `tools/generate_gltf_samples.py`.
+
 == Al actualizar
 
-- Los paquetes `.gaanim` pasan al formato 10, que guarda los morphs 3D, las
-  copias de mallas, las imágenes de los objetos en el mundo 3D y la sombra y
-  el desenfoque de los objetos 3D. Gaanim sigue abriendo los de formato 5 a
-  9; un Gaanim anterior no abre los nuevos, así que actualiza los
-  reproductores que los publican.
+- Los paquetes `.gaanim` pasan al formato 11, que guarda los morphs 3D, las
+  copias de mallas, las imágenes de los objetos en el mundo 3D, la sombra y
+  el desenfoque de los objetos 3D y los morph targets y mapas de normales de
+  los modelos glTF. Gaanim sigue abriendo los de formato 5 a 10; un Gaanim
+  anterior no abre los nuevos, así que actualiza los reproductores que los
+  publican.
+- Un modelo glTF con morph targets o mapas de normales se ve ahora como en
+  Blender: antes se dibujaba con la malla de reposo y las normales de sus
+  vértices.
 - Una imagen, una escena Lottie, una sombra, un brillo o un desenfoque
   dentro de `.in_3d()` ya no se omiten: revisa las escenas que contaban con
   ello.

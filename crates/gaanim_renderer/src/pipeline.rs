@@ -4251,6 +4251,7 @@ type ThreeDData = (
         Option<&'static gaanim_scene::BillboardPlane>,
         Option<&'static gaanim_scene::SkinPalette>,
         Option<&'static gaanim_scene::MeshInstances>,
+        Option<&'static gaanim_scene::MorphWeights>,
     ),
 );
 /// 3D primitives, and 2D drawables placed in the 3D world.
@@ -4317,6 +4318,7 @@ type ThreeDItem<'a> = (
         Option<&'a gaanim_scene::BillboardPlane>,
         Option<&'a gaanim_scene::SkinPalette>,
         Option<&'a gaanim_scene::MeshInstances>,
+        Option<&'a gaanim_scene::MorphWeights>,
     ),
 );
 
@@ -4334,7 +4336,7 @@ fn three_d_source<'a>(
         stroke,
         source,
         fill,
-        (in_world, billboard, palette, instances),
+        (in_world, billboard, palette, instances, morph),
     ): ThreeDItem<'a>,
 ) -> ThreeDSource<'a> {
     // A line revealing part of its source draws the source over that part:
@@ -4370,6 +4372,7 @@ fn three_d_source<'a>(
             shadow: None,
             blur: None,
             instances,
+            morph: morph.map(|morph| &morph.0),
         },
         hud,
         exempt,
@@ -4486,6 +4489,8 @@ pub struct CapturedThreeDSource {
     pub fill: Option<Arc<gaanim_scene::PlaneFillData>>,
     /// The matrices of a skinned mesh's joints this frame.
     pub joints: Option<Arc<[[f32; 16]]>>,
+    /// The weights of a mesh's morph targets this frame.
+    pub morph: Option<Arc<[f32]>>,
     /// The glow of the drawable or of the group that holds it.
     pub glow: Option<crate::effects::Glow>,
     /// Its drop shadow, found as its glow is.
@@ -4567,6 +4572,7 @@ fn captured_gpu_three_d(
                     shadow: source.shadow.clone(),
                     blur: source.blur,
                     instances: source.instances.as_ref(),
+                    morph: source.morph.as_ref(),
                 },
                 source.composition.clone(),
             )
@@ -4907,6 +4913,7 @@ fn three_d_elements<'a>(
                     shadow: content.shadow.clone(),
                     blur: content.blur,
                     instances: content.instances.cloned(),
+                    morph: content.morph.cloned(),
                     composition: composition.clone(),
                 },
             )

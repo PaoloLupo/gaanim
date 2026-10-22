@@ -2328,6 +2328,21 @@ class Anim:
             scene.play(orb.animate.glow(CYAN, radius=0.5, intensity=2.0).repeat(3, yoyo=True))
         """
         ...
+    def morph(self, name: str, weight: float) -> Anim:
+        """Animate the weight of the morph target ``name`` of a glTF node, or of every node of a model that has one by that name.
+
+        At 0 the mesh shows as modelled and at 1 the target in full; weights
+        past 1 or below 0 push it further, or the other way. Other weights
+        keep theirs, and it combines with other property targets. Only the
+        weights change from frame to frame: the targets upload once. An
+        unknown name raises ``KeyError``; a drawable without morph targets,
+        ``TypeError``; a weight that is not finite, ``ValueError``.
+
+        Example:
+            blob = scene.media.gltf("Blob.glb")
+            scene.play(blob.animate.morph("Spikes", 1.0).rotate_by_3d("y", 1.2))
+        """
+        ...
     def blur(self, sigma: float = 0.04) -> Anim:
         """Animate the blur to ``sigma``; ``0`` ends sharp, which makes a blur-in.
 
@@ -3811,6 +3826,34 @@ class Drawable:
         ...
 
     def parts(self) -> tuple[str, ...]: ...
+    def morph_targets(self) -> tuple[str, ...]:
+        """The names of the morph targets of a glTF node's mesh, or of all the nodes of a model, each once.
+
+        Blender's shape keys export as morph targets, named as in Blender; a
+        target without a name is ``target<index>``. Empty for drawables
+        without morph targets.
+
+        Example:
+            blob = scene.media.gltf("Blob.glb")
+            blob.morph_targets()  # ("Squash", "Spikes", "Lean")
+        """
+        ...
+    def morph(self, name: str, weight: float) -> Self:
+        """Set the weight of the morph target ``name`` of a glTF node, or of every node of a model that has one by that name.
+
+        At 0 the mesh shows as modelled and at 1 the target in full. Before
+        the scene shows the model, it is the weight the model starts with,
+        in place of the file's; afterwards, a cut at the cursor. A model's
+        animation that moves the same weights starts from them and sets them
+        while it plays, and a later ``morph`` starts where it leaves them.
+        ``animate.morph`` animates the weight. An unknown name raises
+        ``KeyError``; a drawable without morph targets, ``TypeError``; a
+        weight that is not finite, ``ValueError``.
+
+        Example:
+            blob = scene.media.gltf("Blob.glb").morph("Squash", 0.4)
+        """
+        ...
     def animations(self) -> dict[str, float]:
         """The animations of a glTF model, in the file's order, with their durations in seconds.
 
@@ -10586,12 +10629,16 @@ class MediaLibrary:
         scenes by name or index; by default, its default scene.
 
         Imported: triangles, normals, vertex colors, the metallic-roughness
-        material's factors and base-color texture, emission, unlit materials,
-        alpha modes (opaque, cut out at ``alphaCutoff``, blended), two-sided
-        materials, skins of up to 256 joints and animations of node
-        translations, rotations and scales. Left out: morph targets, normal
-        and occlusion maps, texture transforms, the file's cameras and
-        lights, and the outlines of ``Material3D.outlined``. Textures are scaled down to 2048 pixels on their longest side.
+        material's factors and base-color texture, normal maps (with the
+        file's tangents, or MikkTSpace's), emission, unlit materials, alpha
+        modes (opaque, cut out at ``alphaCutoff``, blended), two-sided
+        materials, skins of up to 256 joints, morph targets with their
+        default weights and names (``morph_targets()``, ``morph()``), and
+        animations of node translations, rotations, scales and morph target
+        weights. Left out: occlusion and metallic-roughness maps, texture
+        transforms, a normal map read through other texture coordinates than
+        the base-color texture's, the file's cameras and lights, and the
+        outlines of ``Material3D.outlined``. Textures are scaled down to 2048 pixels on their longest side.
         A missing file raises ``FileNotFoundError``; an unknown scene,
         ``ValueError``; a file that is not glTF, ``RuntimeError``.
 

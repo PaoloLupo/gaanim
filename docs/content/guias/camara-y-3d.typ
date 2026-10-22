@@ -527,7 +527,11 @@ scene.render()
 Los esqueletos se deforman en la GPU: la malla se sube una vez y en cada
 fotograma solo cambian las matrices de sus huesos, así que un personaje
 animado cuesta lo mismo que una malla quieta y un paquete `.gaanim` guarda
-unas decenas de matrices por fotograma. La pose sale del tiempo, de modo que
+unas decenas de matrices por fotograma. Los morph targets, las shape keys de
+Blender, igual: sus desplazamientos se suben una vez y en cada fotograma solo
+cambian sus pesos, que mueven las animaciones del archivo,
+`morph("Squash", 0.4)` y `animate.morph("Squash", 1.0)` (ver el ejemplo
+`3d/morph_targets_3d`). La pose sale del tiempo, de modo que
 los saltos de la línea de tiempo y las capturas de `--diff` son exactos. Las
 escenas sin modelos no cargan nada de esto: sus mallas se dibujan como
 siempre. El detalle de lo que se importa está en

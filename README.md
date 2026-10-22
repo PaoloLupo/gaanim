@@ -204,8 +204,9 @@ El 3D se rasteriza en la GPU, con búfer de profundidad, antialiasing MSAA y luz
 calculada en cada píxel, y Vello compone el resultado debajo del contenido 2D:
 el coste de un fotograma depende de cuántos objetos 3D hay, no de cuántos
 triángulos tienen. No hay sombras. `scene.media.gltf(...)` importa modelos
-glTF con sus materiales, texturas, esqueletos y animaciones, que se deforman en
-la GPU; consulta `examples/3d/models_3d.py`.
+glTF con sus materiales, texturas, mapas de normales, esqueletos, morph targets
+y animaciones, que se deforman en la GPU; consulta `examples/3d/models_3d.py`,
+`examples/3d/morph_targets_3d.py` y `examples/3d/normal_maps_3d.py`.
 
 Las escenas 2D y 3D abren con el modo interactivo desactivado. Cuando el usuario
 pulsa `I` o usa **Interactivo: ON/OFF** en Overlays (`O`), la cámara interactiva

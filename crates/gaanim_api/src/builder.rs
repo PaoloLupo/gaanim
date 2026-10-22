@@ -1203,6 +1203,9 @@ pub struct SceneBuilder<'w, 's, 'a> {
     /// Drawables that draw copies of their mesh at many points, and the
     /// copies they draw when the next animation starts.
     pub(crate) instanced: HashMap<ObjectId, std::sync::Arc<gaanim_scene::MeshCopies>>,
+    /// The morph target weights of imported models' primitives, as the
+    /// latest `morph` animation or animation of their model leaves them.
+    pub(crate) morph_weights: HashMap<ObjectId, std::sync::Arc<[f32]>>,
     /// Objects a clip mask cuts: their content may leave their box.
     pub(crate) clipped: HashSet<ObjectId>,
     /// Extra glyph tracking of Text roots set by `tracking(...)`, in scene units.
@@ -1349,6 +1352,7 @@ pub(crate) struct SceneBuilderState {
     lines_3d: HashSet<ObjectId>,
     morph_meshes: HashMap<ObjectId, std::sync::Arc<TriangleMeshData>>,
     instanced: HashMap<ObjectId, std::sync::Arc<gaanim_scene::MeshCopies>>,
+    morph_weights: HashMap<ObjectId, std::sync::Arc<[f32]>>,
     clipped: HashSet<ObjectId>,
     text_tracking: HashMap<ObjectId, f64>,
     motion_blur_windows: Vec<(f64, f64, gaanim_renderer::effects::MotionBlur)>,
@@ -1408,6 +1412,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             lines_3d: self.lines_3d.clone(),
             morph_meshes: self.morph_meshes.clone(),
             instanced: self.instanced.clone(),
+            morph_weights: self.morph_weights.clone(),
             clipped: self.clipped.clone(),
             text_tracking: self.text_tracking.clone(),
             text_paths: self.text_paths.clone(),
@@ -1468,6 +1473,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             lines_3d,
             morph_meshes,
             instanced,
+            morph_weights,
             clipped,
             text_tracking,
             text_paths,
@@ -1532,6 +1538,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             morph_meshes,
             morph_mesh_ids: HashSet::new(),
             instanced,
+            morph_weights,
             clipped,
             text_tracking,
             text_paths,
@@ -2040,6 +2047,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             morph_meshes: HashMap::new(),
             morph_mesh_ids: HashSet::new(),
             instanced: HashMap::new(),
+            morph_weights: HashMap::new(),
             clipped: HashSet::new(),
             text_tracking: HashMap::new(),
             text_paths: HashMap::new(),
@@ -2287,6 +2295,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             AnimationType::ArcSweepTo { .. } => "ArcSweep",
             AnimationType::PathTrim { .. } => "Trim",
             AnimationType::EffectsTo { .. } => "Effects",
+            AnimationType::MorphWeightsTo { .. } => "MorphWeights",
             AnimationType::DashOffsetTo { .. } => "DashOffset",
             AnimationType::PathPointsTo { .. } => "Points",
             AnimationType::PivotTo { .. } => "Pivot",
@@ -3697,6 +3706,11 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             if let Some((from, to)) = properties.count {
                 channels.push(AnimationType::CountTo { from, to });
             }
+            if !properties.morph.is_empty() {
+                channels.push(AnimationType::MorphWeightsTo {
+                    weights: properties.morph.clone(),
+                });
+            }
             if properties.glow.is_some() || properties.blur.is_some() || properties.shadow.is_some()
             {
                 channels.push(AnimationType::EffectsTo {
@@ -4076,6 +4090,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         }
         if matches!(anim.anim_type, AnimationType::EffectsTo { .. }) {
             self.play_effects_internal(anim, track);
+            return;
+        }
+        if matches!(anim.anim_type, AnimationType::MorphWeightsTo { .. }) {
+            self.play_morph_internal(anim, track);
             return;
         }
         if matches!(anim.anim_type, AnimationType::DashOffsetTo { .. }) {
@@ -4468,6 +4486,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             | AnimationType::CameraViewPop { .. }
             | AnimationType::PathTrim { .. }
             | AnimationType::EffectsTo { .. }
+            | AnimationType::MorphWeightsTo { .. }
             | AnimationType::DashOffsetTo { .. }
             | AnimationType::PathPointsTo { .. }
             | AnimationType::PivotTo { .. }
@@ -7409,6 +7428,52 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         }
     }
 
+    /// A `morph` animation: a clip per primitive, from the weights its
+    /// morph targets have to those it sets.
+    fn play_morph_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
+        let AnimationType::MorphWeightsTo { weights } = anim.anim_type else {
+            return;
+        };
+        let mut primitives: Vec<ObjectId> = Vec::new();
+        for (primitive, _, _) in &weights {
+            if !primitives.contains(primitive) {
+                primitives.push(*primitive);
+            }
+        }
+        for primitive in primitives {
+            let Some(from) = self.morph_weights.get(&primitive).cloned() else {
+                continue;
+            };
+            let mut to = from.to_vec();
+            for (_, target, weight) in weights.iter().filter(|(of, ..)| *of == primitive) {
+                if let Some(slot) = to.get_mut(*target) {
+                    *slot = *weight;
+                }
+            }
+            let to: std::sync::Arc<[f32]> = to.into();
+            self.morph_weights
+                .insert(primitive, std::sync::Arc::clone(&to));
+            let declared = self
+                .gltf_poses
+                .declared_weights(primitive)
+                .unwrap_or_else(|| std::sync::Arc::clone(&from));
+            self.timeline.add_clip(
+                parent_track,
+                self.current_time + anim.delay,
+                anim.duration,
+                ClipPayload::Animation(AnimationSpec {
+                    target: primitive,
+                    lens: PropertyLensSpec::Dynamic(gaanim_animation::tween::DynamicLens(
+                        std::sync::Arc::new(crate::gltf::MorphWeightsLens { declared, from, to }),
+                    )),
+                    rate_func: anim.rate_func.clone(),
+                    delay: 0.0,
+                    label: self.current_label.clone(),
+                }),
+            );
+        }
+    }
+
     /// A play of an imported model's animation: one clip on the model's
     /// root, which fades from the model's previous play.
     fn play_gltf_animation_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
@@ -7435,9 +7500,43 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             offset: start_time,
         };
         let previous = self.gltf_plays.insert(anim.target, play.clone());
-        let lens = std::sync::Arc::new(crate::gltf::GltfClipLens::new(
-            animations, play, previous, transition,
-        ));
+        // The play starts from the weights its primitives have, and the
+        // model shows those it was declared with before its first play.
+        let morphs = self.gltf_poses.morphs_of(anim.target);
+        let mut declared = animations.weights.clone();
+        let mut rest = animations.weights.clone();
+        for (primitive, node) in morphs.iter() {
+            let as_f64 = |weights: &[f32]| weights.iter().map(|w| f64::from(*w)).collect();
+            if let (Some(weights), Some(slot)) = (
+                self.gltf_poses.declared_weights(*primitive),
+                declared.get_mut(*node),
+            ) {
+                *slot = as_f64(&weights);
+            }
+            if let (Some(weights), Some(slot)) =
+                (self.morph_weights.get(primitive), rest.get_mut(*node))
+            {
+                *slot = as_f64(weights);
+            }
+        }
+        let lens = std::sync::Arc::new(
+            crate::gltf::GltfClipLens::new(animations, play, previous, transition)
+                .with_weights(declared, rest),
+        );
+        // A `morph` after the play starts from the weights it ends on.
+        if !morphs.is_empty() {
+            let end = lens.weights(anim.duration);
+            for (primitive, node) in morphs.iter() {
+                if lens.weighs(*node)
+                    && let Some(weights) = end.get(*node)
+                {
+                    self.morph_weights.insert(
+                        *primitive,
+                        weights.iter().map(|weight| *weight as f32).collect(),
+                    );
+                }
+            }
+        }
         self.gltf_poses.played(
             anim.target,
             start,

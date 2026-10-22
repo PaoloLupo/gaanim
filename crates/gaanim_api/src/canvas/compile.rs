@@ -2705,6 +2705,18 @@ impl SceneModel {
             .filter_map(|id| id_map.get(id).copied())
             .collect();
         builder.gltf_poses.rigged(root, compiled);
+        // Its primitives compiled before it, with the weights they were
+        // declared with.
+        let morphed = rig
+            .morphs
+            .iter()
+            .filter_map(|(primitive, node)| {
+                let primitive = *id_map.get(primitive)?;
+                let declared = builder.morph_weights.get(&primitive)?;
+                Some((primitive, *node, Arc::clone(declared)))
+            })
+            .collect();
+        builder.gltf_poses.morphed(root, morphed);
         for (mesh, joints, inverse_bind) in &rig.skins {
             let Some(entity) = entity_of(builder, mesh) else {
                 continue;
@@ -2724,12 +2736,18 @@ impl SceneModel {
                 gaanim_scene::SkinPalette::default(),
             ));
         }
+        let morphs: Vec<(Entity, usize)> = rig
+            .morphs
+            .iter()
+            .filter_map(|(primitive, node)| Some((entity_of(builder, primitive)?, *node)))
+            .collect();
         if let Some(state) = builder.states.get(root) {
             builder
                 .commands
                 .entity(state.entity)
                 .insert(crate::gltf::GltfRig {
                     nodes: nodes.into(),
+                    morphs: morphs.into(),
                 });
         }
     }
@@ -10049,6 +10067,9 @@ impl SceneModel {
                         *native = *id_map.get(native).unwrap_or(native);
                     }
                 }
+                for (primitive, _, _) in &mut properties.morph {
+                    *primitive = *id_map.get(primitive)?;
+                }
                 AnimationType::Properties(properties)
             }
             AnimationType::PropertySource(source) => {
@@ -11880,6 +11901,17 @@ impl SceneModel {
                 let mref = builder.spawn_triangle_mesh_data(mesh);
                 if let Some(mesh) = morphed {
                     builder.morph_meshes.insert(mref.id, mesh);
+                }
+                // An imported primitive with morph targets starts with the
+                // weights it was declared with.
+                if let Some(weights) = &spec.morph_weights
+                    && let Some(state) = builder.states.get(mref.id)
+                {
+                    builder
+                        .commands
+                        .entity(state.entity)
+                        .insert(gaanim_scene::MorphWeights(Arc::clone(weights)));
+                    builder.morph_weights.insert(mref.id, Arc::clone(weights));
                 }
                 if let Some((copies, bounds)) = copies
                     && let Some(state) = builder.states.get_mut(mref.id)

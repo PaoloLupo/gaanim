@@ -100,9 +100,11 @@ pub const FORMAT: &str = "gaanim-bundle";
 /// version 7 (Gaanim 0.16) stored each frame of a 3D morph that way too,
 /// where version 8 (development builds of Gaanim 0.17) stores the two
 /// meshes a morph blends once and each frame as how far between them it
-/// lies; version 9 adds the copies of meshes drawn at many points, and
-/// version 10 the images that fill outlines in the 3D world.
-pub const VERSION: u32 = 10;
+/// lies; version 9 adds the copies of meshes drawn at many points, version
+/// 10 the images that fill outlines in the 3D world and the shadows and
+/// blurs of 3D content, and version 11 normal maps and morph targets on
+/// imported models' meshes and the weights of those targets each frame.
+pub const VERSION: u32 = 11;
 /// Oldest version this build still reads: bundles published in other pages
 /// keep playing when the hosted players move to a newer version.
 pub const OLDEST_READABLE: u32 = 5;
@@ -2349,6 +2351,7 @@ mod tests {
                 line_range: None,
                 fill: Some(Arc::new(fill.clone())),
                 joints: None,
+                morph: None,
                 glow: None,
                 shadow: None,
                 blur: None,
@@ -2436,6 +2439,7 @@ mod tests {
                 line_range: None,
                 fill: None,
                 joints: None,
+                morph: None,
                 glow,
                 shadow,
                 blur,
@@ -2508,6 +2512,7 @@ mod tests {
                 line_range: None,
                 fill: None,
                 joints: None,
+                morph: None,
                 glow: None,
                 shadow: None,
                 blur: None,
@@ -2565,11 +2570,11 @@ mod tests {
         }
     }
 
-    /// An imported model's mesh comes back with its texture, alpha mode,
-    /// sides and skin weights, stored once, and each frame with the palette
-    /// of its joints.
+    /// An imported model's mesh comes back with its texture, normal map,
+    /// alpha mode, sides, skin weights and morph targets, stored once, and
+    /// each frame with the palette of its joints and its targets' weights.
     #[test]
-    fn skinned_textured_meshes_and_their_palettes_round_trip() {
+    fn imported_meshes_and_their_palettes_and_weights_round_trip() {
         use gaanim_core::peniko::{Blob, ImageAlphaType, ImageData, ImageFormat};
         let texture = gaanim_scene::MeshTexture {
             image: ImageData {
@@ -2595,6 +2600,25 @@ mod tests {
             material: Some(gaanim_scene::Material3D::default()),
             surface: Some(Arc::new(gaanim_scene::MeshSurface {
                 texture: Some(texture),
+                normal_map: Some(gaanim_scene::NormalMap {
+                    texture: gaanim_scene::MeshTexture {
+                        image: ImageData {
+                            data: Blob::from(vec![128, 128, 255, 255]),
+                            format: ImageFormat::Rgba8,
+                            alpha_type: ImageAlphaType::Alpha,
+                            width: 1,
+                            height: 1,
+                        },
+                        wrap: [gaanim_scene::TextureWrap::Repeat; 2],
+                        nearest: false,
+                    },
+                    scale: 0.75,
+                    tangents: vec![
+                        [1.0, 0.0, 0.0, 1.0],
+                        [0.0, 1.0, 0.0, -1.0],
+                        [1.0, 0.0, 0.0, 1.0],
+                    ],
+                }),
                 alpha: gaanim_scene::AlphaMode::Mask(0.3),
                 double_sided: true,
                 skin: Some(gaanim_scene::SkinWeights {
@@ -2605,31 +2629,45 @@ mod tests {
                         [0.2, 0.3, 0.5, 0.0],
                     ],
                 }),
+                morph_targets: vec![
+                    gaanim_scene::MorphTarget {
+                        positions: vec![[0.0; 3], [0.5, 0.0, 0.0], [0.0, 0.0, 0.25]],
+                        normals: Some(vec![[0.0, 0.0, 1.0]; 3]),
+                    },
+                    gaanim_scene::MorphTarget {
+                        positions: vec![[0.0, -1.0, 0.0]; 3],
+                        normals: None,
+                    },
+                ],
             })),
             blend: None,
         });
-        let source = |palette: [f32; 16]| gaanim_renderer::pipeline::CapturedThreeDSource {
-            entity: bevy::prelude::Entity::from_raw_u32(1).unwrap(),
-            transform: gaanim_core::glam::DMat4::IDENTITY,
-            opacity: 1.0,
-            mesh: Some(Arc::clone(&mesh)),
-            lines: None,
-            material: mesh.material,
-            line_width: None,
-            line_range: None,
-            fill: None,
-            joints: Some(Arc::from(vec![palette, [1.0; 16]])),
-            glow: None,
-            shadow: None,
-            blur: None,
-            instances: None,
-            composition: gaanim_renderer::pipeline::ThreeDComposition {
-                in_views: true,
-                post_exempt: false,
-                layer: None,
-                transition_side: Default::default(),
-                lineage: Vec::new(),
-            },
+        let weights: [Arc<[f32]>; 2] = [Arc::from([0.0, 1.0]), Arc::from([0.25, 0.5])];
+        let source = |palette: [f32; 16], weights: &Arc<[f32]>| {
+            gaanim_renderer::pipeline::CapturedThreeDSource {
+                entity: bevy::prelude::Entity::from_raw_u32(1).unwrap(),
+                transform: gaanim_core::glam::DMat4::IDENTITY,
+                opacity: 1.0,
+                mesh: Some(Arc::clone(&mesh)),
+                lines: None,
+                material: mesh.material,
+                line_width: None,
+                line_range: None,
+                fill: None,
+                joints: Some(Arc::from(vec![palette, [1.0; 16]])),
+                morph: Some(Arc::clone(weights)),
+                glow: None,
+                shadow: None,
+                blur: None,
+                instances: None,
+                composition: gaanim_renderer::pipeline::ThreeDComposition {
+                    in_views: true,
+                    post_exempt: false,
+                    layer: None,
+                    transition_side: Default::default(),
+                    lineage: Vec::new(),
+                },
+            }
         };
         let identity = gaanim_core::glam::Mat4::IDENTITY.to_cols_array();
         let moved =
@@ -2638,7 +2676,7 @@ mod tests {
         for (index, palette) in [identity, moved].into_iter().enumerate() {
             let mut captured = frame(index as f64 / 60.0);
             captured.capture.three_d = Some(gaanim_renderer::pipeline::CapturedThreeD {
-                sources: vec![source(palette)],
+                sources: vec![source(palette, &weights[index])],
                 ..Default::default()
             });
             writer.push_frame(&captured, [0; 32]).unwrap();
@@ -2677,6 +2715,20 @@ mod tests {
             assert_eq!(back_surface.double_sided, surface.double_sided);
             assert_eq!(back_surface.skin, surface.skin);
             assert_eq!(back.joints.as_deref(), Some(&[palette, [1.0; 16]][..]));
+            let (back_map, map) = (
+                back_surface.normal_map.as_ref().unwrap(),
+                surface.normal_map.as_ref().unwrap(),
+            );
+            assert_eq!(
+                back_map.texture.image.data.data(),
+                map.texture.image.data.data()
+            );
+            assert_eq!(
+                (back_map.scale, &back_map.tangents),
+                (map.scale, &map.tangents)
+            );
+            assert_eq!(back_surface.morph_targets, surface.morph_targets);
+            assert_eq!(back.morph.as_deref(), Some(&weights[index][..]));
         }
     }
 

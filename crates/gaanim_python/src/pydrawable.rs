@@ -499,6 +499,19 @@ impl PyCanvasAnim {
         })
     }
 
+    /// Animate the weight of the morph target `name` of a glTF node's
+    /// mesh, or of every node of a model that has one by that name.
+    fn morph(&self, name: &str, weight: f64) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_native_animation()?;
+        self.require_property_slot("morph")?;
+        self.inner
+            .clone()
+            .morph(name, weight)
+            .map(|inner| Self { inner })
+            .map_err(morph_target_error)
+    }
+
     #[pyo3(signature = (sigma=0.04))]
     fn blur(&self, sigma: f64) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
@@ -2232,6 +2245,22 @@ impl PyBounds {
 /// The Python object a fluent setter returns: the receiver itself (keeping its
 /// class, e.g. a `Readout` with `.number`) when the setter changed this very
 /// drawable, or a new `Drawable` for a different one, such as a part.
+/// A morph target that is not there is a `KeyError`; a drawable without any,
+/// a `TypeError`; a weight that is not a number, a `ValueError`.
+fn morph_target_error(error: gaanim_api::canvas::MorphTargetError) -> PyErr {
+    match error {
+        gaanim_api::canvas::MorphTargetError::Unknown { .. } => {
+            pyo3::exceptions::PyKeyError::new_err(error.to_string())
+        }
+        gaanim_api::canvas::MorphTargetError::NoTargets => {
+            pyo3::exceptions::PyTypeError::new_err(error.to_string())
+        }
+        gaanim_api::canvas::MorphTargetError::InvalidWeight => {
+            PyValueError::new_err(error.to_string())
+        }
+    }
+}
+
 fn same_drawable<'py>(
     slf: &Bound<'py, PyDrawable>,
     result: PyResult<PyDrawable>,
@@ -3403,6 +3432,26 @@ impl PyDrawable {
     fn parts(&self, py: Python<'_>) -> PyResult<Py<PyTuple>> {
         crate::custom::ensure_authoring_allowed()?;
         Ok(PyTuple::new(py, self.0.parts())?.unbind())
+    }
+
+    /// The names of the morph targets of a glTF node's mesh, or of every
+    /// node of a model; empty for other drawables.
+    fn morph_targets(&self, py: Python<'_>) -> PyResult<Py<PyTuple>> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(PyTuple::new(py, self.0.morph_targets())?.unbind())
+    }
+
+    /// Set the weight of the morph target `name` of a glTF node's mesh, or
+    /// of every node of a model that has one by that name.
+    fn morph<'py>(slf: &Bound<'py, Self>, name: &str, weight: f64) -> PyResult<Bound<'py, PyAny>> {
+        crate::custom::ensure_authoring_allowed()?;
+        let result = slf
+            .borrow()
+            .0
+            .morph(name, weight)
+            .map(PyDrawable)
+            .map_err(morph_target_error);
+        same_drawable(slf, result)
     }
 
     /// The animations of an imported glTF model, in the file's order, with

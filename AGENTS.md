@@ -39,9 +39,10 @@ This file guides repository work; model selection belongs to the calling client.
     host that renders frames (canvas, exporter, embed player, offscreen
     previews) prepares those images with `GpuThreeD` before Vello renders.
     There is no Bevy 3D pipeline. glTF models (`gaanim_objects::gltf`) become
-    plain nodes and meshes whose `MeshSurface` adds a texture, alpha mode and
-    skin weights; `ModelPipelines` draws those, built only when a frame first
-    draws one, and each frame only a skin's palette (`SkinPalette`) changes.
+    plain nodes and meshes whose `MeshSurface` adds a texture, a normal map,
+    alpha mode, skin weights and morph targets; `ModelPipelines` draws those,
+    built only when a frame first draws one, and each frame only a skin's
+    palette (`SkinPalette`) and morph weights (`MorphWeights`) change.
     Animations are timeline clips (`gaanim_api::gltf::GltfClipLens`). Glow
     on 3D content is drawn by the same pass (`three_d/glow.rs`): visible
     silhouettes against the opaque depth, blurred and laid into the image,

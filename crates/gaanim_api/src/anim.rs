@@ -134,6 +134,9 @@ pub struct PropertyAnimation {
     pub points: Option<Vec<(f64, f64)>>,
     /// Copies of a repeater shown, `(from, to)`; a fraction fades the last.
     pub count: Option<(f64, f64)>,
+    /// Weights morph targets of imported models' primitives reach: each
+    /// primitive, the index of its target and the weight.
+    pub morph: Vec<(ObjectId, usize, f32)>,
 }
 
 impl PropertyAnimation {
@@ -160,6 +163,7 @@ impl PropertyAnimation {
             && self.dash_offset.is_none()
             && self.points.is_none()
             && self.count.is_none()
+            && self.morph.is_empty()
             && !self.has_effects()
     }
 
@@ -180,6 +184,7 @@ impl PropertyAnimation {
             && self.dash_offset.is_none()
             && self.points.is_none()
             && self.count.is_none()
+            && self.morph.is_empty()
             && !self.has_effects()
     }
 }
@@ -441,6 +446,11 @@ pub enum AnimationType {
         glow: Option<Option<gaanim_renderer::effects::Glow>>,
         blur: Option<Option<gaanim_renderer::effects::GaussianBlur>>,
         shadow: Option<Option<gaanim_renderer::effects::DropShadow>>,
+    },
+    /// Move the weights of imported models' morph targets: each primitive,
+    /// the index of its target and the weight it reaches.
+    MorphWeightsTo {
+        weights: Vec<(ObjectId, usize, f32)>,
     },
     /// Move each vertex of a polygon or polyline straight to its new
     /// position, in the coordinates the shape was declared in.

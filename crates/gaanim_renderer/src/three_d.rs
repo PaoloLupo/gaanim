@@ -107,6 +107,9 @@ pub(crate) struct Content<'a> {
     /// Copies of the mesh drawn instead of it, one at each point (see
     /// [`gaanim_scene::MeshInstances`]).
     pub instances: Option<&'a MeshInstances>,
+    /// The weights of an imported mesh's morph targets (see
+    /// [`gaanim_scene::MorphWeights`]).
+    pub morph: Option<&'a Arc<[f32]>>,
 }
 
 /// Width of 3D lines without a stroke width, as a fraction of the frame's
@@ -173,6 +176,9 @@ const MODEL_VERTEX_BYTES: usize = 32;
 /// Bytes of a skin's palette as a draw binds it: the most joints a skin
 /// moves, a matrix each (`joints` in [`MODEL_SHADER`]).
 const JOINTS_BYTES: usize = gaanim_scene::model::MAX_JOINTS * 64;
+/// Most bytes of what a model's vertices read by index (see
+/// [`model_geometry`]): the storage binding size every device allows.
+const MAX_GEOMETRY_BYTES: usize = 128 << 20;
 /// Where a draw's uniforms keep its lines' half width and shown segments
 /// (`Draw.line` in [`SHADER`]).
 #[cfg(test)]
@@ -248,6 +254,16 @@ struct ModelBuffers {
     texture_digest: u64,
     /// Whether every texel of the texture is opaque.
     opaque_texture: bool,
+    /// The normal map's texels, read in linear light, and their digest.
+    normal_map: Option<MeshTexture>,
+    normal_digest: u64,
+    /// What its vertices read by index (see [`model_geometry`]): tangents
+    /// for the normal map and the morph targets' displacements; empty
+    /// without either. And its digest, computed once.
+    geometry: Vec<u8>,
+    geometry_digest: u64,
+    /// How far each morph target moves a vertex at most, at a weight of one.
+    reach: Vec<f32>,
     alpha: AlphaMode,
     double_sided: bool,
     skinned: bool,
@@ -315,6 +331,9 @@ impl MeshSource {
                 .hash(&mut hasher);
             (model.double_sided, model.skinned).hash(&mut hasher);
             model.cutoff().to_bits().hash(&mut hasher);
+            if model.normal_map.is_some() || !model.geometry.is_empty() {
+                (model.normal_digest, model.geometry_digest).hash(&mut hasher);
+            }
         }
         if let Some(fill) = &self.fill {
             fill.curves.hash(&mut hasher);
@@ -358,6 +377,8 @@ impl MeshSource {
                 (Some(a), Some(b)) => {
                     a.vertices == b.vertices
                         && a.texture == b.texture
+                        && a.normal_map == b.normal_map
+                        && a.geometry == b.geometry
                         && a.alpha == b.alpha
                         && a.double_sided == b.double_sided
                         && a.skinned == b.skinned
@@ -741,33 +762,120 @@ fn model_buffers(mesh: &TriangleMeshData, surface: &gaanim_scene::MeshSurface) -
             .chunks_exact(4)
             .all(|texel| texel[3] == 255)
     });
-    let texture_digest = texture.as_ref().map_or(0, |texture| {
-        // FNV-1a: stable across builds, as the digests recordings keep.
-        let mut digest: u64 = 0xcbf2_9ce4_8422_2325;
-        let mut eat = |bytes: &[u8]| {
-            for byte in bytes {
-                digest = (digest ^ u64::from(*byte)).wrapping_mul(0x0100_0000_01b3);
-            }
-        };
-        eat(&texture.image.width.to_le_bytes());
-        eat(&texture.image.height.to_le_bytes());
-        eat(&[
-            texture.nearest as u8,
-            texture.wrap[0] as u8,
-            texture.wrap[1] as u8,
-        ]);
-        eat(texture.image.data.data());
-        digest
-    });
+    let digest = texture.as_ref().map_or(0, texture_digest);
+    let normal_map = surface
+        .normal_map
+        .as_ref()
+        .filter(|map| uvs.is_some() && map.tangents.len() == count);
+    let (geometry, reach) = model_geometry(surface, normal_map, count);
     ModelBuffers {
         vertices,
         texture,
-        texture_digest,
+        texture_digest: digest,
         opaque_texture,
+        normal_digest: normal_map.map_or(0, |map| texture_digest(&map.texture)),
+        normal_map: normal_map.map(|map| map.texture.clone()),
+        geometry_digest: fnv(FNV_START, &geometry),
+        geometry,
+        reach,
         alpha: surface.alpha,
         double_sided: surface.double_sided,
         skinned: skin.is_some(),
     }
+}
+
+/// Where FNV-1a starts.
+const FNV_START: u64 = 0xcbf2_9ce4_8422_2325;
+
+/// `digest` with `bytes` taken in by FNV-1a, which is stable across builds,
+/// as the digests recordings keep.
+fn fnv(mut digest: u64, bytes: &[u8]) -> u64 {
+    for byte in bytes {
+        digest = (digest ^ u64::from(*byte)).wrapping_mul(0x0100_0000_01b3);
+    }
+    digest
+}
+
+/// A digest of a texture's size, sampling and texels.
+fn texture_digest(texture: &MeshTexture) -> u64 {
+    let mut digest = fnv(FNV_START, &texture.image.width.to_le_bytes());
+    digest = fnv(digest, &texture.image.height.to_le_bytes());
+    digest = fnv(
+        digest,
+        &[
+            texture.nearest as u8,
+            texture.wrap[0] as u8,
+            texture.wrap[1] as u8,
+        ],
+    );
+    fnv(digest, texture.image.data.data())
+}
+
+/// What the vertex shader of a model with `count` vertices reads by vertex
+/// index (`geometry` in [`MODEL_SHADER`]), and how far each of its morph
+/// targets moves a vertex at most: a header, holding `normal_map`'s scale,
+/// 1 when tangents follow, the vertices and the targets; a tangent per
+/// vertex for `normal_map`; then, for each target and vertex, its
+/// displacement and the change of its normal, a row each. Empty with
+/// neither. Targets past [`MAX_GEOMETRY_BYTES`] are left out.
+fn model_geometry(
+    surface: &gaanim_scene::MeshSurface,
+    normal_map: Option<&gaanim_scene::NormalMap>,
+    count: usize,
+) -> (Vec<u8>, Vec<f32>) {
+    let targets: Vec<&gaanim_scene::MorphTarget> = surface
+        .morph_targets
+        .iter()
+        .filter(|target| target.positions.len() == count)
+        .collect();
+    if (normal_map.is_none() && targets.is_empty()) || count == 0 {
+        return (Vec::new(), Vec::new());
+    }
+    let row = 16;
+    let fixed = row * (1 + normal_map.map_or(0, |_| count));
+    let room = MAX_GEOMETRY_BYTES.saturating_sub(fixed) / (count * 2 * row);
+    if targets.len() > room {
+        tracing::warn!(
+            "a mesh of {count} vertices draws the first {room} of its {} morph targets",
+            targets.len()
+        );
+    }
+    let targets = &targets[..targets.len().min(room)];
+    let mut bytes = Vec::with_capacity(fixed + targets.len() * count * 2 * row);
+    push_f32s(
+        &mut bytes,
+        &[
+            normal_map.map_or(0.0, |map| map.scale),
+            f32::from(u8::from(normal_map.is_some())),
+            count as f32,
+            targets.len() as f32,
+        ],
+    );
+    if let Some(map) = normal_map {
+        for tangent in &map.tangents {
+            push_f32s(&mut bytes, tangent);
+        }
+    }
+    let mut reach = Vec::with_capacity(targets.len());
+    for target in targets {
+        let mut farthest = 0.0_f32;
+        for (vertex, moved) in target.positions.iter().enumerate() {
+            let moved = moved.map(|value| if value.is_finite() { value } else { 0.0 });
+            farthest = farthest
+                .max((moved[0] * moved[0] + moved[1] * moved[1] + moved[2] * moved[2]).sqrt());
+            let turned = target
+                .normals
+                .as_ref()
+                .and_then(|normals| normals.get(vertex))
+                .map_or([0.0; 3], |turned| {
+                    turned.map(|value| if value.is_finite() { value } else { 0.0 })
+                });
+            push_f32s(&mut bytes, &[moved[0], moved[1], moved[2], 0.0]);
+            push_f32s(&mut bytes, &[turned[0], turned[1], turned[2], 0.0]);
+        }
+        reach.push(farthest);
+    }
+    (bytes, reach)
 }
 
 /// Center and radius of a sphere around `points`.
@@ -926,6 +1034,9 @@ struct GpuDraw {
     outlined: bool,
     /// A skinned mesh: where its palette starts in the frame's joints.
     joints: Option<u32>,
+    /// A morphed mesh: where its run of targets and weights starts among
+    /// those in the frame's joints, and how many it holds.
+    morph: Option<(u32, u32)>,
     /// A glowing mesh or line: its glow's blur and gain.
     glow: Option<glow::GlowDraw>,
     /// One that casts a drop shadow: its blur, gain and offset.
@@ -955,7 +1066,8 @@ pub struct GpuMeshFrame {
     shadow_size: u32,
     shadow_layers: Arc<[[f32; 16]]>,
     /// The palettes of the skinned draws, each [`JOINTS_BYTES`] apart at
-    /// most, aligned for the dynamic offsets that bind them.
+    /// most, aligned for the dynamic offsets that bind them, and between
+    /// them the morph targets and weights of the morphed draws.
     joints: Arc<[u8]>,
     digest: u64,
 }
@@ -993,6 +1105,11 @@ impl GpuMeshFrame {
             if let Some(model) = &draw.source.model {
                 update(&model.vertices);
                 update(&model.texture_digest.to_le_bytes());
+                // Normal maps and morph targets, when there are any.
+                if model.normal_map.is_some() || !model.geometry.is_empty() {
+                    update(&model.normal_digest.to_le_bytes());
+                    update(&model.geometry_digest.to_le_bytes());
+                }
             }
             if let Some(fill) = &draw.source.fill {
                 update(&fill.curves);
@@ -1026,6 +1143,8 @@ struct Pending {
     line_range: Option<[f32; 2]>,
     /// A skinned mesh's palette.
     joints: Option<Arc<[[f32; 16]]>>,
+    /// A morphed mesh's targets and their weights, those it weighs.
+    morph: Option<Vec<[f32; 2]>>,
     /// The bounding sphere of what it draws, in model space: a skinned
     /// mesh's spans where its joints take it.
     sphere: (DVec3, f64),
@@ -1232,9 +1351,28 @@ impl<'a> GpuMeshes<'a> {
             .joints
             .filter(|joints| source.skinned() && !joints.is_empty())
             .cloned();
+        // The targets a morphed mesh weighs, and how far they reach.
+        let (morph, reach) = match (content.morph, &source.model) {
+            (Some(weights), Some(model)) if !model.reach.is_empty() => {
+                let weighed: Vec<[f32; 2]> = weights
+                    .iter()
+                    .take(model.reach.len())
+                    .enumerate()
+                    .filter(|(_, weight)| weight.is_finite() && weight.abs() > 1e-6)
+                    .map(|(target, weight)| [target as f32, *weight])
+                    .collect();
+                let reach: f64 = weighed
+                    .iter()
+                    .map(|[target, weight]| f64::from(model.reach[*target as usize] * weight.abs()))
+                    .sum();
+                ((!weighed.is_empty()).then_some(weighed), reach)
+            }
+            _ => (None, 0.0),
+        };
+        let rest = (source.center, source.radius + reach);
         let mut sphere = match &joints {
-            Some(joints) => skinned_sphere(&source, joints),
-            None => (source.center, source.radius),
+            Some(joints) => skinned_sphere(rest, joints),
+            None => rest,
         };
         // Copies of a mesh reach as far as the sphere about every copy.
         let copies = content
@@ -1255,6 +1393,7 @@ impl<'a> GpuMeshes<'a> {
             class,
             translucent: !fill && (opacity < 0.999 || !opaque_colors),
             joints,
+            morph,
             sphere,
             source,
             model: content.transform.mat4,
@@ -1397,19 +1536,6 @@ impl<'a> GpuMeshes<'a> {
                     .map(|blur| blur.sigma * pixels_per_unit)
                     .filter(|sigma| sigma.is_finite() && *sigma >= 0.1)
                     .map(|sigma| (sigma as f32).to_bits());
-                push_draw_uniforms(
-                    &mut draw_uniforms,
-                    pending,
-                    [line_px, outline_px],
-                    [from, to],
-                );
-                let instances = if pending.source.fill.is_some() {
-                    0..pending.source.count
-                } else if to > from {
-                    (from.floor().max(0.0) as u32)..(to.ceil() as u32).min(pending.source.count)
-                } else {
-                    0..0
-                };
                 // A palette per skinned draw, at an offset the bind group
                 // can start at.
                 let palette = pending.joints.as_ref().map(|palette| {
@@ -1420,6 +1546,29 @@ impl<'a> GpuMeshes<'a> {
                     }
                     start as u32
                 });
+                // A run of targets and weights per morphed draw, which the
+                // shader reads as pairs of floats.
+                let morph = pending.morph.as_ref().map(|weighed| {
+                    let start = joints.len() / 8;
+                    for pair in weighed {
+                        push_f32s(&mut joints, pair);
+                    }
+                    (start as u32, weighed.len() as u32)
+                });
+                push_draw_uniforms(
+                    &mut draw_uniforms,
+                    pending,
+                    [line_px, outline_px],
+                    [from, to],
+                    morph,
+                );
+                let instances = if pending.source.fill.is_some() {
+                    0..pending.source.count
+                } else if to > from {
+                    (from.floor().max(0.0) as u32)..(to.ceil() as u32).min(pending.source.count)
+                } else {
+                    0..0
+                };
                 let double_sided = pending
                     .source
                     .model
@@ -1435,6 +1584,7 @@ impl<'a> GpuMeshes<'a> {
                         && !pending.source.outline.is_empty()
                         && pending.material.is_some_and(|material| material.outlined()),
                     joints: palette,
+                    morph,
                     glow,
                     shadow,
                     blur,
@@ -1459,6 +1609,7 @@ impl<'a> GpuMeshes<'a> {
                 draw.casts.hash(&mut hasher);
                 draw.outlined.hash(&mut hasher);
                 draw.joints.hash(&mut hasher);
+                draw.morph.hash(&mut hasher);
                 draw.glow.hash(&mut hasher);
                 draw.shadow.hash(&mut hasher);
                 draw.blur.hash(&mut hasher);
@@ -1516,16 +1667,16 @@ fn world_sphere(pending: &Pending) -> (DVec3, f64) {
 }
 
 /// A sphere, in model space, around a skinned mesh posed by `joints`: around
-/// its bind-pose sphere placed by each joint, which holds every vertex since
-/// a vertex lies between the places its joints take it.
-fn skinned_sphere(source: &MeshSource, joints: &[[f32; 16]]) -> (DVec3, f64) {
+/// its bind-pose sphere `rest` placed by each joint, which holds every
+/// vertex since a vertex lies between the places its joints take it.
+fn skinned_sphere(rest: (DVec3, f64), joints: &[[f32; 16]]) -> (DVec3, f64) {
     let placed: Vec<(DVec3, f64)> = joints
         .iter()
         .map(|matrix| {
             let matrix = DMat4::from_cols_array(&matrix.map(f64::from));
             (
-                matrix.transform_point3(source.center),
-                source.radius * largest_scale(&matrix),
+                matrix.transform_point3(rest.0),
+                rest.1 * largest_scale(&matrix),
             )
         })
         .filter(|(center, radius)| center.is_finite() && radius.is_finite())
@@ -1535,7 +1686,7 @@ fn skinned_sphere(source: &MeshSource, joints: &[[f32; 16]]) -> (DVec3, f64) {
         .map(|(center, radius)| *center - *radius)
         .reduce(DVec3::min)
     else {
-        return (source.center, source.radius);
+        return rest;
     };
     let high = placed
         .iter()
@@ -1897,6 +2048,8 @@ fn draw_alike(frame: &GpuMeshFrame, a: usize, b: usize) -> bool {
         && !second.translucent
         && first.joints.is_none()
         && second.joints.is_none()
+        && first.morph.is_none()
+        && second.morph.is_none()
         && Arc::ptr_eq(&first.source, &second.source)
         && first.culled == second.culled
         && first.casts == second.casts
@@ -1906,12 +2059,14 @@ fn draw_alike(frame: &GpuMeshFrame, a: usize, b: usize) -> bool {
 
 /// Append one draw's uniforms, padded to `DRAW_STRIDE`: its lines and its
 /// outline `widths_px` pixels wide, its lines showing the segments from
-/// `shown[0]` to `shown[1]` (fractional at the ends).
+/// `shown[0]` to `shown[1]` (fractional at the ends), and a morphed model's
+/// run of targets and weights among the frame's, `morph`.
 fn push_draw_uniforms(
     bytes: &mut Vec<u8>,
     pending: &Pending,
     [line_px, outline_px]: [f64; 2],
     shown: [f32; 2],
+    morph: Option<(u32, u32)>,
 ) {
     let start = bytes.len();
     push_mat4(bytes, pending.model);
@@ -1949,15 +2104,15 @@ fn push_draw_uniforms(
     let open = f32::from(u8::from(!pending.source.closed));
     let sheet = f32::from(u8::from(pending.source.sheet));
     push_f32s(bytes, &[outline_px as f32, open, sheet, 0.0]);
-    // An imported model's alpha cutoff, and whether it has a texture, a
-    // palette and blended alpha (`Draw.imported` in [`SHADER`]).
+    // An imported model's alpha cutoff; whether it has a texture, a
+    // palette and blended alpha, as bits; and a morphed one's run of
+    // targets and weights (`Draw.imported` in [`SHADER`]).
     let model = pending.source.model.as_ref().map_or([0.0; 4], |model| {
-        [
-            model.cutoff(),
-            f32::from(u8::from(model.texture.is_some())),
-            f32::from(u8::from(pending.joints.is_some())),
-            f32::from(u8::from(model.alpha == AlphaMode::Blend)),
-        ]
+        let flags = u8::from(model.texture.is_some())
+            | u8::from(pending.joints.is_some()) << 1
+            | u8::from(model.alpha == AlphaMode::Blend) << 2;
+        let [first, count] = morph.map_or([0.0; 2], |(first, count)| [first as f32, count as f32]);
+        [model.cutoff(), f32::from(flags), first, count]
     });
     push_f32s(bytes, &model);
     debug_assert_eq!(bytes.len() - start, DRAW_BYTES);
@@ -2631,15 +2786,25 @@ impl Pipelines {
 /// first time a frame draws a model, so scenes without one never compile
 /// them.
 struct ModelPipelines {
-    /// Group 2: the base-color texture and its sampler.
+    /// Group 2: the base-color texture and the normal map with their
+    /// samplers, and what the vertices read by index.
     texture_layout: wgpu::BindGroupLayout,
-    /// Group 3: a draw's palette, bound at its offset in the frame's joints.
+    /// Group 3: a draw's palette, bound at its offset in the frame's joints,
+    /// and the frame's morph targets and weights.
     joints_layout: wgpu::BindGroupLayout,
     /// Meshes by `[culled][pass]`.
     meshes: [[wgpu::RenderPipeline; 3]; 2],
     /// Into a shadow map, by `[closed]`, as [`Pipelines::shadow`].
     shadow: [wgpu::RenderPipeline; 2],
-    /// A white texel, which models without a texture read.
+    /// A white texel, which models without a texture read, a texel of a
+    /// normal that tilts nothing, a sampler for either, and a header of no
+    /// tangents and no targets, which models without a normal map or
+    /// morph targets read.
+    white: wgpu::TextureView,
+    flat: wgpu::TextureView,
+    sampler: wgpu::Sampler,
+    no_geometry: wgpu::Buffer,
+    /// What models with none of these bind.
     blank: wgpu::BindGroup,
 }
 
@@ -2668,20 +2833,58 @@ impl ModelPipelines {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 7,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 8,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 9,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: NonZeroU64::new(16),
+                    },
+                    count: None,
+                },
             ],
         });
         let joints_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("gaanim-3d-model-joints"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 6,
-                visibility: wgpu::ShaderStages::VERTEX,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: true,
-                    min_binding_size: NonZeroU64::new(JOINTS_BYTES as u64),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 6,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: true,
+                        min_binding_size: NonZeroU64::new(JOINTS_BYTES as u64),
+                    },
+                    count: None,
                 },
-                count: None,
-            }],
+                wgpu::BindGroupLayoutEntry {
+                    binding: 10,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: NonZeroU64::new(8),
+                    },
+                    count: None,
+                },
+            ],
         });
         let layout = |label, second: &wgpu::BindGroupLayout| {
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -2872,24 +3075,41 @@ impl ModelPipelines {
                 cache: None,
             })
         };
-        let white = upload_texture(
+        let white = upload_texture(device, queue, &white_texel(), false);
+        let flat = upload_texture(
             device,
             queue,
             &ImageData {
-                data: Blob::from(vec![255_u8; 4]),
+                data: Blob::from(vec![128_u8, 128, 255, 255]),
                 format: ImageFormat::Rgba8,
                 alpha_type: ImageAlphaType::Alpha,
                 width: 1,
                 height: 1,
             },
+            true,
         );
         let sampler = texture_sampler(device, [TextureWrap::Repeat; 2], false);
-        let blank = texture_group(device, &texture_layout, &white, &sampler);
+        let no_geometry = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("gaanim-3d-model-geometry"),
+            contents: &[0; 16],
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+        let blank = model_group(
+            device,
+            &texture_layout,
+            (&white, &sampler),
+            (&flat, &sampler),
+            &no_geometry,
+        );
         Self {
             meshes: [passes(false), passes(true)],
             shadow: [shadow(false), shadow(true)],
             texture_layout,
             joints_layout,
+            white,
+            flat,
+            sampler,
+            no_geometry,
             blank,
         }
     }
@@ -2972,13 +3192,15 @@ fn straight_rgba(image: &ImageData) -> std::borrow::Cow<'_, ImageData> {
 }
 
 /// A view of `image`, uploaded with its mipmaps: sRGB texels that the
-/// shader reads in linear light.
+/// shader reads in linear light, or, `linear`, texels it reads as they are,
+/// as a normal map's.
 fn upload_texture(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     image: &ImageData,
+    linear: bool,
 ) -> wgpu::TextureView {
-    let levels = mipmaps(image);
+    let levels = mipmaps(image, linear);
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("gaanim-3d-model-texture"),
         size: wgpu::Extent3d {
@@ -2989,7 +3211,11 @@ fn upload_texture(
         mip_level_count: levels.len() as u32,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+        format: if linear {
+            wgpu::TextureFormat::Rgba8Unorm
+        } else {
+            wgpu::TextureFormat::Rgba8UnormSrgb
+        },
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
         view_formats: &[],
     });
@@ -3019,8 +3245,9 @@ fn upload_texture(
 
 /// The mipmaps of an RGBA8 image in sRGB with straight alpha, from the
 /// image itself to one texel: each level averages 2x2 texels of the one
-/// before in linear light, weighted by their alpha.
-fn mipmaps(image: &ImageData) -> Vec<(u32, u32, std::borrow::Cow<'_, [u8]>)> {
+/// before in linear light, weighted by their alpha. A `linear` image, a
+/// normal map's, averages its texels as they are, alpha aside.
+fn mipmaps(image: &ImageData, linear: bool) -> Vec<(u32, u32, std::borrow::Cow<'_, [u8]>)> {
     let (width, height) = (image.width.max(1), image.height.max(1));
     let bytes = image.data.data();
     if bytes.len() < width as usize * height as usize * 4 {
@@ -3028,7 +3255,9 @@ fn mipmaps(image: &ImageData) -> Vec<(u32, u32, std::borrow::Cow<'_, [u8]>)> {
     }
     let decode: [f32; 256] = std::array::from_fn(|value| {
         let value = value as f32 / 255.0;
-        if value <= 0.04045 {
+        if linear {
+            value
+        } else if value <= 0.04045 {
             value / 12.92
         } else {
             ((value + 0.055) / 1.055).powf(2.4)
@@ -3036,7 +3265,9 @@ fn mipmaps(image: &ImageData) -> Vec<(u32, u32, std::borrow::Cow<'_, [u8]>)> {
     });
     let encode = |value: f32| {
         let value = value.clamp(0.0, 1.0);
-        let srgb = if value <= 0.0031308 {
+        let srgb = if linear {
+            value
+        } else if value <= 0.0031308 {
             value * 12.92
         } else {
             1.055 * value.powf(1.0 / 2.4) - 0.055
@@ -3053,7 +3284,11 @@ fn mipmaps(image: &ImageData) -> Vec<(u32, u32, std::borrow::Cow<'_, [u8]>)> {
         .chunks_exact(4)
         .take(width as usize * height as usize)
         .map(|texel| {
-            let alpha = f32::from(texel[3]) / 255.0;
+            let alpha = if linear {
+                1.0
+            } else {
+                f32::from(texel[3]) / 255.0
+            };
             [
                 decode[texel[0] as usize] * alpha,
                 decode[texel[1] as usize] * alpha,
@@ -3123,12 +3358,14 @@ fn texture_sampler(device: &wgpu::Device, wrap: [TextureWrap; 2], nearest: bool)
     })
 }
 
-/// Binds `view` through `sampler` as a model's texture.
-fn texture_group(
+/// Binds a model's base-color texture and normal map, each through its
+/// sampler, and what its vertices read by index.
+fn model_group(
     device: &wgpu::Device,
     layout: &wgpu::BindGroupLayout,
-    view: &wgpu::TextureView,
-    sampler: &wgpu::Sampler,
+    (texture, sampler): (&wgpu::TextureView, &wgpu::Sampler),
+    (normal_map, normal_sampler): (&wgpu::TextureView, &wgpu::Sampler),
+    geometry: &wgpu::Buffer,
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("gaanim-3d-model-texture"),
@@ -3136,11 +3373,23 @@ fn texture_group(
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 4,
-                resource: wgpu::BindingResource::TextureView(view),
+                resource: wgpu::BindingResource::TextureView(texture),
             },
             wgpu::BindGroupEntry {
                 binding: 5,
                 resource: wgpu::BindingResource::Sampler(sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 7,
+                resource: wgpu::BindingResource::TextureView(normal_map),
+            },
+            wgpu::BindGroupEntry {
+                binding: 8,
+                resource: wgpu::BindingResource::Sampler(normal_sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 9,
+                resource: geometry.as_entire_binding(),
             },
         ],
     })
@@ -3237,9 +3486,9 @@ pub struct GpuThreeD {
     glow: Option<glow::GlowPipelines>,
     glow_targets: Option<glow::GlowTargets>,
     uploads: HashMap<usize, Uploaded>,
-    /// Models' and filled outlines' textures by the id of their pixels, and
-    /// their samplers.
-    textures: HashMap<u64, wgpu::TextureView>,
+    /// Models' and filled outlines' textures by the id of their pixels and
+    /// whether they are read as they are (normal maps), and their samplers.
+    textures: HashMap<(u64, bool), wgpu::TextureView>,
     /// The texel outlines filled otherwise bind in place of an image.
     white: Option<wgpu::TextureView>,
     samplers: HashMap<([TextureWrap; 2], bool), wgpu::Sampler>,
@@ -3311,25 +3560,26 @@ impl GpuThreeD {
             })
         });
         if !self.textures.is_empty() {
-            let shown: HashSet<u64> = frames
+            let shown: HashSet<(u64, bool)> = frames
                 .iter()
                 .flat_map(|frame| frame.draws.iter())
                 .flat_map(|draw| {
-                    let model = draw
-                        .source
-                        .model
-                        .as_ref()
+                    let model = draw.source.model.as_ref();
+                    let texture = model
                         .and_then(|model| model.texture.as_ref())
-                        .map(|texture| texture.image.data.id());
+                        .map(|texture| (texture.image.data.id(), false));
+                    let normal_map = model
+                        .and_then(|model| model.normal_map.as_ref())
+                        .map(|texture| (texture.image.data.id(), true));
                     let images = draw.source.fill.iter().flat_map(|fill| {
                         fill.runs
                             .iter()
-                            .filter_map(|(_, brush)| Some(brush.as_ref()?.image.data.id()))
+                            .filter_map(|(_, brush)| Some((brush.as_ref()?.image.data.id(), false)))
                     });
-                    model.into_iter().chain(images)
+                    texture.into_iter().chain(normal_map).chain(images)
                 })
                 .collect();
-            self.textures.retain(|id, _| shown.contains(id));
+            self.textures.retain(|key, _| shown.contains(key));
         }
         let mut changed = false;
         for frame in frames {
@@ -3416,7 +3666,7 @@ impl GpuThreeD {
         let samplers = &mut self.samplers;
         let white = self
             .white
-            .get_or_insert_with(|| upload_texture(device, queue, &white_texel()));
+            .get_or_insert_with(|| upload_texture(device, queue, &white_texel(), false));
         for draw in frame.draws.iter() {
             self.uploads
                 .entry(Arc::as_ptr(&draw.source) as usize)
@@ -3433,22 +3683,50 @@ impl GpuThreeD {
                                     contents: &model.vertices,
                                     usage: wgpu::BufferUsages::VERTEX,
                                 });
-                            let texture = match &model.texture {
-                                Some(texture) => {
-                                    let view =
-                                        textures.entry(texture.image.data.id()).or_insert_with(
-                                            || upload_texture(device, queue, &texture.image),
-                                        );
-                                    let sampler = samplers
-                                        .entry((texture.wrap, texture.nearest))
-                                        .or_insert_with(|| {
-                                            texture_sampler(device, texture.wrap, texture.nearest)
-                                        });
-                                    texture_group(device, &models.texture_layout, view, sampler)
-                                }
-                                None => models.blank.clone(),
+                            if model.texture.is_none()
+                                && model.normal_map.is_none()
+                                && model.geometry.is_empty()
+                            {
+                                return (vertices, models.blank.clone());
+                            }
+                            // A texture uploads once for every model that
+                            // shows it, a sampler once per way of sampling.
+                            let mut bound = |texture: &Option<MeshTexture>, linear: bool| {
+                                let Some(texture) = texture else {
+                                    let view = if linear { &models.flat } else { &models.white };
+                                    return (view.clone(), models.sampler.clone());
+                                };
+                                let view = textures
+                                    .entry((texture.image.data.id(), linear))
+                                    .or_insert_with(|| {
+                                        upload_texture(device, queue, &texture.image, linear)
+                                    })
+                                    .clone();
+                                let sampler = samplers
+                                    .entry((texture.wrap, texture.nearest))
+                                    .or_insert_with(|| {
+                                        texture_sampler(device, texture.wrap, texture.nearest)
+                                    })
+                                    .clone();
+                                (view, sampler)
                             };
-                            (vertices, texture)
+                            let base = bound(&model.texture, false);
+                            let normal_map = bound(&model.normal_map, true);
+                            let geometry = (!model.geometry.is_empty()).then(|| {
+                                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                    label: Some("gaanim-3d-model-geometry"),
+                                    contents: &model.geometry,
+                                    usage: wgpu::BufferUsages::STORAGE,
+                                })
+                            });
+                            let group = model_group(
+                                device,
+                                &models.texture_layout,
+                                (&base.0, &base.1),
+                                (&normal_map.0, &normal_map.1),
+                                geometry.as_ref().unwrap_or(&models.no_geometry),
+                            );
+                            (vertices, group)
                         }),
                     vertices: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                         label: Some("gaanim-3d-vertices"),
@@ -3500,13 +3778,16 @@ impl GpuThreeD {
                                 .entry((id, nearest))
                                 .or_insert_with(|| {
                                     let view = match brush {
-                                        Some(brush) => &*textures.entry(id).or_insert_with(|| {
-                                            upload_texture(
-                                                device,
-                                                queue,
-                                                &straight_rgba(&brush.image),
-                                            )
-                                        }),
+                                        Some(brush) => {
+                                            &*textures.entry((id, false)).or_insert_with(|| {
+                                                upload_texture(
+                                                    device,
+                                                    queue,
+                                                    &straight_rgba(&brush.image),
+                                                    false,
+                                                )
+                                            })
+                                        }
                                         None => &*white,
                                     };
                                     let wrap = [TextureWrap::ClampToEdge; 2];
@@ -3612,7 +3893,8 @@ impl GpuThreeD {
         if !frame.instances.is_empty() {
             queue.write_buffer(instance_buffer, 0, &frame.instances);
         }
-        // Every model binds a palette, a skinned one at its offset.
+        // Every model binds a palette, a skinned one at its offset, and the
+        // frame's morph targets and weights, which the buffer holds too.
         let joints_group = match models {
             Some(models) => {
                 let needed = frame.joints.len().max(JOINTS_BYTES);
@@ -3625,20 +3907,28 @@ impl GpuThreeD {
                     let buffer = device.create_buffer(&wgpu::BufferDescriptor {
                         label: Some("gaanim-3d-model-joints"),
                         size: capacity as u64,
-                        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                        usage: wgpu::BufferUsages::UNIFORM
+                            | wgpu::BufferUsages::STORAGE
+                            | wgpu::BufferUsages::COPY_DST,
                         mapped_at_creation: false,
                     });
                     let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                         label: Some("gaanim-3d-model-joints"),
                         layout: &models.joints_layout,
-                        entries: &[wgpu::BindGroupEntry {
-                            binding: 6,
-                            resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                                buffer: &buffer,
-                                offset: 0,
-                                size: NonZeroU64::new(JOINTS_BYTES as u64),
-                            }),
-                        }],
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 6,
+                                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                                    buffer: &buffer,
+                                    offset: 0,
+                                    size: NonZeroU64::new(JOINTS_BYTES as u64),
+                                }),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 10,
+                                resource: buffer.as_entire_binding(),
+                            },
+                        ],
                     });
                     self.joint_buffer = Some((buffer, capacity, group));
                 }
@@ -4047,8 +4337,10 @@ struct Draw {
     // mesh, and 1 for a sheet (see `SHEET_SHADE`).
     outline: vec4<f32>,
     outline_size: vec4<f32>,
-    // An imported model's alpha cutoff (0 for none), and 1 when it has a
-    // texture, when a palette skins it, and when its alpha blends.
+    // An imported model's alpha cutoff (0 for none); 1 when it has a
+    // texture, plus 2 when a palette skins it and 4 when its alpha blends;
+    // and a morphed one's first target and weight among the frame's (see
+    // `morph_weights` in `MODEL_SHADER`) and how many it weighs.
     imported: vec4<f32>,
 }
 
@@ -4593,14 +4885,26 @@ fn vertex_shadow(in: ShadowIn) -> @builtin(position) vec4<f32> {
 "#;
 
 /// The shader of imported models ([`ModelPipelines`]), after [`SHADER`]: a
-/// base-color texture read through each vertex's UV, alpha cut out or
-/// blended as the material says, and a skin's palette blended by each
-/// vertex's weights.
+/// base-color texture and a normal map read through each vertex's UV,
+/// alpha cut out or blended as the material says, morph targets added by
+/// their weights and a skin's palette blended by each vertex's weights.
 const MODEL_SHADER: &str = r#"
 @group(2) @binding(4) var model_texture: texture_2d<f32>;
 @group(2) @binding(5) var model_sampler: sampler;
+// The normal map, in linear texels.
+@group(2) @binding(7) var normal_texture: texture_2d<f32>;
+@group(2) @binding(8) var normal_sampler: sampler;
+// What a model's vertices read by their index (see `model_geometry`): a
+// header, holding the normal map's scale, 1 when tangents follow, the
+// vertices and the morph targets; a tangent per vertex for a normal map;
+// then, for each target and vertex, its displacement and the change of its
+// normal.
+@group(2) @binding(9) var<storage, read> geometry: array<vec4<f32>>;
 // The palette of a skinned draw, bound at its offset in the frame's joints.
 @group(3) @binding(6) var<uniform> joints: array<mat4x4<f32>, 256>;
+// The morph targets the frame's draws weigh, each with its weight: a draw's
+// run starts at `draw.imported.z` and holds `draw.imported.w` of them.
+@group(3) @binding(10) var<storage, read> morph_weights: array<vec2<f32>>;
 
 struct ModelIn {
     @location(0) position: vec3<f32>,
@@ -4617,6 +4921,7 @@ struct ModelIn {
     @location(12) uv: vec2<f32>,
     @location(13) joints: vec4<u32>,
     @location(14) weights: vec4<f32>,
+    @builtin(vertex_index) vertex_id: u32,
 }
 
 struct ModelShadowIn {
@@ -4628,6 +4933,7 @@ struct ModelShadowIn {
     @location(12) uv: vec2<f32>,
     @location(13) joints: vec4<u32>,
     @location(14) weights: vec4<f32>,
+    @builtin(vertex_index) vertex_id: u32,
 }
 
 struct ModelOut {
@@ -4637,11 +4943,25 @@ struct ModelOut {
     @location(1) world: vec3<f32>,
     @location(2) normal: vec3<f32>,
     @location(3) uv: vec2<f32>,
+    // A normal-mapped vertex's tangent in the world, and the sign of its
+    // bitangent; zero without a normal map.
+    @location(4) tangent: vec4<f32>,
 }
 
 struct ModelShadowOut {
     @builtin(position) clip: vec4<f32>,
     @location(0) uv: vec2<f32>,
+}
+
+// What `Draw.imported.y` says of a model, a bit each: that it has a
+// texture, that a palette skins it and that its alpha blends.
+const TEXTURED: u32 = 1u;
+const SKINNED: u32 = 2u;
+const BLENDED: u32 = 4u;
+
+// Whether the draw's model is `flag`.
+fn imported(flag: u32) -> bool {
+    return (u32(draw.imported.y + 0.5) & flag) != 0u;
 }
 
 // Where a skinned vertex's joints take it, in the mesh's space: their
@@ -4653,7 +4973,7 @@ fn skin(joint: vec4<u32>, weight: vec4<f32>) -> mat4x4<f32> {
         vec4<f32>(0.0, 0.0, 1.0, 0.0),
         vec4<f32>(0.0, 0.0, 0.0, 1.0),
     );
-    if draw.imported.z < 0.5 || weight.x + weight.y + weight.z + weight.w < 1e-6 {
+    if !imported(SKINNED) || weight.x + weight.y + weight.z + weight.w < 1e-6 {
         return identity;
     }
     let j = min(joint, vec4<u32>(255u));
@@ -4661,16 +4981,97 @@ fn skin(joint: vec4<u32>, weight: vec4<f32>) -> mat4x4<f32> {
         + joints[j.z] * weight.z + joints[j.w] * weight.w;
 }
 
+struct Morphed {
+    position: vec3<f32>,
+    normal: vec3<f32>,
+}
+
+// Vertex `vertex_id` at `position` with `normal`, moved by the morph
+// targets the draw weighs, before its skin moves it.
+fn morphed(vertex_id: u32, position: vec3<f32>, normal: vec3<f32>) -> Morphed {
+    var out = Morphed(position, normal);
+    let weighed = u32(draw.imported.w);
+    if weighed == 0u {
+        return out;
+    }
+    let header = geometry[0];
+    let vertices = u32(header.z);
+    let shapes = u32(header.w);
+    if vertex_id >= vertices {
+        return out;
+    }
+    // The targets' rows follow the header and the tangents.
+    let rows_at = 1u + select(0u, vertices, header.y > 0.5);
+    let run = u32(draw.imported.z);
+    for (var index = 0u; index < weighed; index += 1u) {
+        let entry = morph_weights[run + index];
+        let shape = u32(entry.x);
+        if shape < shapes {
+            let row = rows_at + (shape * vertices + vertex_id) * 2u;
+            out.position += entry.y * geometry[row].xyz;
+            out.normal += entry.y * geometry[row + 1u].xyz;
+        }
+    }
+    return out;
+}
+
+// The tangent of normal-mapped vertex `vertex_id` in the mesh's space;
+// zero without a normal map.
+fn tangent_of(vertex_id: u32) -> vec4<f32> {
+    let header = geometry[0];
+    if header.y < 0.5 || vertex_id >= u32(header.z) {
+        return vec4<f32>(0.0);
+    }
+    return geometry[1u + vertex_id];
+}
+
+// The normal map's texel at `uv`, from -1 to 1 along the tangent, the
+// bitangent and the normal, its tilt scaled; straight along the normal
+// without a map.
+fn normal_texel(uv: vec2<f32>) -> vec3<f32> {
+    let texel = textureSample(normal_texture, normal_sampler, uv).xyz * 2.0 - 1.0;
+    let header = geometry[0];
+    if header.y < 0.5 {
+        return vec3<f32>(0.0, 0.0, 1.0);
+    }
+    return vec3<f32>(texel.xy * header.x, texel.z);
+}
+
+// Unit `normal` tilted by a normal map's texel `bump` toward `tangent`,
+// made perpendicular to it, and its bitangent.
+fn bumped(normal: vec3<f32>, tangent: vec4<f32>, bump: vec3<f32>) -> vec3<f32> {
+    let along = tangent.xyz - normal * dot(normal, tangent.xyz);
+    if dot(along, along) < 1e-12 {
+        return normal;
+    }
+    let u = normalize(along);
+    let v = cross(normal, u) * select(1.0, -1.0, tangent.w < 0.0);
+    let tilted = normalize_or_zero(u * bump.x + v * bump.y + normal * bump.z);
+    if dot(tilted, tilted) < 0.5 {
+        return normal;
+    }
+    return tilted;
+}
+
 @vertex
 fn vertex_model(in: ModelIn) -> ModelOut {
     let model = mat4x4<f32>(in.model_x, in.model_y, in.model_z, in.model_w);
     let normal = mat3x3<f32>(in.normal_x.xyz, in.normal_y.xyz, in.normal_z.xyz);
     let skinned = skin(in.joints, in.weights);
-    let world = (model * (skinned * vec4<f32>(in.position, 1.0))).xyz;
+    let shaped = morphed(in.vertex_id, in.position, in.normal);
+    let world = (model * (skinned * vec4<f32>(shaped.position, 1.0))).xyz;
     var out: ModelOut;
     out.clip = image_clip(world);
     out.world = world;
-    out.normal = normal * (skinned * vec4<f32>(in.normal, 0.0)).xyz;
+    out.normal = normal * (skinned * vec4<f32>(shaped.normal, 0.0)).xyz;
+    // A tangent lies along the surface, which the model matrix carries; a
+    // mirroring matrix turns its bitangent around.
+    let tangent = tangent_of(in.vertex_id);
+    let mirrored = determinant(mat3x3<f32>(model[0].xyz, model[1].xyz, model[2].xyz)) < 0.0;
+    out.tangent = vec4<f32>(
+        (model * (skinned * vec4<f32>(tangent.xyz, 0.0))).xyz,
+        select(tangent.w, -tangent.w, mirrored),
+    );
     // A model's vertex colors tint its base color, as glTF multiplies them.
     out.color = in.base;
     if draw.material.w > 0.5 {
@@ -4683,7 +5084,7 @@ fn vertex_model(in: ModelIn) -> ModelOut {
 // The base color of a model's pixel: its vertex's, times its texel.
 fn model_color(in: ModelOut) -> vec4<f32> {
     var color = in.color;
-    if draw.imported.y > 0.5 {
+    if imported(TEXTURED) {
         color = color * textureSample(model_texture, model_sampler, in.uv);
     }
     return color;
@@ -4696,7 +5097,7 @@ fn model_cut() -> f32 {
     if draw.imported.x > 0.0 {
         return draw.imported.x;
     }
-    if draw.imported.w > 0.5 {
+    if imported(BLENDED) {
         return 1.0 / 255.0;
     }
     return 0.0;
@@ -4711,20 +5112,23 @@ fn fragment_model(in: ModelOut, @builtin(front_facing) front: bool) -> @location
         face = -face;
     }
     var color = model_color(in);
+    let bump = normal_texel(in.uv);
     if color.a < draw.imported.x {
         discard;
     }
-    if draw.imported.w < 0.5 {
+    if !imported(BLENDED) {
         color.a = 1.0;
     }
     if draw.material.z > 0.5 {
         var normal = normalize_or_zero(in.normal);
-        // The back face of a two-sided surface faces the other way.
-        if !front {
-            normal = -normal;
-        }
         if dot(normal, normal) < 0.5 {
             normal = face;
+        } else {
+            normal = bumped(normal, in.tangent, bump);
+            // The back face of a two-sided surface faces the other way.
+            if !front {
+                normal = -normal;
+            }
         }
         color = shade(color, normal, face, viewer, in.world, in.clip.xy);
     }
@@ -4745,8 +5149,9 @@ fn fragment_model_layer(in: ModelOut, @builtin(sample_index) sample: u32) -> @lo
 fn vertex_model_shadow(in: ModelShadowIn) -> ModelShadowOut {
     let model = mat4x4<f32>(in.model_x, in.model_y, in.model_z, in.model_w);
     let skinned = skin(in.joints, in.weights);
+    let shaped = morphed(in.vertex_id, in.position, vec3<f32>(0.0));
     var out: ModelShadowOut;
-    out.clip = caster.view_proj * (model * (skinned * vec4<f32>(in.position, 1.0)));
+    out.clip = caster.view_proj * (model * (skinned * vec4<f32>(shaped.position, 1.0)));
     out.uv = in.uv;
     return out;
 }
@@ -4755,7 +5160,7 @@ fn vertex_model_shadow(in: ModelShadowIn) -> ModelShadowOut {
 @fragment
 fn fragment_model_shadow(in: ModelShadowOut) {
     var alpha = draw.base.a;
-    if draw.imported.y > 0.5 {
+    if imported(TEXTURED) {
         alpha = alpha * textureSample(model_texture, model_sampler, in.uv).a;
     }
     if alpha < draw.imported.x {
@@ -5040,6 +5445,7 @@ mod tests {
             shadow: None,
             blur: None,
             instances: None,
+            morph: None,
         };
         let mut sources = MeshSources::default();
         let mut meshes =
@@ -5106,6 +5512,7 @@ mod tests {
                 shadow: None,
                 blur: None,
                 instances: None,
+                morph: None,
             },
         );
         // The fixed key light casts one map, at full size.
@@ -5181,6 +5588,7 @@ mod tests {
                     shadow: None,
                     blur: None,
                     instances: None,
+                    morph: None,
                 },
             );
         }
@@ -5240,6 +5648,7 @@ mod tests {
                     shadow: None,
                     blur: None,
                     instances: None,
+                    morph: None,
                 },
             );
         }
@@ -5306,6 +5715,7 @@ mod tests {
                 shadow: None,
                 blur: None,
                 instances: None,
+                morph: None,
             },
         );
         let frames: Vec<GpuMeshFrame> = meshes
@@ -5362,6 +5772,7 @@ mod tests {
                     shadow: None,
                     blur: None,
                     instances: None,
+                    morph: None,
                 },
             );
         }
@@ -5452,6 +5863,7 @@ mod tests {
                 shadow: None,
                 blur: None,
                 instances: None,
+                morph: None,
             },
         );
         assert!(meshes.push_fill(
@@ -5472,6 +5884,7 @@ mod tests {
                 shadow: None,
                 blur: None,
                 instances: None,
+                morph: None,
             },
         ));
         let illumination = Illumination {
@@ -5550,6 +5963,7 @@ mod tests {
                 shadow: None,
                 blur: None,
                 instances: None,
+                morph: None,
             },
         );
         assert!(meshes.push_fill(
@@ -5570,6 +5984,7 @@ mod tests {
                 shadow: None,
                 blur: None,
                 instances: None,
+                morph: None,
             },
         ));
         let illumination = Illumination {
@@ -5631,6 +6046,7 @@ mod tests {
                     shadow: None,
                     blur: None,
                     instances: None,
+                    morph: None,
                 },
             );
         }
@@ -5713,6 +6129,7 @@ mod tests {
                     shadow: None,
                     blur: None,
                     instances: Some(&instances),
+                    morph: None,
                 },
             );
             meshes
@@ -5774,6 +6191,7 @@ mod tests {
                     shadow: None,
                     blur: None,
                     instances: None,
+                    morph: None,
                 },
             );
         }
@@ -5904,6 +6322,7 @@ mod tests {
                 shadow: None,
                 blur: None,
                 instances: None,
+                morph: None,
             },
         );
         let frames: Vec<GpuMeshFrame> = meshes
@@ -5967,6 +6386,7 @@ mod tests {
                 shadow: None,
                 blur: None,
                 instances: None,
+                morph: None,
             },
         );
         let frames: Vec<GpuMeshFrame> = meshes
@@ -6013,6 +6433,7 @@ mod tests {
                 joints: vec![[0; 4]; count],
                 weights: vec![[1.0, 0.0, 0.0, 0.0]; count],
             }),
+            ..Default::default()
         }));
         mesh
     }
@@ -6038,6 +6459,23 @@ mod tests {
     fn draw_meshes(
         meshes: &[(TriangleMeshData, Option<Arc<[[f32; 16]]>>)],
     ) -> Option<(Vec<u8>, bool)> {
+        let meshes: Vec<_> = meshes
+            .iter()
+            .map(|(mesh, joints)| (mesh.clone(), joints.clone(), None))
+            .collect();
+        draw_morphed(&meshes)
+    }
+
+    /// The RGBA pixels of `meshes` drawn as [`draw_meshes`] draws them, each
+    /// with its palette and its morph targets' weights.
+    #[allow(clippy::type_complexity)]
+    fn draw_morphed(
+        meshes: &[(
+            TriangleMeshData,
+            Option<Arc<[[f32; 16]]>>,
+            Option<Arc<[f32]>>,
+        )],
+    ) -> Option<(Vec<u8>, bool)> {
         let mut gpu = crate::background::test_gpu::test_gpu()?;
         let mut camera = Camera::ortho_2d_frame(4.0, 4.0, 64, 64);
         camera.position = DVec3::new(0.0, 0.0, 10.0);
@@ -6047,7 +6485,7 @@ mod tests {
         let opacity = GlobalOpacity(1.0);
         let mut sources = MeshSources::default();
         let mut pending = GpuMeshes::new(&mut sources, (64, 64), placement, 0).unwrap();
-        for (index, (mesh, joints)) in meshes.iter().enumerate() {
+        for (index, (mesh, joints, morph)) in meshes.iter().enumerate() {
             let key = index as u64 + 1;
             pending.push(
                 0,
@@ -6067,6 +6505,7 @@ mod tests {
                     shadow: None,
                     blur: None,
                     instances: None,
+                    morph: morph.as_ref(),
                 },
             );
         }
@@ -6150,6 +6589,7 @@ mod tests {
                     shadow: shadow.clone(),
                     blur: *blur,
                     instances: None,
+                    morph: None,
                 },
             );
         }
@@ -6322,6 +6762,7 @@ mod tests {
                     shadow,
                     blur: None,
                     instances: None,
+                    morph: None,
                 },
             ));
             let frames: Vec<GpuMeshFrame> = meshes
@@ -6471,6 +6912,86 @@ mod tests {
     }
 
     #[test]
+    fn a_morphed_model_draws_its_targets_by_their_weights() {
+        // One target moves every corner a unit right: 16 pixels.
+        let mut mesh = model_quad(None, AlphaMode::Opaque, false);
+        let count = mesh.vertices.len();
+        Arc::make_mut(mesh.surface.as_mut().unwrap()).morph_targets =
+            vec![gaanim_scene::MorphTarget {
+                positions: vec![[1.0, 0.0, 0.0]; count],
+                normals: None,
+            }];
+        let weighed =
+            |weight: f32| draw_morphed(&[(mesh.clone(), None, Some(Arc::from([weight])))]);
+        // At weight 0 the quad spans pixels 16 to 48, at 1 from 32 to 64,
+        // and at 0.5 from 24 to 56.
+        let Some((rest, built)) = weighed(0.0) else {
+            return;
+        };
+        assert!(built);
+        assert_eq!(pixel(&rest, 20, 32)[3], 255);
+        assert_eq!(pixel(&rest, 52, 32)[3], 0);
+        let (full, _) = weighed(1.0).unwrap();
+        assert_eq!(pixel(&full, 28, 32)[3], 0);
+        assert_eq!(pixel(&full, 60, 32)[3], 255);
+        let (half, _) = weighed(0.5).unwrap();
+        for (x, alpha) in [(22, 0), (26, 255), (54, 255), (58, 0)] {
+            assert_eq!(pixel(&half, x, 32)[3], alpha, "pixel {x}");
+        }
+    }
+
+    #[test]
+    fn a_normal_map_tilts_the_shading_of_a_flat_face() {
+        // A lit card facing the camera, its one texel tilting every normal
+        // toward the key light, up and to the left, or away from it.
+        let card = |texel: [u8; 4]| {
+            let mut mesh = model_quad(None, AlphaMode::Opaque, false);
+            mesh.material = Some(Material3D::default());
+            let count = mesh.vertices.len();
+            Arc::make_mut(mesh.surface.as_mut().unwrap()).normal_map =
+                Some(gaanim_scene::NormalMap {
+                    texture: MeshTexture {
+                        image: ImageData {
+                            data: Blob::from(texel.to_vec()),
+                            format: ImageFormat::Rgba8,
+                            alpha_type: ImageAlphaType::Alpha,
+                            width: 1,
+                            height: 1,
+                        },
+                        wrap: [TextureWrap::Repeat; 2],
+                        nearest: false,
+                    },
+                    scale: 1.0,
+                    tangents: vec![[1.0, 0.0, 0.0, 1.0]; count],
+                });
+            mesh
+        };
+        let shade = |texel| {
+            draw_meshes(&[(card(texel), None)]).map(|(pixels, _)| {
+                let [r, g, b, _] = pixel(&pixels, 32, 32);
+                u32::from(r) + u32::from(g) + u32::from(b)
+            })
+        };
+        let Some(flat) = shade([128, 128, 255, 255]) else {
+            return;
+        };
+        let toward = shade([38, 128, 218, 255]).unwrap();
+        let away = shade([218, 128, 218, 255]).unwrap();
+        // The white card saturates toward the light, so it brightens less.
+        assert!(
+            toward > flat + 10 && flat > away + 40,
+            "{toward} {flat} {away}"
+        );
+        // A flat texel shades as the card without a map.
+        let mut plain = model_quad(None, AlphaMode::Opaque, false);
+        plain.material = Some(Material3D::default());
+        let (pixels, _) = draw_meshes(&[(plain, None)]).unwrap();
+        let [r, g, b, _] = pixel(&pixels, 32, 32);
+        let plain = u32::from(r) + u32::from(g) + u32::from(b);
+        assert!(plain.abs_diff(flat) <= 3, "{plain} {flat}");
+    }
+
+    #[test]
     fn a_skinned_lit_model_casts_its_posed_shadow() {
         // A lit floor and, a quarter unit above it, a lit card half a unit
         // wide on a joint. The key light casts its shadow 0.19 units right
@@ -6556,6 +7077,7 @@ mod tests {
             shadow: None,
             blur: None,
             instances: None,
+            morph: None,
         };
         meshes.push(0, [(2, 1), (2, 1)], [None, None], &card(&front));
         meshes.push(0, [(3, 1), (3, 1)], [None, None], &card(&back));
@@ -6577,6 +7099,7 @@ mod tests {
                 shadow: None,
                 blur: None,
                 instances: None,
+                morph: None,
             },
         ));
         let frames: Vec<GpuMeshFrame> = meshes
@@ -6670,6 +7193,7 @@ mod tests {
                     shadow: None,
                     blur: None,
                     instances: None,
+                    morph: None,
                 },
             ));
             let frames: Vec<GpuMeshFrame> = meshes
@@ -6780,6 +7304,7 @@ mod tests {
                     shadow: None,
                     blur: None,
                     instances: None,
+                    morph: None,
                 },
             ));
             let frames: Vec<GpuMeshFrame> = meshes
@@ -6896,6 +7421,7 @@ mod tests {
                 shadow: None,
                 blur: None,
                 instances: None,
+                morph: None,
             },
         ));
         let frames: Vec<GpuMeshFrame> = meshes
@@ -7199,6 +7725,7 @@ mod tests {
                     shadow: None,
                     blur: None,
                     instances: None,
+                    morph: None,
                 },
                 false,
             );
@@ -7245,6 +7772,7 @@ mod tests {
                         shadow: None,
                         blur: None,
                         instances: None,
+                        morph: None,
                     },
                     true,
                 );
