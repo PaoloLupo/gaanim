@@ -337,6 +337,11 @@ pub enum AnimationType {
         target: CanvasEndpoint,
         blur: bool,
     },
+    /// Move where a perspective camera draws the center of its view, in
+    /// scene units of the frame (`gaanim_math::Camera::lens_shift`).
+    CameraLensShift {
+        to: DVec2,
+    },
     /// Change the depth of field of parallax layers; `None` keeps a value.
     CameraDepthOfField {
         focus: Option<f64>,
@@ -862,6 +867,35 @@ impl AnimationType {
             || matches!(self, Self::TextSelectionProperties { properties, .. } if properties.is_empty())
     }
 
+    /// Whether this animation shows its target or changes how opaque it
+    /// is: once one has played, a later fade-in is no longer the target's
+    /// entry, which hides it until then.
+    pub(crate) fn shows_target(&self) -> bool {
+        match self {
+            Self::Write { .. }
+            | Self::Create { .. }
+            | Self::Create3D
+            | Self::Uncreate { .. }
+            | Self::Unwrite { .. }
+            | Self::GrowFromCenter
+            | Self::ShrinkToCenter
+            | Self::SpinInFromNothing
+            | Self::GrowFromPoint { .. }
+            | Self::GrowFromEdge { .. }
+            | Self::DrawBorderThenFill { .. }
+            | Self::GrowArrow
+            | Self::FadeTo { .. }
+            | Self::FadeIn
+            | Self::FadeInFrom { .. }
+            | Self::FadeOut
+            | Self::TextMotion(_)
+            | Self::TextAnimator(_)
+            | Self::TextSelection { .. } => true,
+            Self::Properties(properties) => properties.opacity.is_some(),
+            _ => false,
+        }
+    }
+
     /// Effects whose clips are laid out from the builder's cursor rather
     /// than from the animation's delay.
     pub(crate) fn schedules_from_the_cursor(&self) -> bool {
@@ -906,6 +940,7 @@ impl AnimationType {
                 | Self::CameraWhipPan { .. }
                 | Self::CameraDollyZoom { .. }
                 | Self::CameraDepthOfField { .. }
+                | Self::CameraLensShift { .. }
         )
     }
 

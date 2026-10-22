@@ -328,6 +328,9 @@ pub enum PropertyLensSpec {
         from_zoom: f64,
         to_zoom: f64,
         from_lens: Option<(f64, f64, f64)>,
+        /// The lens shift the reset starts from, which it returns to zero.
+        #[cfg_attr(feature = "serde", serde(default))]
+        from_lens_shift: gaanim_core::glam::DVec2,
     },
     /// Center the camera on a moving mobject for the lifetime of the clip.
     CameraFollow {
@@ -445,6 +448,11 @@ pub enum PropertyLensSpec {
         from: [f64; 3],
         to: [f64; 3],
     },
+    /// Tween the camera's lens shift (`gaanim_math::Camera::lens_shift`).
+    CameraLensShift {
+        from: gaanim_core::glam::DVec2,
+        to: gaanim_core::glam::DVec2,
+    },
     /// A dolly zoom: the camera moves along its line of sight to `factor`
     /// times its distance from `target` while the field of view keeps the
     /// target's plane the same size (`gaanim_math::dolly_zoom`).
@@ -522,6 +530,36 @@ pub enum PropertyLensSpec {
 }
 
 impl PropertyLensSpec {
+    /// Whether this lens moves the camera, whatever its clip's target.
+    pub fn moves_the_camera(&self) -> bool {
+        matches!(
+            self,
+            Self::CameraState { .. }
+                | Self::CameraPosition { .. }
+                | Self::CameraPositionSource { .. }
+                | Self::CameraRotation { .. }
+                | Self::CameraZoom { .. }
+                | Self::CameraZoomSource { .. }
+                | Self::CameraPanZoom { .. }
+                | Self::CameraRotationSource { .. }
+                | Self::CameraOrthographic { .. }
+                | Self::CameraReset { .. }
+                | Self::CameraFollow { .. }
+                | Self::CameraFollowEndpoint { .. }
+                | Self::CameraFrameDynamic { .. }
+                | Self::CameraShake { .. }
+                | Self::CameraTarget { .. }
+                | Self::CameraLookAt { .. }
+                | Self::CameraOrbit { .. }
+                | Self::CameraLookAtSource { .. }
+                | Self::CameraPerspective { .. }
+                | Self::CameraPathFollow { .. }
+                | Self::CameraDepthOfField { .. }
+                | Self::CameraLensShift { .. }
+                | Self::CameraDollyZoom { .. }
+        )
+    }
+
     /// Converts this serializable specification into a runtime Bevy `PropertyLens`.
     pub fn to_lens(&self) -> PropertyLens {
         match self {
@@ -632,6 +670,10 @@ impl PropertyLensSpec {
             Self::CameraDepthOfField { from, to } => PropertyLens::CameraZoom {
                 from: from[1],
                 to: to[1],
+            },
+            Self::CameraLensShift { from, to } => PropertyLens::CameraZoom {
+                from: from.x,
+                to: to.x,
             },
             Self::CameraDollyZoom {
                 from_position,

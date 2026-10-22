@@ -1464,12 +1464,14 @@ impl PyText {
         Ok(slf)
     }
 
-    fn billboard(slf: PyRef<'_, Self>) -> PyResult<PyRef<'_, Self>> {
-        crate::custom::ensure_authoring_allowed()?;
-        Ok({
-            slf.handle.clone().billboard();
-            slf
-        })
+    #[pyo3(signature = (*, offset=(0.0, 0.0), anchor=None))]
+    fn billboard(
+        slf: PyRef<'_, Self>,
+        offset: (f64, f64),
+        anchor: Option<PyAnchor>,
+    ) -> PyResult<PyRef<'_, Self>> {
+        PyDrawable(slf.handle.clone()).billboard_impl(offset, anchor)?;
+        Ok(slf)
     }
 
     fn hud(slf: PyRef<'_, Self>) -> PyResult<PyRef<'_, Self>> {

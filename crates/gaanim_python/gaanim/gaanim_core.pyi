@@ -4910,7 +4910,12 @@ class Drawable:
     def shift_by_3d(self, dx: float, dy: float, dz: float) -> Self:
         """Apply a relative 3D translation as an immediate cursor cut."""
         ...
-    def billboard(self) -> Self:
+    def billboard(
+        self,
+        *,
+        offset: tuple[float, float] = (0.0, 0.0),
+        anchor: Optional[AnchorName | Anchor] = None,
+    ) -> Self:
         """Keep a 3D drawable facing the perspective camera.
 
         This is useful for labels and markers attached to a 3D scene. The
@@ -4923,8 +4928,19 @@ class Drawable:
         an opaque 3D mesh lies between its anchor and the camera. The method
         is chainable and returns the same ``Drawable``.
 
+        ``move_to_3d`` places its 3D point, and the drawable is drawn on
+        screen around where the camera shows that point, in scene units of
+        the frame, whatever the depth: ``anchor`` names the point of its box
+        that lies on it (its own origin without one), and ``offset`` moves it
+        from there, so ``billboard(offset=(0, 0.4), anchor="bottom")`` keeps a
+        label just above a 3D point at every distance. ``shift_by`` moves
+        the 3D point instead. Inside a billboarded group, the members are
+        placed in those screen units around the group's origin. A
+        non-finite ``offset`` raises ``ValueError``.
+
         Example:
             label = scene.text("origin").move_to_3d(0.0, 1.0, 0.0).billboard()
+            tag = scene.text("load").move_to_3d(*node).billboard(offset=(0, 0.3), anchor="bottom")
         """
         ...
     def in_3d(self, material: Optional[Material3D] = None) -> Self:
@@ -5507,6 +5523,7 @@ class Support(Drawable):
 
 Endpoint: TypeAlias = Drawable | AnchorPoint | PointRef | tuple[float, float] | tuple[float, float, float]
 ScalarSource: TypeAlias = float | Parameter | Variable | Computed | TimeInput
+Endpoint3D: TypeAlias = Endpoint | tuple[ScalarSource, ScalarSource, ScalarSource]
 AngleRay: TypeAlias = Direction | Endpoint
 
 class Material3D:
@@ -6451,7 +6468,25 @@ class Camera:
     @property
     def animate(self) -> CameraAnimation: ...
     def state_2d(self, center: tuple[float, float] = (0.0, 0.0), zoom: float = 1.0, rotation: float = 0.0) -> CameraState: ...
-    def state_3d(self, eye: tuple[float, float, float], target: tuple[float, float, float], up: tuple[float, float, float] = (0.0, 1.0, 0.0), fov_y: float = 0.7853981633974483, near: float = 0.1, far: float = 1000.0) -> CameraState: ...
+    def state_3d(
+        self,
+        eye: tuple[float, float, float],
+        target: tuple[float, float, float],
+        up: tuple[float, float, float] = (0.0, 1.0, 0.0),
+        fov_y: float = 0.7853981633974483,
+        near: float = 0.1,
+        far: float = 1000.0,
+        *,
+        screen_offset: tuple[float, float] = (0.0, 0.0),
+    ) -> CameraState:
+        """A perspective camera state looking from ``eye`` at ``target``.
+
+        ``screen_offset`` draws ``target`` that far from the middle of the
+        frame, in scene units, as ``screen_offset`` sets it; ``to`` moves
+        the offset with the rest of the state. Invalid values raise
+        ``ValueError``.
+        """
+        ...
     def capture(self) -> CameraState: ...
     def project(self, point: tuple[float, float, float], state: CameraState) -> tuple[float, float]:
         """Where a camera in ``state`` draws the world ``point`` on the frame.
@@ -6500,7 +6535,7 @@ class Camera:
         """
         ...
     def rotate_to(self, angle: ScalarSource) -> Camera: ...
-    def look_at(self, eye: Optional[Endpoint], target: Endpoint, up: Optional[tuple[float, float, float]] = None) -> Camera: ...
+    def look_at(self, eye: Optional[Endpoint3D], target: Endpoint3D, up: Optional[tuple[float, float, float]] = None) -> Camera: ...
     def perspective(self, fov_y: float, near: float = 0.1, far: float = 1000.0) -> Camera: ...
     def depth_of_field(
         self,
@@ -6538,8 +6573,44 @@ class Camera:
         ...
     def orthographic(self, zoom: float = 1.0) -> Camera: ...
     def reset(self) -> Camera: ...
+    def screen_offset(self, x: float, y: float) -> Camera:
+        """Draw the center of a perspective camera's view at ``(x, y)`` and return the camera.
+
+        Cuts to what ``CameraAnimation.screen_offset`` animates.
+        """
+        ...
     def bind_2d(self, *, center: Optional[Endpoint] = None, zoom: Optional[ScalarSource] = None, rotation: Optional[ScalarSource] = None, influence: Optional[ScalarSource] = None, enabled: bool = True) -> CameraConstraint: ...
-    def bind_3d(self, *, eye: Optional[Endpoint] = None, target: Optional[Endpoint] = None, fov_y: Optional[ScalarSource] = None, up: tuple[float, float, float] = (0.0, 1.0, 0.0), influence: Optional[ScalarSource] = None, enabled: bool = True) -> CameraConstraint: ...
+    def bind_3d(
+        self,
+        *,
+        eye: Optional[Endpoint3D] = None,
+        target: Optional[Endpoint3D] = None,
+        fov_y: Optional[ScalarSource] = None,
+        up: Optional[tuple[ScalarSource, ScalarSource, ScalarSource]] = None,
+        screen_offset: Optional[tuple[ScalarSource, ScalarSource]] = None,
+        influence: Optional[ScalarSource] = None,
+        enabled: bool = True,
+    ) -> CameraConstraint:
+        """Keep the perspective camera on reactive inputs, every frame.
+
+        ``eye`` and ``target`` are drawables, anchor points, points, or
+        ``(x, y, z)`` whose coordinates may each be a number, a
+        ``Parameter``, a ``Variable``, a ``Computed`` or ``scene.time``, so
+        animating parameters moves the camera without auxiliary points.
+        ``up`` takes such coordinates too (``(0, 1, 0)`` when omitted);
+        ``fov_y``, ``influence`` and the two coordinates of
+        ``screen_offset`` (see ``CameraAnimation.screen_offset``) are
+        scalars. A zero or non-finite ``up``
+        raises ``ValueError``; one that a reactive input makes zero leaves
+        the camera as it was on that frame.
+
+        Example:
+            yaw = scene.viz.parameter(0.0)
+            eye = (computed(lambda a: 12 * math.sin(a), inputs=[yaw]), 4.0,
+                   computed(lambda a: 12 * math.cos(a), inputs=[yaw]))
+            scene.camera.bind_3d(eye=eye, target=(0, 0, 0))
+        """
+        ...
     def inset(
         self,
         target: Endpoint,
@@ -7023,8 +7094,8 @@ class CameraAnimation:
         ...
     def look_at(
         self,
-        eye: Optional[Endpoint],
-        target: Endpoint,
+        eye: Optional[Endpoint3D],
+        target: Endpoint3D,
         up: Optional[tuple[float, float, float]] = None,
     ) -> Anim:
         """Aim the camera from ``eye`` toward ``target``.
@@ -7033,8 +7104,10 @@ class CameraAnimation:
         is drawn on every frame, so the camera turns toward a target that
         moves while the animation plays, and ends aimed where it ends as
         authored: later camera moves, an ``orbit`` for instance, start there.
-        To keep a moving target at the center all along, use
-        ``follow(target, turn=True)``.
+        An ``(x, y, z)`` whose coordinates are ``Parameter``, ``Computed`` or
+        ``scene.time`` values is read the same way. To keep a moving target
+        at the center all along, use ``follow(target, turn=True)``, or
+        ``bind_3d``.
 
         Args:
             eye: Camera position in world coordinates; ``None`` keeps the
@@ -7081,6 +7154,24 @@ class CameraAnimation:
 
         Example:
             scene.camera.animate.perspective(0.785, near=0.1, far=1000.0)
+        """
+        ...
+
+    def screen_offset(self, x: float, y: float) -> Anim:
+        """Move where a perspective camera draws its target to ``(x, y)``.
+
+        ``(x, y)`` is in scene units from the middle of the frame. The lens
+        shifts off its axis, as a tilt-shift lens does: the image slides
+        without the camera turning, so verticals keep their slant and the
+        target stays where it shows while ``orbit`` turns the camera around
+        it or ``dolly`` moves it closer, which lets a model sit beside a
+        panel of text. ``look_at`` and ``to`` keep the offset; play this
+        animation with them to move both, or set it in ``state_3d``.
+        ``reset`` brings it back to the middle, and an orthographic camera
+        ignores it. Non-finite values raise ``ValueError``.
+
+        Example:
+            scene.play([scene.camera.animate.screen_offset(-3.5, 0), scene.camera.animate.orbit(0.6, 0)])
         """
         ...
 

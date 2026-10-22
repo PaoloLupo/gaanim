@@ -1088,6 +1088,11 @@ pub(crate) enum PendingCameraHoldKind {
 }
 
 /// The tint of emphasis effects in a scene without a theme.
+/// How long after a stop comes what changes the frame at the stop's instant
+/// but was made after it: a moment no frame grid samples, so the stop's
+/// frame keeps what came before it.
+pub(crate) const STOP_REST: f64 = 1e-6;
+
 pub(crate) const DEFAULT_EMPHASIS_COLOR: Color = Color::from_rgb8(255, 215, 0);
 /// The tint of emphasis effects, in a scene without a theme, for what
 /// already shows [`DEFAULT_EMPHASIS_COLOR`].
@@ -1215,6 +1220,9 @@ pub struct SceneBuilder<'w, 's, 'a> {
     pub(crate) motion_blur_windows: Vec<(f64, f64, gaanim_renderer::effects::MotionBlur)>,
     /// Depth of field of parallax layers at the authoring cursor.
     pub(crate) depth_of_field: gaanim_scene::DepthOfField,
+    /// The camera's lens shift where the cursor is, which a shift animation
+    /// starts from.
+    pub(crate) lens_shift: gaanim_core::glam::DVec2,
     /// Glyph layout and current offset of Texts laid on a path.
     pub(crate) text_paths: HashMap<
         ObjectId,
@@ -1255,6 +1263,16 @@ pub struct SceneBuilder<'w, 's, 'a> {
     /// and the point of its parent's space it was then, which the pivot
     /// keeps as the parent moves on.
     declared_pivots: HashMap<ObjectId, (DVec3, DVec3)>,
+    /// The point of each group that `move_to_3d` places: its origin, or the
+    /// center of its members' box without one.
+    pub(crate) group_pivots: HashMap<ObjectId, DVec3>,
+    /// Objects an animation has shown or faded: a later fade-in is no
+    /// longer their entry, so it does not hide them before it.
+    entered: HashSet<ObjectId>,
+    /// The instant of the last stop: what changes the frame at that instant
+    /// afterwards comes [`STOP_REST`] after it, so the stop shows what was
+    /// made before it.
+    pub(crate) rest_at: Option<f64>,
     /// Opacity each object had before an animation took it to zero, which
     /// an entrance shows it at again.
     pub(crate) faded_opacities: HashMap<ObjectId, f32>,
@@ -1357,6 +1375,7 @@ pub(crate) struct SceneBuilderState {
     text_tracking: HashMap<ObjectId, f64>,
     motion_blur_windows: Vec<(f64, f64, gaanim_renderer::effects::MotionBlur)>,
     depth_of_field: gaanim_scene::DepthOfField,
+    lens_shift: gaanim_core::glam::DVec2,
     text_paths: HashMap<
         ObjectId,
         (
@@ -1373,6 +1392,9 @@ pub(crate) struct SceneBuilderState {
     layout_rests: HashMap<ObjectId, LayoutRest>,
     layout_root_rests: HashMap<ObjectId, SpatialTransform>,
     declared_pivots: HashMap<ObjectId, (DVec3, DVec3)>,
+    group_pivots: HashMap<ObjectId, DVec3>,
+    entered: HashSet<ObjectId>,
+    rest_at: Option<f64>,
     faded_opacities: HashMap<ObjectId, f32>,
     backdrop_orders: HashMap<ObjectId, u64>,
     authored_follows: HashMap<ObjectId, AuthoredFollow>,
@@ -1418,6 +1440,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             text_paths: self.text_paths.clone(),
             motion_blur_windows: self.motion_blur_windows.clone(),
             depth_of_field: self.depth_of_field,
+            lens_shift: self.lens_shift,
             camera_view_rests: self.camera_view_rests.clone(),
             text_motion: self.text_motion.clone(),
             persistent_objects: self.persistent_objects.clone(),
@@ -1427,6 +1450,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             layout_rests: self.layout_rests.clone(),
             layout_root_rests: self.layout_root_rests.clone(),
             declared_pivots: self.declared_pivots.clone(),
+            group_pivots: self.group_pivots.clone(),
+            entered: self.entered.clone(),
+            rest_at: self.rest_at,
             faded_opacities: self.faded_opacities.clone(),
             authored_follows: self.authored_follows.clone(),
             backdrop_orders: self.backdrop_orders.clone(),
@@ -1479,6 +1505,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             text_paths,
             motion_blur_windows,
             depth_of_field,
+            lens_shift,
             camera_view_rests,
             text_motion,
             persistent_objects,
@@ -1488,6 +1515,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             layout_rests,
             layout_root_rests,
             declared_pivots,
+            group_pivots,
+            entered,
+            rest_at,
             faded_opacities,
             backdrop_orders,
             authored_follows,
@@ -1544,6 +1574,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             text_paths,
             motion_blur_windows,
             depth_of_field,
+            lens_shift,
             camera_view_rests,
             text_motion,
             persistent_objects,
@@ -1553,6 +1584,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             layout_rests,
             layout_root_rests,
             declared_pivots,
+            group_pivots,
+            entered,
+            rest_at,
             faded_opacities,
             backdrop_orders,
             authored_follows,
@@ -2053,6 +2087,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             text_paths: HashMap::new(),
             motion_blur_windows: Vec::new(),
             depth_of_field: gaanim_scene::DepthOfField::default(),
+            lens_shift: gaanim_core::glam::DVec2::ZERO,
             camera_view_rests: HashMap::new(),
             text_motion: Default::default(),
             property_bindings: HashMap::new(),
@@ -2066,6 +2101,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             layout_rests: HashMap::new(),
             layout_root_rests: HashMap::new(),
             declared_pivots: HashMap::new(),
+            group_pivots: HashMap::new(),
+            entered: HashSet::new(),
+            rest_at: None,
             faded_opacities: HashMap::new(),
             authored_follows: HashMap::new(),
             backdrop_orders: HashMap::new(),
@@ -2262,7 +2300,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             | AnimationType::CameraFollowPath { .. }
             | AnimationType::CameraWhipPan { .. }
             | AnimationType::CameraDollyZoom { .. }
-            | AnimationType::CameraDepthOfField { .. } => "Camera",
+            | AnimationType::CameraDepthOfField { .. }
+            | AnimationType::CameraLensShift { .. } => "Camera",
             AnimationType::TextMotion(_) => "TextMotion",
             AnimationType::Properties { .. } => "Properties",
             AnimationType::Write { .. } => "Write",
@@ -2370,6 +2409,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     /// Registers an explicit interactive stop at the current timeline playhead.
     pub fn stop(&mut self) {
         self.stop_times.push(self.current_time);
+        self.rest_at = Some(self.current_time);
         self.timeline.add_clip(
             self.default_track,
             self.current_time,
@@ -3388,6 +3428,14 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     /// Schedules `anim`, first resolving repetition that the clip's rate
     /// function cannot express on its own.
     fn play_internal(&mut self, anim: AnimationBuilder) {
+        let shown = anim.anim_type.shows_target().then_some(anim.target);
+        self.play_internal_unmarked(anim);
+        if let Some(target) = shown {
+            self.entered.insert(target);
+        }
+    }
+
+    fn play_internal_unmarked(&mut self, anim: AnimationBuilder) {
         if let RateFunc::Repeat {
             inner,
             count,
@@ -3607,7 +3655,15 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             );
             if let Some(translation) = properties.translation {
                 channels.push(match translation {
-                    crate::anim::PropertyTranslation::To(to) => AnimationType::TranslateTo { to },
+                    // A group's pivot goes where `move_to_3d` puts it.
+                    crate::anim::PropertyTranslation::To(to) => AnimationType::TranslateTo {
+                        to: to
+                            - self
+                                .group_pivots
+                                .get(&anim.target)
+                                .copied()
+                                .unwrap_or_default(),
+                    },
                     crate::anim::PropertyTranslation::ToAnchor { to, anchor } => {
                         AnimationType::TranslateAnchorTo { to, anchor }
                     }
@@ -4301,7 +4357,11 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 let from = 0.0;
                 let to = shown_opacity(&self.faded_opacities, anim.target, state.opacity);
                 state.opacity = to;
-                self.commands.entity(state.entity).insert(Opacity(from));
+                // The first fade-in of what nothing has shown yet is its
+                // entry: it is transparent until then.
+                if !self.entered.contains(&anim.target) {
+                    self.commands.entity(state.entity).insert(Opacity(from));
+                }
                 PropertyLensSpec::Opacity { from, to }
             }
             AnimationType::FadeInFrom { .. } => {
@@ -4466,6 +4526,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             | AnimationType::CameraWhipPan { .. }
             | AnimationType::CameraDollyZoom { .. }
             | AnimationType::CameraDepthOfField { .. }
+            | AnimationType::CameraLensShift { .. }
             | AnimationType::TextMotion(_)
             | AnimationType::Write { .. }
             | AnimationType::Create { .. }

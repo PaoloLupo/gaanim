@@ -820,9 +820,10 @@ fn compile_tracking_endpoint(
                 offset: anchor.offset,
             })
             .unwrap_or(TrackingEndpoint::Static(DVec3::ZERO)),
-        CanvasEndpoint::Expression { x, y } => TrackingEndpoint::Expression {
+        CanvasEndpoint::Expression { x, y, z } => TrackingEndpoint::Expression {
             x: compile_tracking_scalar(x, id_map, states),
             y: compile_tracking_scalar(y, id_map, states),
+            z: compile_tracking_scalar(z, id_map, states),
         },
         CanvasEndpoint::MediaPixel { object, x, y } => id_map
             .get(object)
@@ -3840,6 +3841,13 @@ impl SceneModel {
             // The editor's animation timeline traces each clip to its `play`.
             builder.timeline.origin = (track_origins && matches!(op, Op::Play(_) | Op::Launch(_)))
                 .then(|| crate::canvas::ops::op_origin(seg.id, op_index));
+            // A stop shows what was made before it: a change made after it
+            // at its instant, such as a cut, comes a moment later.
+            if builder.rest_at == Some(builder.current_time)
+                && Self::changes_the_frame_at_once(op, builder.current_time > scene_start + 1e-9)
+            {
+                builder.current_time += crate::builder::STOP_REST;
+            }
             match op {
                 Op::Spawn(spec) => {
                     let live = spec.lock().expect("object spec poisoned").clone();
@@ -3911,6 +3919,9 @@ impl SceneModel {
                             .commands
                             .entity(state.entity)
                             .insert((gaanim_scene::Billboard, bevy::prelude::Transform::default()));
+                        if let Some(shift) = spec.billboard_shift {
+                            builder.commands.entity(state.entity).insert(shift);
+                        }
                     }
                     if let Some(depth) = spec.parallax_depth
                         && let Some(state) = builder.states.get(actual.id)
@@ -3998,6 +4009,7 @@ impl SceneModel {
                             target,
                             fov_y,
                             up,
+                            lens_shift,
                         } => gaanim_animation::CameraBindingKind::ThreeD {
                             eye: eye.as_ref().map(|endpoint| {
                                 compile_tracking_endpoint(endpoint, id_map, &builder.states)
@@ -4008,7 +4020,12 @@ impl SceneModel {
                             fov_y: fov_y.as_ref().map(|expression| {
                                 compile_tracking_scalar(expression, id_map, &builder.states)
                             }),
-                            up: *up,
+                            up: compile_tracking_endpoint(up, id_map, &builder.states),
+                            lens_shift: lens_shift.as_ref().map(|shift| {
+                                shift.each_ref().map(|value| {
+                                    compile_tracking_scalar(value, id_map, &builder.states)
+                                })
+                            }),
                         },
                     };
                     builder.commands.spawn(gaanim_animation::CameraBinding {
@@ -8775,6 +8792,28 @@ impl SceneModel {
         }
     }
 
+    /// Whether `op` changes the frame at the instant it is made: a cut, an
+    /// instant animation (a camera move without duration), a drawable
+    /// declared mid-segment, which shows at once, or a binding; not a wait,
+    /// animations that start where things are, nor what only says which
+    /// segment holds a drawable (`reuse`, `persist`).
+    fn changes_the_frame_at_once(op: &Op, mid_segment: bool) -> bool {
+        let instant = |anim: &AnimationBuilder| anim.duration <= 0.0 && anim.delay <= 0.0;
+        match op {
+            Op::Immediate(_)
+            | Op::Show(_)
+            | Op::Hide(_)
+            | Op::Remove(_)
+            | Op::SetPropertyBinding { .. }
+            | Op::ClearPropertyBinding { .. }
+            | Op::SpawnCameraBinding(_) => true,
+            Op::Spawn(_) => mid_segment,
+            Op::Play(anims) | Op::Launch(anims) => anims.iter().any(instant),
+            Op::Animate { anim, active } => *active && instant(anim),
+            _ => false,
+        }
+    }
+
     /// Screens whose first pop in `ops` is a `pop_out`, with their companions:
     /// that pop is their entry, so their declaration does not show them.
     fn camera_view_entries(ops: &[Op]) -> Vec<ObjectId> {
@@ -9283,9 +9322,10 @@ impl SceneModel {
                 let matrix = world(runtime);
                 Some((matrix.transform_point3(DVec3::ZERO), matrix))
             }
-            CanvasEndpoint::Expression { x, y } => {
-                Some((DVec3::new(scalar(x)?, scalar(y)?, 0.0), DMat4::IDENTITY))
-            }
+            CanvasEndpoint::Expression { x, y, z } => Some((
+                DVec3::new(scalar(x)?, scalar(y)?, scalar(z)?),
+                DMat4::IDENTITY,
+            )),
             CanvasEndpoint::LocalExpression { space, x, y, z } => {
                 let runtime = *id_map.get(space)?;
                 builder.states.get(runtime)?;
@@ -9373,6 +9413,7 @@ impl SceneModel {
                     },
                 );
                 if let gaanim_animation::CameraStateSource::Concrete(pose) = to {
+                    builder.lens_shift = pose.lens_shift;
                     *camera_position = pose.position;
                     *camera_rotation = pose.rotation;
                     *camera_target = pose.target;
@@ -9820,6 +9861,7 @@ impl SceneModel {
                     target: *camera_target,
                     up: *camera_up,
                     projection: gaanim_math::Projection::Perspective { fov_y, near, far },
+                    lens_shift: builder.lens_shift,
                 });
                 Self::add_camera_lens(
                     builder,
@@ -9847,8 +9889,10 @@ impl SceneModel {
                         from_zoom: *camera_zoom,
                         to_zoom: 1.0,
                         from_lens: *camera_fov,
+                        from_lens_shift: builder.lens_shift,
                     },
                 );
+                builder.lens_shift = DVec2::ZERO;
                 *camera_position = DVec3::ZERO;
                 *camera_rotation = gaanim_core::glam::DQuat::IDENTITY;
                 *camera_target = DVec3::ZERO;
@@ -9942,6 +9986,16 @@ impl SceneModel {
                     },
                 );
                 builder.depth_of_field = to;
+            }
+            AnimationType::CameraLensShift { to } => {
+                let from = builder.lens_shift;
+                Self::add_camera_lens(
+                    builder,
+                    start,
+                    anim,
+                    PropertyLensSpec::CameraLensShift { from, to: *to },
+                );
+                builder.lens_shift = *to;
             }
             AnimationType::CameraDollyZoom { factor } => {
                 let Some((fov, near, far)) = *camera_fov else {
@@ -12279,6 +12333,14 @@ impl SceneModel {
                     .as_ref()
                     .and_then(|layout| Self::lay_out_readout_row(builder, id_map, layout));
                 let mr = builder.group_about(&refs, spec.group_origin);
+                // A readout's row is placed by its translation (a bar race
+                // binds its value's), so only its declaration uses its pivot.
+                if spec.reactive_readout_layout.is_none()
+                    && let Some(state) = builder.states.get(mr.id)
+                {
+                    let pivot = spec.group_origin.unwrap_or_else(|| state.bounds.center());
+                    builder.group_pivots.insert(mr.id, pivot);
+                }
                 // A readout is one line of text: its text anchors use the
                 // row's baseline.
                 if let Some(baseline) = baseline {
@@ -14869,6 +14931,7 @@ mod tests {
             CanvasEndpoint::Expression {
                 x: x.source(),
                 y: ScalarSource::Constant(40.0),
+                z: ScalarSource::Constant(0.0),
             },
             DVec3::ZERO,
             gaanim_animation::FollowOffsetSpace::World,
@@ -16128,6 +16191,280 @@ mod tests {
         let top = matrix.transform_point3(DVec3::new(0.0, 2.0, 0.0));
         let expected = DVec3::new(-6.0 - 2.0 * 1f64.sin(), -1.5 + 2.0 * 1f64.cos(), 0.0);
         assert!((top - expected).length() < 1e-9, "{top:?}");
+    }
+
+    /// A stop shows what was made before it: a camera reset and a cut made
+    /// after it, as the next segment starts at its instant, come a moment
+    /// later, and the next frame shows them.
+    #[test]
+    fn a_stop_shows_the_frame_before_the_cuts_made_after_it() {
+        let mut canvas = SceneModel::new(1280, 720);
+        canvas.segment("first", None).unwrap();
+        let mark = canvas.circle(0.3).move_to(-6.0, 3.0);
+        let pan = canvas.camera_pan_to(2.0, 0.0, 1.0);
+        canvas.play(vec![pan]);
+        canvas.stop(None).unwrap();
+        canvas.segment("second", None).unwrap();
+        let reset = canvas.camera_reset(0.0);
+        canvas.play(vec![reset]);
+        let mark = mark.move_to(6.0, -3.0);
+        canvas.play(vec![mark.animate().move_to(5.0, -3.0).duration(1.0)]);
+        canvas.stop(None).unwrap();
+        let (mut world, mut timeline) = compile_camera_timeline(canvas);
+        let stops: Vec<f64> = timeline
+            .segments
+            .iter()
+            .flat_map(|segment| segment.stops.iter().map(|stop| stop.time))
+            .collect();
+        assert_eq!(stops[0], 1.0);
+        assert!((stops[1] - 2.0).abs() < 1e-5, "{stops:?}");
+        let entity = world
+            .query_filtered::<Entity, (
+                With<gaanim_scene::Opacity>,
+                Without<gaanim_animation::FloatSignal>,
+            )>()
+            .single(&world)
+            .unwrap();
+        for (time, camera_x, mark_x) in [
+            (1.0, 2.0, -6.0),
+            (1.0 + 1.0 / 60.0, 0.0, 6.0),
+            (1.0, 2.0, -6.0),
+        ] {
+            timeline.seek(&mut world, time);
+            let camera = world.resource::<gaanim_math::Camera>().position.x;
+            let mark = world.get::<gaanim_math::SpatialTransform>(entity).unwrap();
+            let mark = mark.to_mat4().transform_point3(DVec3::ZERO).x;
+            assert!(
+                (camera - camera_x).abs() < 1e-6,
+                "camera at {camera} at {time}"
+            );
+            assert!((mark - mark_x).abs() < 0.01, "mark at {mark} at {time}");
+        }
+    }
+
+    /// What only says which segment holds a drawable, as `reuse` made just
+    /// after a stop, stays at the stop's instant, with what follows it.
+    #[test]
+    fn a_reuse_after_a_stop_keeps_its_instant() {
+        let mut canvas = SceneModel::new(1280, 720);
+        canvas.segment("first", None).unwrap();
+        let mark = canvas.circle(0.3);
+        canvas.wait(1.0);
+        canvas.stop(None).unwrap();
+        canvas.segment("second", None).unwrap();
+        canvas.reuse(&mark).unwrap();
+        canvas.play(vec![mark.animate().move_to(1.0, 0.0).duration(1.0)]);
+        let (_, timeline) = compile_camera_timeline(canvas);
+        let starts: Vec<f64> = timeline
+            .clips
+            .values()
+            .filter(|clip| {
+                matches!(
+                    &clip.payload,
+                    gaanim_timeline::clip::ClipPayload::Animation(animation)
+                        if matches!(
+                            animation.lens,
+                            gaanim_timeline::clip::PropertyLensSpec::Translation { .. }
+                        )
+                )
+            })
+            .map(|clip| clip.start)
+            .collect();
+        assert_eq!(starts, [1.0]);
+    }
+
+    /// An object that enters with `create` or `grow_from_center` shows from
+    /// its entry on, though a fade-out and a fade-in come later; one whose
+    /// entry is its first fade-in stays transparent until then.
+    #[test]
+    fn a_later_fade_in_does_not_hide_an_entry_before_it() {
+        let mut canvas = SceneModel::new(1280, 720);
+        let ring = canvas.circle(1.0);
+        let square = canvas.rect(2.0, 2.0);
+        let faded = canvas.circle(0.5);
+        canvas.play(vec![
+            ring.animate().create().duration(0.9),
+            square.animate().grow_from_center().duration(0.9),
+        ]);
+        canvas.wait(1.0);
+        canvas.play(vec![
+            ring.animate().fade_out().duration(0.4),
+            square.animate().fade_out().duration(0.4),
+            faded.animate().fade_in().duration(0.4),
+        ]);
+        canvas.play(vec![
+            ring.animate().fade_in().duration(0.4),
+            square.animate().fade_in().duration(0.4),
+        ]);
+        canvas.wait(0.5);
+        let mut world = World::new();
+        world.insert_resource(Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+        let mut timeline = world.remove_resource::<Timeline>().unwrap();
+        timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
+        // The ring, the square and the faded circle, in the order spawned.
+        let mut entities: Vec<_> = world
+            .query_filtered::<(Entity, &MobjectId), (
+                With<gaanim_scene::Opacity>,
+                Without<gaanim_animation::FloatSignal>,
+            )>()
+            .iter(&world)
+            .map(|(entity, id)| (id.0, entity))
+            .collect();
+        entities.sort();
+        let entities: Vec<_> = entities.into_iter().map(|(_, entity)| entity).collect();
+        assert_eq!(entities.len(), 3);
+        for (time, expected) in [
+            (0.6, [1.0, 1.0, 0.0]),
+            (1.5, [1.0, 1.0, 0.0]),
+            (3.0, [1.0, 1.0, 1.0]),
+            (0.6, [1.0, 1.0, 0.0]),
+        ] {
+            timeline.seek(&mut world, time);
+            for (entity, expected) in entities.iter().zip(expected) {
+                let opacity = world.get::<gaanim_scene::Opacity>(*entity).unwrap().0;
+                assert!(
+                    (opacity - expected).abs() < 1e-6,
+                    "{opacity} at {time}, expected {expected}"
+                );
+            }
+        }
+    }
+
+    /// `move_to` places the origin of a group about one, declared and
+    /// animated, as `move_to_3d` does.
+    #[test]
+    fn move_to_places_the_origin_of_a_group_about_one() {
+        let mut canvas = SceneModel::new(1280, 720);
+        let ball = canvas.circle(0.5).move_to(2.0, 1.0);
+        let origin = DVec3::new(2.0, 0.5, 0.0);
+        let group = canvas
+            .group_about(&[&ball], origin)
+            .move_to_default(-1.0, 1.0);
+        canvas.wait(0.5);
+        canvas.play(vec![group.animate().move_to(3.0, -2.0).duration(0.5)]);
+        canvas.wait(0.5);
+        let (mut world, mut timeline) = compile_camera_timeline(canvas);
+        for (time, expected) in [
+            (0.25, DVec3::new(-1.0, 1.0, 0.0)),
+            (1.25, DVec3::new(3.0, -2.0, 0.0)),
+        ] {
+            timeline.seek(&mut world, time);
+            let mut groups = world
+                .query_filtered::<&gaanim_math::SpatialTransform, With<gaanim_scene::GroupMarker>>(
+                );
+            let placed = groups
+                .single(&world)
+                .unwrap()
+                .to_mat4()
+                .transform_point3(origin);
+            assert!((placed - expected).length() < 1e-6, "at {time}: {placed:?}");
+        }
+    }
+
+    /// `animate().move_to_3d`, a cut after declaration and a reactive
+    /// position put a group's origin, or the center of its box, where a
+    /// declared `move_to_3d` does.
+    #[test]
+    fn a_group_moves_by_its_pivot_however_it_is_moved() {
+        for origin in [Some(DVec3::new(2.0, 0.5, 0.0)), None] {
+            let mut canvas = SceneModel::new(1280, 720);
+            let p = canvas.parameter(3.0).unwrap();
+            let ball = canvas.circle(0.5).move_to_3d(2.0, 1.0, 0.0);
+            let group = match origin {
+                Some(origin) => canvas.group_about(&[&ball], origin),
+                None => canvas.group(&[&ball]),
+            }
+            .move_to_3d(0.0, 0.0, 0.0);
+            canvas.wait(0.5);
+            // It is there already: it stays.
+            canvas.play(vec![
+                group.animate().move_to_3d(0.0, 0.0, 0.0).duration(0.5),
+            ]);
+            canvas.play(vec![
+                group.animate().move_to_3d(1.0, -1.0, 0.5).duration(0.5),
+            ]);
+            canvas.wait(0.5);
+            let group = group.move_to_3d(-2.0, 0.0, 0.0);
+            canvas.wait(0.5);
+            group.move_to_3d(&p, 0.0, 1.0);
+            canvas.wait(0.5);
+            let mut world = World::new();
+            world.insert_resource(Timeline::new());
+            world.insert_resource(gaanim_text::font::FontRegistry::new());
+            world.insert_resource(gaanim_text::prelude::TextConfig::default());
+            canvas.compile(&mut world);
+            world.flush();
+            let mut timeline = world.remove_resource::<Timeline>().unwrap();
+            timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
+            let pivot = origin.unwrap_or(DVec3::new(2.0, 1.0, 0.0));
+            for (time, expected) in [
+                (0.25, DVec3::ZERO),
+                (0.75, DVec3::ZERO),
+                (2.25, DVec3::new(-2.0, 0.0, 0.0)),
+                (1.75, DVec3::new(1.0, -1.0, 0.5)),
+                (2.75, DVec3::new(3.0, 0.0, 1.0)),
+                (0.75, DVec3::ZERO),
+            ] {
+                timeline.seek(&mut world, time);
+                let mut groups = world.query_filtered::<&gaanim_math::SpatialTransform, With<gaanim_scene::GroupMarker>>();
+                let transform = *groups.single(&world).unwrap();
+                let placed = transform.to_mat4().transform_point3(pivot);
+                assert!(
+                    (placed - expected).length() < 1e-6,
+                    "origin {origin:?} at {time}: {placed:?}, expected {expected:?}"
+                );
+            }
+        }
+    }
+
+    /// `screen_offset` shifts the lens over its animation, an orbit keeps
+    /// the shift, so the target stays where it shows, and a reset brings it
+    /// back to the center.
+    #[test]
+    fn a_screen_offset_holds_through_an_orbit_until_a_reset() {
+        let target = DVec3::new(0.0, 0.5, 0.0);
+        let mut canvas = SceneModel::new(1280, 720);
+        let _marker = canvas.circle(1.0);
+        let perspective = canvas.camera_perspective(0.8, 0.1, 1000.0, 0.0);
+        canvas.play(vec![perspective]);
+        let look_at = canvas.camera_look_at_endpoints(
+            Some(CanvasEndpoint::Static(DVec3::new(0.0, 2.0, 12.0))),
+            CanvasEndpoint::Static(target),
+            DVec3::Y,
+            0.0,
+        );
+        canvas.play(vec![look_at]);
+        let shift = DVec2::new(-300.0, 40.0);
+        let offset = canvas.camera_screen_offset(shift, 1.0).unwrap();
+        canvas.play(vec![offset.rate_func(gaanim_math::RateFunc::Linear)]);
+        let orbit = canvas.camera_orbit(0.8, 0.2, 1.0);
+        canvas.play(vec![orbit]);
+        let reset = canvas.camera_reset(1.0);
+        canvas.play(vec![reset.rate_func(gaanim_math::RateFunc::Linear)]);
+        let (mut world, mut timeline) = compile_camera_timeline(canvas);
+
+        for (time, expected) in [
+            (0.5, shift * 0.5),
+            (1.5, shift),
+            (1.0, shift),
+            (2.5, shift * 0.5),
+            (3.0, DVec2::ZERO),
+        ] {
+            timeline.seek(&mut world, time);
+            let camera = *world.resource::<gaanim_math::Camera>();
+            assert!(
+                (camera.lens_shift - expected).length() < 1e-9,
+                "shift {:?} at {time}, expected {expected:?}",
+                camera.lens_shift
+            );
+            if (1.0..=2.0).contains(&time) {
+                assert!((camera.hud_point(target) - shift).length() < 1e-6);
+            }
+        }
     }
 
     #[test]
@@ -17400,6 +17737,7 @@ mod tests {
         let reactive = CanvasEndpoint::Expression {
             x: 1.0.into(),
             y: 2.0.into(),
+            z: 0.0.into(),
         };
         assert_eq!(
             canvas
@@ -18633,6 +18971,63 @@ mod tests {
         let camera = world.resource::<gaanim_math::Camera>();
         assert_eq!(camera.position.x, -130.0);
         assert_eq!(camera.position.y, 25.0);
+    }
+
+    /// `bind_3d` reads an eye and an up made of reactive coordinates every
+    /// frame, with no point to carry them.
+    #[test]
+    fn compiled_3d_camera_binding_reads_reactive_coordinates() {
+        let mut canvas = SceneModel::new(960, 540);
+        let parameter = canvas.parameter(0.0).unwrap();
+        let parameter_id = parameter.drawable().id;
+        let x = ScalarSource::function(ReactiveFunction::new(
+            0,
+            1,
+            vec![gaanim_animation::ReactiveInput::Signal(parameter_id)],
+            |values| Ok(vec![values[0] * 10.0]),
+        ))
+        .unwrap();
+        let eye = CanvasEndpoint::Expression {
+            x: x.clone(),
+            y: 4.0.into(),
+            z: 12.0.into(),
+        };
+        let up = CanvasEndpoint::Expression {
+            x,
+            y: 1.0.into(),
+            z: 0.0.into(),
+        };
+        let _constraint = canvas
+            .camera_bind_3d(
+                Some(eye),
+                Some(CanvasEndpoint::Static(DVec3::ZERO)),
+                None,
+                up,
+                None,
+                ScalarSource::constant(1.0),
+                true,
+            )
+            .unwrap();
+        canvas.play(vec![parameter.animate().set(0.5).duration(1.0)]);
+
+        let mut world = World::new();
+        world.insert_resource(Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+        let mut timeline = world.remove_resource::<Timeline>().unwrap();
+        timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
+        world.insert_resource(gaanim_math::Camera::ortho_2d(960, 540));
+        timeline.seek(&mut world, 1.0);
+        gaanim_animation::apply_camera_bindings(&mut world, 1.0);
+        let camera = world.resource::<gaanim_math::Camera>();
+        assert!(
+            (camera.position - DVec3::new(5.0, 4.0, 12.0)).length() < 1e-9,
+            "{:?}",
+            camera.position
+        );
+        assert!((camera.up - DVec3::new(5.0, 1.0, 0.0).normalize()).length() < 1e-9);
     }
 
     #[test]

@@ -21,7 +21,7 @@ pub use axis_box::{
 pub use bevy::ecs::error as ecs_error;
 pub use components::{
     AuthoredCall, AuthoredIndex, AuthoredObject, AuthoredObjects, AxisLabelGap, Billboard,
-    BillboardPlane, CoordinateLabelOffset, CoordinateTickLevel, CoordinateViewRole,
+    BillboardPlane, BillboardShift, CoordinateLabelOffset, CoordinateTickLevel, CoordinateViewRole,
     CoversOnPurpose, DepthOfField, DrawnIn3D, FillBrush, FillDirection, FillLevel, GlobalOpacity,
     GroupMarker, HudOverlay, InWorld3D, LayoutBackdrop, LayoutInspection, LayoutInspectionCell,
     LayoutInspectionFrame, LayoutInspectionKind, LayoutZoneRecord, LayoutZones, Light3D,

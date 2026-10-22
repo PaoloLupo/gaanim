@@ -191,6 +191,9 @@ fn covered_texts(world: &mut World) -> Vec<(Entity, Entity)> {
         let Some((key, opacity)) = drawn.get(&glyph) else {
             continue;
         };
+        if drawn_in_3d(world, glyph) {
+            continue;
+        }
         let Some(transform) = world.get::<GlobalSpatialTransform>(glyph) else {
             continue;
         };
@@ -226,6 +229,7 @@ fn covered_texts(world: &mut World) -> Vec<(Entity, Entity)> {
                     .is_some_and(|(_, opacity)| *opacity >= 0.999)
                 && opaque_cover(world, *entity)
                 && !covers_on_purpose(world, *entity)
+                && !drawn_in_3d(world, *entity)
         })
         .filter_map(|(entity, path, _)| {
             let transform = world.get::<GlobalSpatialTransform>(entity)?;
@@ -431,6 +435,24 @@ fn covers_on_purpose(world: &World, entity: Entity) -> bool {
     false
 }
 
+/// Whether `entity` is drawn by the 3D pass, beneath the 2D canvas and
+/// where the camera projects it: part of a billboard or of a drawable
+/// placed in the 3D world. Its scene coordinates say nothing of where it
+/// shows, and it hides no text of the canvas.
+fn drawn_in_3d(world: &World, entity: Entity) -> bool {
+    let mut current = Some(entity);
+    while let Some(node) = current {
+        if world.get::<Billboard>(node).is_some()
+            || world.get::<InWorld3D>(node).is_some()
+            || world.get::<DrawnIn3D>(node).is_some()
+        {
+            return true;
+        }
+        current = world.get::<ChildOf>(node).map(ChildOf::parent);
+    }
+    false
+}
+
 /// Whether `entity` draws its whole fill as is: not a glyph, an image, a
 /// box background (drawn beneath its box's content), an echo copy, a camera
 /// view or a fill being drawn, clipped or blended.
@@ -548,6 +570,27 @@ mod tests {
             },
             |canvas: &mut SceneModel| {
                 canvas.rect(4.0, 2.0).fill(RED).covers_on_purpose();
+            },
+        ] {
+            assert!(warnings(cover).is_empty());
+        }
+    }
+
+    /// A billboard, or a shape placed in the 3D world, is drawn by the 3D
+    /// pass beneath the canvas, where the camera shows it: it hides no text,
+    /// whatever its scene coordinates.
+    #[test]
+    fn what_the_3d_pass_draws_hides_no_text() {
+        for cover in [
+            |canvas: &mut SceneModel| {
+                let tag = canvas.rect(4.0, 2.0).fill(RED);
+                canvas.group(&[&tag]).billboard();
+            },
+            |canvas: &mut SceneModel| {
+                canvas.rect(4.0, 2.0).fill(RED).billboard();
+            },
+            |canvas: &mut SceneModel| {
+                canvas.rect(4.0, 2.0).fill(RED).in_3d(None);
             },
         ] {
             assert!(warnings(cover).is_empty());

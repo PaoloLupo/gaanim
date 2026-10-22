@@ -103,10 +103,11 @@ pub const FORMAT: &str = "gaanim-bundle";
 /// lies; version 9 adds the copies of meshes drawn at many points, version
 /// 10 the images that fill outlines in the 3D world and the shadows and
 /// blurs of 3D content, version 11 normal maps and morph targets on
-/// imported models' meshes and the weights of those targets each frame, and
+/// imported models' meshes and the weights of those targets each frame,
 /// version 12 how translucent 3D content blends, the cones of spot lights,
-/// the depth of field that blurs 3D content and volumes.
-pub const VERSION: u32 = 12;
+/// the depth of field that blurs 3D content and volumes, and version 13 the
+/// lens shift of a perspective camera.
+pub const VERSION: u32 = 13;
 /// Oldest version this build still reads: bundles published in other pages
 /// keep playing when the hosted players move to a newer version.
 pub const OLDEST_READABLE: u32 = 5;

@@ -293,7 +293,8 @@ termina con `pass` o `fail`:
   figura y dónde se tapa por primera vez; súbelo con `z_layer` o `z_index`.
   Un texto oculto a propósito (con opacidad 0) o detrás de una figura
   translúcida, de una imagen o de una figura marcada con
-  `covers_on_purpose()` no cuenta.
+  `covers_on_purpose()` no cuenta, ni lo que dibuja el pase 3D (un
+  `billboard()` o un objeto `in_3d()`), que queda debajo del lienzo 2D.
 - Que ningún texto visible en una pausa o al final de un segmento se salga
   del área segura (el marco menos `margin`): dice cuánto se sale y dónde. Un
   texto `hud()` cuenta donde está fijado, y uno del lienzo 2D donde lo pone la

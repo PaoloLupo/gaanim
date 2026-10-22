@@ -614,12 +614,10 @@ impl PyCanvasAnim {
                 return Ok(Self {
                     inner: if text_default {
                         self.inner.clone().move_to_text(x, y)
+                    } else if let Some(anchor) = anchor {
+                        self.inner.clone().move_to_anchor(x, y, anchor.0)
                     } else {
-                        self.inner.clone().move_to_anchor(
-                            x,
-                            y,
-                            anchor.map(|anchor| anchor.0).unwrap_or_default(),
-                        )
+                        self.inner.clone().move_to(x, y)
                     },
                 });
             }
@@ -633,15 +631,20 @@ impl PyCanvasAnim {
                     },
                 );
             }
-            let anchor = anchor
-                .map(|anchor| anchor.0)
-                .unwrap_or_default()
-                .to_offset();
+            // A group about an origin follows the point by its origin.
+            let anchor =
+                (anchor.is_some() || !self.inner.property_target_has_group_origin()).then(|| {
+                    let anchor = anchor
+                        .map(|anchor| anchor.0)
+                        .unwrap_or_default()
+                        .to_offset();
+                    gaanim_core::glam::DVec3::new(anchor.x, anchor.y, 0.0)
+                });
             return source_anim(
                 self,
                 PropertySources::Translation {
                     values: [sx, sy, 0.0.into()],
-                    anchor: Some(gaanim_core::glam::DVec3::new(anchor.x, anchor.y, 0.0)),
+                    anchor,
                 },
             );
         }
@@ -2651,15 +2654,19 @@ impl PyDrawable {
                     self.0.clone().move_to_default(x, y)
                 }));
             }
-            let anchor = anchor
-                .map(|anchor| anchor.0)
-                .unwrap_or_default()
-                .to_offset();
+            // A group about an origin follows the point by its origin.
+            let anchor = (anchor.is_some() || !self.0.has_group_origin()).then(|| {
+                let anchor = anchor
+                    .map(|anchor| anchor.0)
+                    .unwrap_or_default()
+                    .to_offset();
+                gaanim_core::glam::DVec3::new(anchor.x, anchor.y, 0.0)
+            });
             return binding_result(
                 self,
                 PropertySources::Translation {
                     values: [sx, sy, 0.0.into()],
-                    anchor: Some(gaanim_core::glam::DVec3::new(anchor.x, anchor.y, 0.0)),
+                    anchor,
                 },
             );
         }
@@ -2726,9 +2733,22 @@ impl PyDrawable {
         Ok(Self(self.0.clone().shift_by_3d(dx, dy, dz)))
     }
 
-    pub(crate) fn billboard_impl(&self) -> PyResult<Self> {
+    pub(crate) fn billboard_impl(
+        &self,
+        offset: (f64, f64),
+        anchor: Option<PyAnchor>,
+    ) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
-        Ok(Self(self.0.clone().billboard()))
+        if !(offset.0.is_finite() && offset.1.is_finite()) {
+            return Err(PyValueError::new_err("billboard offset must be finite"));
+        }
+        if offset == (0.0, 0.0) && anchor.is_none() {
+            return Ok(Self(self.0.clone().billboard()));
+        }
+        Ok(Self(self.0.clone().billboard_shifted(
+            gaanim_core::glam::DVec2::new(offset.0, offset.1),
+            anchor.map(|anchor| anchor.0),
+        )))
     }
 
     pub(crate) fn in_3d_impl(&self, material: Option<PyMaterial3D>) -> PyResult<Self> {
@@ -4106,8 +4126,13 @@ impl PyDrawable {
         let result = slf.borrow().shift_by_3d_impl(dx, dy, dz);
         same_drawable(slf, result)
     }
-    fn billboard<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, PyAny>> {
-        let result = slf.borrow().billboard_impl();
+    #[pyo3(signature = (*, offset=(0.0, 0.0), anchor=None))]
+    fn billboard<'py>(
+        slf: &Bound<'py, Self>,
+        offset: (f64, f64),
+        anchor: Option<PyAnchor>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().billboard_impl(offset, anchor);
         same_drawable(slf, result)
     }
     #[pyo3(signature = (material=None))]
@@ -4648,8 +4673,13 @@ macro_rules! media_drawable_methods {
         Ok(slf)
     }
 
-    fn billboard<'py>(slf: PyRef<'py, Self>) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.handle()).billboard_impl()?;
+    #[pyo3(signature = (*, offset=(0.0, 0.0), anchor=None))]
+    fn billboard<'py>(
+        slf: PyRef<'py, Self>,
+        offset: (f64, f64),
+        anchor: Option<PyAnchor>,
+    ) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.handle()).billboard_impl(offset, anchor)?;
         Ok(slf)
     }
 

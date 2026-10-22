@@ -445,6 +445,10 @@ impl SceneBuilder<'_, '_, '_> {
                 let local = state.bounds.center() + state.bounds.size() * 0.5 * *anchor;
                 Some(local)
             }
+            // A group's pivot follows the point, as `move_to_3d` places it.
+            (PropertySources::Translation { anchor: None, .. }, Some(_)) => {
+                self.group_pivots.get(&target).copied()
+            }
             _ => None,
         };
         let anchor_offset = local_anchor

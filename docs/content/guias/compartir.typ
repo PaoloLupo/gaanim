@@ -588,7 +588,7 @@ bloque y los segmentos que usa, y descarga los demás bloques con sus
 segmentos a medida que los reproduce. Así, una presentación larga empieza a
 verse sin esperar a descargar los trazados de todas sus diapositivas.
 
-Este es el formato 12. Guarda las mallas y líneas 3D que cambian de un
+Este es el formato 13. Guarda las mallas y líneas 3D que cambian de un
 fotograma a otro (una superficie que se dobla, una curva que se mueve) como el
 cambio de sus vértices respecto de los fotogramas anteriores de su segmento,
 sin perder un bit: en `gallery/catenoid_helicoid` el paquete pasa de 62 a
@@ -602,10 +602,11 @@ una vez cada una, y la sombra y el desenfoque de cada objeto 3D, con su
 fotograma. Los morph targets y los mapas de normales de un modelo glTF se
 guardan una vez con su malla, y en cada fotograma solo los pesos; cada
 fotograma guarda también cómo se mezcla su contenido 3D translúcido, los
-conos de sus focos y la profundidad de campo que lo desenfoca. Los valores
+conos de sus focos, la profundidad de campo que lo desenfoca y el
+desplazamiento de la lente de la cámara (`screen_offset`). Los valores
 de un volumen y los colores de sus valores van a la tabla de imágenes, una
 vez cada uno.
-Gaanim sigue leyendo los formatos 5 a 11 (versiones 0.9 a 0.16 y las de
+Gaanim sigue leyendo los formatos 5 a 12 (versiones 0.9 a 0.16 y las de
 desarrollo de la 0.17), así que los paquetes ya publicados siguen abriéndose. Los grabados con
 versiones anteriores a la 0.9 ya no se abren: vuelve a grabarlos desde su
 script.

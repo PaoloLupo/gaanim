@@ -2387,7 +2387,8 @@ impl PyCamera {
     }
 
     /// Create a concrete perspective look-at camera state.
-    #[pyo3(signature = (eye, target, up=(0.0, 1.0, 0.0), fov_y=std::f64::consts::FRAC_PI_4, near=0.1, far=1000.0))]
+    #[pyo3(signature = (eye, target, up=(0.0, 1.0, 0.0), fov_y=std::f64::consts::FRAC_PI_4, near=0.1, far=1000.0, *, screen_offset=(0.0, 0.0)))]
+    #[allow(clippy::too_many_arguments)]
     fn state_3d(
         &self,
         eye: (f64, f64, f64),
@@ -2396,19 +2397,21 @@ impl PyCamera {
         fov_y: f64,
         near: f64,
         far: f64,
+        screen_offset: (f64, f64),
     ) -> PyResult<PyCameraState> {
         crate::custom::ensure_authoring_allowed()?;
         let inner = self
             .inner
             .lock()
             .expect("scene canvas poisoned")
-            .camera_state_3d(
+            .camera_state_3d_shifted(
                 gaanim_core::glam::DVec3::new(eye.0, eye.1, eye.2),
                 gaanim_core::glam::DVec3::new(target.0, target.1, target.2),
                 gaanim_core::glam::DVec3::new(up.0, up.1, up.2),
                 fov_y,
                 near,
                 far,
+                gaanim_core::glam::DVec2::new(screen_offset.0, screen_offset.1),
             )
             .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
         Ok(PyCameraState { inner })
@@ -2437,7 +2440,7 @@ impl PyCamera {
     /// on the frame, in HUD units.
     fn screen_point(&self, target: &Bound<'_, PyAny>) -> PyResult<PyPointRef> {
         crate::custom::ensure_authoring_allowed()?;
-        let target = resolve_endpoint_3d(target)?;
+        let target = resolve_reactive_endpoint_3d(target, &self.inner)?;
         Ok(PyPointRef(
             self.inner
                 .lock()
@@ -2810,16 +2813,17 @@ impl PyCameraAnimation {
             gaanim_math::Camera::validate_look_at(eye_vec, target_vec, up_vec)
                 .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
         }
+        // Reactive coordinates check their scene, which takes its lock.
+        let eye = eye
+            .as_ref()
+            .map(|eye| resolve_reactive_endpoint_3d(eye, &self.inner))
+            .transpose()?;
+        let target = resolve_reactive_endpoint_3d(&target, &self.inner)?;
         let inner = self
             .inner
             .lock()
             .expect("scene canvas poisoned")
-            .camera_look_at_endpoints(
-                eye.as_ref().map(resolve_endpoint_3d).transpose()?,
-                resolve_endpoint_3d(&target)?,
-                up_vec,
-                1.0,
-            );
+            .camera_look_at_endpoints(eye, target, up_vec, 1.0);
         Ok(PyCanvasAnim { inner })
     }
 
@@ -2893,6 +2897,18 @@ impl PyCameraAnimation {
             .lock()
             .expect("scene canvas poisoned")
             .camera_reset(1.0);
+        Ok(PyCanvasAnim { inner })
+    }
+
+    /// Move where a perspective camera draws the center of its view.
+    fn screen_offset(&self, x: f64, y: f64) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
+        let inner = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .camera_screen_offset(gaanim_core::glam::DVec2::new(x, y), 1.0)
+            .map_err(pyo3::exceptions::PyValueError::new_err)?;
         Ok(PyCanvasAnim { inner })
     }
 
@@ -3144,6 +3160,16 @@ impl PyCamera {
         Ok(self.clone())
     }
 
+    fn screen_offset(&self, x: f64, y: f64) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        let animation = PyCameraAnimation {
+            inner: self.inner.clone(),
+        }
+        .screen_offset(x, y)?;
+        self.commit_immediate(animation)?;
+        Ok(self.clone())
+    }
+
     /// Persistently bind orthographic camera channels to native reactive sources.
     #[pyo3(signature = (*, center=None, zoom=None, rotation=None, influence=None, enabled=true))]
     fn bind_2d(
@@ -3176,19 +3202,39 @@ impl PyCamera {
     }
 
     /// Persistently bind perspective camera channels to native reactive sources.
-    #[pyo3(signature = (*, eye=None, target=None, fov_y=None, up=(0.0, 1.0, 0.0), influence=None, enabled=true))]
+    #[pyo3(signature = (*, eye=None, target=None, fov_y=None, up=None, screen_offset=None, influence=None, enabled=true))]
+    #[allow(clippy::too_many_arguments)]
     fn bind_3d(
         &self,
         eye: Option<Bound<'_, PyAny>>,
         target: Option<Bound<'_, PyAny>>,
         fov_y: Option<Bound<'_, PyAny>>,
-        up: (f64, f64, f64),
+        up: Option<Bound<'_, PyAny>>,
+        screen_offset: Option<(Bound<'_, PyAny>, Bound<'_, PyAny>)>,
         influence: Option<Bound<'_, PyAny>>,
         enabled: bool,
     ) -> PyResult<PyCameraConstraint> {
         crate::custom::ensure_authoring_allowed()?;
-        let eye = eye.as_ref().map(resolve_endpoint_3d).transpose()?;
-        let target = target.as_ref().map(resolve_endpoint_3d).transpose()?;
+        let eye = eye
+            .as_ref()
+            .map(|eye| resolve_reactive_endpoint_3d(eye, &self.inner))
+            .transpose()?;
+        let target = target
+            .as_ref()
+            .map(|target| resolve_reactive_endpoint_3d(target, &self.inner))
+            .transpose()?;
+        let up = match up.as_ref() {
+            Some(up) => resolve_reactive_endpoint_3d(up, &self.inner)?,
+            None => CanvasEndpoint::Static(gaanim_core::glam::DVec3::Y),
+        };
+        let screen_offset = screen_offset
+            .map(|(x, y)| {
+                PyResult::Ok([
+                    extract_scalar_source(x, &self.inner)?,
+                    extract_scalar_source(y, &self.inner)?,
+                ])
+            })
+            .transpose()?;
         let fov_y = fov_y
             .map(|value| extract_scalar_source(value, &self.inner))
             .transpose()?;
@@ -3196,12 +3242,11 @@ impl PyCamera {
             .map(|value| extract_scalar_source(value, &self.inner))
             .transpose()?
             .unwrap_or_else(|| gaanim_animation::ScalarSource::constant(1.0));
-        let up = gaanim_core::glam::DVec3::new(up.0, up.1, up.2);
         let handle = self
             .inner
             .lock()
             .expect("scene canvas poisoned")
-            .camera_bind_3d(eye, target, fov_y, up, influence, enabled)
+            .camera_bind_3d(eye, target, fov_y, up, screen_offset, influence, enabled)
             .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
         Ok(PyCameraConstraint { inner: handle })
     }
@@ -9484,6 +9529,40 @@ pub(crate) fn resolve_endpoint_3d(obj: &Bound<'_, PyAny>) -> PyResult<CanvasEndp
             "3D Endpoint must be a Drawable, AnchorPoint, PointRef, or a (x, y, z) tuple",
         ))
     }
+}
+
+/// Resolve a 3D camera endpoint as [`resolve_endpoint_3d`] does, or an
+/// `(x, y, z)` whose coordinates may also be a `Parameter`, a `Variable`, a
+/// `Computed` or `scene.time` of `canvas`, which the camera reads every
+/// frame.
+pub(crate) fn resolve_reactive_endpoint_3d(
+    obj: &Bound<'_, PyAny>,
+    canvas: &Arc<Mutex<ApiCanvas>>,
+) -> PyResult<CanvasEndpoint> {
+    if obj.extract::<(f64, f64, f64)>().is_err()
+        && !obj.is_instance_of::<pyo3::types::PyString>()
+        && let Ok(items) = obj.extract::<Vec<Bound<'_, PyAny>>>()
+        && items.len() == 3
+    {
+        let mut sources = items
+            .into_iter()
+            .map(|item| extract_scalar_source(item, canvas))
+            .collect::<PyResult<Vec<_>>>()?;
+        let (z, y, x) = (
+            sources.pop().expect("three coordinates"),
+            sources.pop().expect("three coordinates"),
+            sources.pop().expect("three coordinates"),
+        );
+        return Ok(
+            match (x.constant_value(), y.constant_value(), z.constant_value()) {
+                (Some(x), Some(y), Some(z)) => {
+                    CanvasEndpoint::Static(gaanim_core::glam::DVec3::new(x, y, z))
+                }
+                _ => CanvasEndpoint::Expression { x, y, z },
+            },
+        );
+    }
+    resolve_endpoint_3d(obj)
 }
 
 fn resolve_ray(obj: &Bound<'_, PyAny>) -> PyResult<CanvasRay> {

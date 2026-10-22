@@ -1004,6 +1004,8 @@ pub struct ObjectSpec {
     pub exclude_from_parent_draw: bool,
     /// If true, this object should billboard (face camera) in 3D.
     pub billboard: bool,
+    /// Where a billboard sits around its point on screen.
+    pub billboard_shift: Option<gaanim_scene::BillboardShift>,
     pub(crate) coordinate_view_role: Option<gaanim_scene::CoordinateViewRole>,
     /// Unzoomed offset of a coordinate-view label from its data anchor.
     pub(crate) coordinate_label_offset: Option<gaanim_core::glam::DVec2>,
@@ -1205,6 +1207,7 @@ impl ObjectSpec {
             z_layer: None,
             covers_on_purpose: false,
             billboard: false,
+            billboard_shift: None,
             coordinate_view_role: None,
             coordinate_label_offset: None,
             axis_label_gap: None,
@@ -2325,8 +2328,25 @@ impl Anim {
         })
     }
 
+    /// Animate the visual center to `(x, y)`, or the origin of a group
+    /// given one, as `DrawableHandle::move_to_default` places them.
     pub fn move_to(self, x: impl Into<ScalarSource>, y: impl Into<ScalarSource>) -> Self {
-        self.move_to_anchor(x, y, Anchor::Center)
+        if self.property_target_has_group_origin() {
+            self.move_to_3d(x, y, 0.0)
+        } else {
+            self.move_to_anchor(x, y, Anchor::Center)
+        }
+    }
+
+    /// Whether the target is a group about an origin, which `move_to`
+    /// places in place of its box's center.
+    #[doc(hidden)]
+    pub fn property_target_has_group_origin(&self) -> bool {
+        self.property_spec.as_ref().is_some_and(|spec| {
+            spec.lock().is_ok_and(|spec| {
+                matches!(spec.kind, SpawnKind::Group(_)) && spec.group_origin.is_some()
+            })
+        })
     }
 
     /// Capture a drawable's bounds center when the animation is scheduled.

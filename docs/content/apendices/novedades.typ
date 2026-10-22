@@ -20,7 +20,9 @@ desenfoques también viven en el mundo 3D, los modelos glTF traen sus
 morph targets y sus mapas de normales, el contenido 3D translúcido puede
 mezclarse en el orden en que está en cada píxel, hay focos, la
 profundidad de campo de la cámara desenfoca también el contenido 3D, y los
-campos escalares se dibujan como isosuperficies y volúmenes.
+campos escalares se dibujan como isosuperficies y volúmenes. La cámara 3D
+puede dejar su objetivo a un lado del encuadre y moverse con parámetros, y
+los rótulos 3D se colocan en pantalla sobre su punto.
 
 == Morph entre mallas 3D
 
@@ -152,16 +154,63 @@ campos escalares se dibujan como isosuperficies y volúmenes.
 - El paquete `.gaanim` guarda cada volumen una vez, en su tabla de imágenes.
 - Nuevo ejemplo, `3d/fields_3d`.
 
+== Encuadrar el 3D junto a un panel
+
+- `scene.camera.screen_offset(x, y)` y `animate.screen_offset(x, y)`
+  desplazan la lente de la cámara en perspectiva: el objetivo se dibuja en
+  `(x, y)` sin que la cámara gire, y un `orbit` o un `dolly` lo dejan ahí,
+  así que un modelo se queda a un lado de un panel de texto. `state_3d(...,
+  screen_offset=)` lo guarda en un estado y `reset()` lo devuelve al centro.
+- `billboard(offset=(dx, dy), anchor=)` coloca un rótulo sobre su punto 3D
+  por el punto de su caja que diga `anchor` y lo desplaza en pantalla, a la
+  misma distancia esté el punto cerca o lejos. Antes hacía falta meterlo en
+  un grupo con `origin=(0, 0)`.
+- `bind_3d` y `look_at` aceptan `eye` y `target` como tuplas cuyas
+  coordenadas son `Parameter`, `Variable`, `Computed` o `scene.time`, sin
+  puntos invisibles que los arrastren; `bind_3d` también un `up` y un
+  `screen_offset` así.
+- Nuevo ejemplo, `3d/framing_3d`.
+
+== Correcciones
+
+- `animate.move_to_3d(p)` de un grupo llevaba su traslación a `p`, así que
+  el grupo terminaba corrido por su origen (o por el centro de su caja): pedir
+  el lugar donde ya estaba lo movía. Ahora deja el origen del grupo, o el
+  centro de su caja si no tiene, donde lo deja `move_to_3d(p)`; también un
+  `move_to_3d` después de declararlo y uno con coordenadas reactivas. Y
+  `move_to` y `animate.move_to` colocan el origen de un grupo con `origin=`,
+  como dice la referencia.
+- Un objeto que entraba con `create`, `write`, `reveal` o
+  `grow_from_center` y más adelante tenía un `fade_in()` quedaba invisible
+  hasta su siguiente fundido. Un `fade_in` solo deja transparente desde el
+  principio al objeto que aún no entró.
+- La última pausa de un segmento ya mostraba los cambios instantáneos del
+  inicio del siguiente (`camera.reset()`, un `move_to`). Una pausa muestra
+  ahora lo escrito antes de ella; lo que cambia de golpe después, en el
+  mismo instante, llega un microsegundo más tarde, en todos los
+  reproductores y en los paquetes. `gaanim inspect` lista esa pausa dentro
+  del segmento que la escribe.
+- `gaanim check` avisaba de textos tapados por un `billboard()` comparando
+  sus coordenadas 3D sin proyectar. El pase 3D dibuja los billboards y los
+  objetos `in_3d()` debajo del lienzo 2D, así que ya no cuentan como tapas.
+- Con un `traced_path` en la escena y alguna posición reactiva (`follow`,
+  `screen_point`…), cada salto en la línea de tiempo volvía a muestrear el
+  mundo entero a 60 Hz desde t=0, aunque el rastro se hubiera disipado
+  minutos antes: `gaanim check` tardaba del orden de *pausas × instante de la
+  pausa*. El rastro solo se reconstruye con todo el mundo cuando algo
+  reactivo mueve su fuente, y los clips de la cámara ya no cuentan como
+  movimientos de la fuente.
+
 == Al actualizar
 
-- Los paquetes `.gaanim` pasan al formato 12, que guarda los morphs 3D, las
+- Los paquetes `.gaanim` pasan al formato 13, que guarda los morphs 3D, las
   copias de mallas, las imágenes de los objetos en el mundo 3D, la sombra y
   el desenfoque de los objetos 3D, los morph targets y mapas de normales de
   los modelos glTF, cómo se mezcla el contenido 3D translúcido, los conos de
-  los focos, la profundidad de campo del contenido 3D y los volúmenes.
-  Gaanim sigue
-  abriendo los de formato 5 a 11; un Gaanim anterior no abre los nuevos, así
-  que actualiza los reproductores que los publican.
+  los focos, la profundidad de campo del contenido 3D, los volúmenes y el
+  desplazamiento de la lente de la cámara. Gaanim sigue abriendo los de
+  formato 5 a 12; un Gaanim anterior no abre los nuevos, así que actualiza
+  los reproductores que los publican.
 - Una escena que desenfoca sus capas de parallax con
   `camera.depth_of_field` mientras una cámara 3D está apartada de su
   objetivo desenfoca ahora también su contenido 3D, que antes quedaba
@@ -175,6 +224,10 @@ campos escalares se dibujan como isosuperficies y volúmenes.
 - `transform_to` y `replacement_transform_to` entre una malla 3D y un objeto
   que no lo es, o entre una malla con material y otra sin él, lanzan
   `ValueError`. Antes la malla no cambiaba.
+- `move_to(x, y)` de un grupo con `origin=` coloca su origen, no el centro de
+  su caja.
+- Lo que cambia de golpe justo después de un `scene.stop()` empieza un
+  microsegundo más tarde, y lo que le sigue también.
 
 = 0.16.1
 

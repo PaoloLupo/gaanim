@@ -467,6 +467,50 @@ mod range_serde {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Billboard;
 
+/// Where a [`Billboard`] sits around its point on screen: the point of its
+/// box `anchor` names (a normalized point of its local bounds, `None` for
+/// its own origin) on the point, moved by `offset` scene units of the
+/// frame, however far the point is.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Default)]
+pub struct BillboardShift {
+    pub offset: gaanim_core::glam::DVec2,
+    pub anchor: Option<gaanim_core::glam::DVec2>,
+}
+
+impl BillboardShift {
+    /// The move, in the billboard's local units, that puts its anchor on its
+    /// point and then shifts it by the offset, for a billboard of `bounds`
+    /// drawn at `scale`.
+    pub fn local(
+        &self,
+        bounds: Option<gaanim_math::Bounds3D>,
+        scale: gaanim_core::glam::DVec3,
+    ) -> gaanim_core::glam::DVec3 {
+        let anchor =
+            self.anchor
+                .zip(bounds)
+                .map_or(gaanim_core::glam::DVec2::ZERO, |(anchor, bounds)| {
+                    let (center, half) = (bounds.center(), bounds.size() * 0.5);
+                    gaanim_core::glam::DVec2::new(
+                        center.x + half.x * anchor.x,
+                        center.y + half.y * anchor.y,
+                    )
+                });
+        let per = |scale: f64| {
+            if scale.abs() > 1e-12 {
+                1.0 / scale
+            } else {
+                0.0
+            }
+        };
+        gaanim_core::glam::DVec3::new(
+            self.offset.x * per(scale.x) - anchor.x,
+            self.offset.y * per(scale.y) - anchor.y,
+            0.0,
+        )
+    }
+}
+
 /// Internal: where the 3D pass draws a [`Billboard`] it was handed (see
 /// [`InWorld3D`]): a plane facing the camera, as large on screen as the 2D
 /// renderer would draw the label, kept by
