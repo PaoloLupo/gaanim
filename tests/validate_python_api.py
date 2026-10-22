@@ -2086,6 +2086,99 @@ def validate_matrix_logical_units(module: object) -> list[str]:
     return failures
 
 
+def validate_python_module_stubs() -> list[str]:
+    """The stubs of the pure-Python modules declare what their code takes.
+
+    For every public class and function a stub declares that the code
+    defines (a stub may name a type only for typing, as ``TailwindPalette``):
+    a dataclass's fields, a class's constructor parameters and a function's
+    parameters match the code's, by name and kind. Every public type alias
+    of the code (a ``Literal`` or a union) is declared too.
+    """
+    import dataclasses
+    import importlib
+    import inspect
+    import types
+
+    def stub_parameters(function: ast.FunctionDef) -> list[str]:
+        arguments = function.args
+        names = [arg.arg for arg in arguments.posonlyargs + arguments.args]
+        if arguments.vararg is not None:
+            names.append("*" + arguments.vararg.arg)
+        names += [f"{arg.arg}=" for arg in arguments.kwonlyargs]
+        if arguments.kwarg is not None:
+            names.append("**" + arguments.kwarg.arg)
+        return [name for name in names if name not in ("self", "cls")]
+
+    def code_parameters(function: object) -> list[str]:
+        names = []
+        for parameter in inspect.signature(function).parameters.values():
+            if parameter.name in ("self", "cls"):
+                continue
+            prefix, suffix = {
+                inspect.Parameter.VAR_POSITIONAL: ("*", ""),
+                inspect.Parameter.VAR_KEYWORD: ("**", ""),
+                inspect.Parameter.KEYWORD_ONLY: ("", "="),
+            }.get(parameter.kind, ("", ""))
+            names.append(prefix + parameter.name + suffix)
+        return names
+
+    failures: list[str] = []
+    for module_name in ("sections", "templates", "matrix", "colors"):
+        stub = STUB.with_name(f"{module_name}.pyi")
+        tree = ast.parse(stub.read_text(encoding="utf-8"), filename=str(stub))
+        code = importlib.import_module(f"gaanim.{module_name}")
+        declared: set[str] = set()
+        for node in tree.body:
+            if isinstance(node, ast.Assign):
+                declared.update(target.id for target in node.targets if isinstance(target, ast.Name))
+            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                declared.add(node.target.id)
+            elif isinstance(node, (ast.ClassDef, ast.FunctionDef)):
+                declared.add(node.name)
+            if not isinstance(node, (ast.ClassDef, ast.FunctionDef)) or node.name.startswith("_"):
+                continue
+            where = f"{module_name}.pyi {node.name}"
+            runtime = getattr(code, node.name, None)
+            if runtime is None:
+                continue
+            if isinstance(node, ast.FunctionDef):
+                if stub_parameters(node) != code_parameters(runtime):
+                    failures.append(
+                        f"{where} takes {stub_parameters(node)}, the code {code_parameters(runtime)}"
+                    )
+            elif dataclasses.is_dataclass(runtime):
+                fields = [
+                    member.target.id
+                    for member in node.body
+                    if isinstance(member, ast.AnnAssign) and isinstance(member.target, ast.Name)
+                ]
+                expected = [field.name for field in dataclasses.fields(runtime)]
+                if fields != expected:
+                    failures.append(f"{where} has fields {fields}, the code {expected}")
+            else:
+                init = next(
+                    (
+                        member
+                        for member in node.body
+                        if isinstance(member, ast.FunctionDef) and member.name == "__init__"
+                    ),
+                    None,
+                )
+                if init is not None and stub_parameters(init) != code_parameters(runtime.__init__):
+                    failures.append(
+                        f"{where}.__init__ takes {stub_parameters(init)}, "
+                        f"the code {code_parameters(runtime.__init__)}"
+                    )
+        for name, value in vars(code).items():
+            if name.startswith("_") or name in declared:
+                continue
+            origin = typing.get_origin(value)
+            if origin is typing.Literal or origin in (typing.Union, types.UnionType):
+                failures.append(f"{module_name}.pyi does not declare the alias {name}")
+    return failures
+
+
 def validate_matrix_stub_typing() -> list[str]:
     """Keep the matrix facade drawable-compatible and derivations specialized."""
     matrix_stub = STUB.with_name("matrix.pyi")
@@ -3985,6 +4078,7 @@ def main() -> int:
     missing.extend(validate_matrix_contract(module))
     missing.extend(validate_matrix_logical_units(module))
     missing.extend(validate_matrix_stub_typing())
+    missing.extend(validate_python_module_stubs())
     missing.extend(validate_vector_geometry_contract(module))
     missing.extend(validate_camera_view_contract(module))
     missing.extend(validate_composition_contract(module))

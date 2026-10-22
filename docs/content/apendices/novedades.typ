@@ -238,6 +238,18 @@ sobre su punto.
 - Un texto oculto con `hidden()` que se movía con `animate.move_to_3d` (o
   `move_to`) no aparecía nunca, ni con un `fade_in`: el movimiento mostraba
   la raíz del texto pero no sus glifos.
+- `billboard(anchor=)` de un grupo cuyos miembros no están centrados en su
+  origen ignoraba el ancla y se corría según el ángulo de la cámara: giraba
+  alrededor del origen del marco de sus miembros, no del pivote que
+  `move_to_3d` coloca. Ahora gira alrededor de su pivote y pone el punto de
+  la caja de sus miembros que nombra `anchor` sobre su punto 3D, como un
+  objeto suelto.
+- Un billboard con `anchor` u `offset` se desplazaba un poco más en cada
+  cuadro en el que solo se movía la cámara (un `orbit` con todo lo demás
+  quieto): partía de su propia posición del cuadro anterior.
+- El stub de `gaanim.sections` no declaraba `camera=` en `Section` ni en
+  `SectionStep`, ni el alias `SegmentCamera`, así que pyright rechazaba lo
+  que la escena aceptaba.
 
 == Al actualizar
 

@@ -4931,12 +4931,15 @@ class Drawable:
         ``move_to_3d`` places its 3D point, and the drawable is drawn on
         screen around where the camera shows that point, in scene units of
         the frame, whatever the depth: ``anchor`` names the point of its box
-        that lies on it (its own origin without one), and ``offset`` moves it
-        from there, so ``billboard(offset=(0, 0.4), anchor="bottom")`` keeps a
-        label just above a 3D point at every distance. ``shift_by`` moves
-        the 3D point instead. Inside a billboarded group, the members are
-        placed in those screen units around the group's origin. A
-        non-finite ``offset`` raises ``ValueError``.
+        that lies on it (its own origin without one, or a group's pivot), and
+        ``offset`` moves it from there, so
+        ``billboard(offset=(0, 0.4), anchor="bottom")`` keeps a label just
+        above a 3D point at every distance. ``shift_by`` moves the 3D point
+        instead. A billboarded group turns about its pivot (its ``origin=``,
+        or the center of its members' box), which ``move_to_3d`` places, and
+        ``anchor`` names a point of its members' box; the members are placed
+        in those screen units around it. A non-finite ``offset`` raises
+        ``ValueError``.
 
         Example:
             label = scene.text("origin").move_to_3d(0.0, 1.0, 0.0).billboard()

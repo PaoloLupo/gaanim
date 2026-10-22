@@ -1087,12 +1087,8 @@ pub fn billboard_system(
             Entity,
             &mut GlobalSpatialTransform,
             Option<&mut bevy::prelude::Transform>,
-            Option<(
-                &AxisLabelGap,
-                &SpatialTransform,
-                Option<&ChildOf>,
-                Option<&LocalBounds>,
-            )>,
+            Option<(&SpatialTransform, Option<&ChildOf>)>,
+            Option<(&AxisLabelGap, Option<&LocalBounds>)>,
             Option<&mut crate::components::BillboardPlane>,
             Option<&LocalBounds>,
             Option<&crate::components::BillboardShift>,
@@ -1109,7 +1105,7 @@ pub fn billboard_system(
 
     let Some(current) = camera else { return };
     let current = &current.camera;
-    for (entity, mut global, transform_opt, axis_label, plane, bounds, shift) in &mut query {
+    for (entity, mut global, transform_opt, local, axis_label, plane, bounds, shift) in &mut query {
         let cam = transition.as_deref().map_or(current, |frame| {
             let side = frame.side_of(entity, |entity| {
                 parents.get(entity).ok().map(ChildOf::parent)
@@ -1149,8 +1145,13 @@ pub fn billboard_system(
                 .ok()
                 .map(|(_, global)| global.mat4),
         };
-        let axis_label = axis_label.and_then(|(gap, local, parent, bounds)| {
-            Some((gap, parent_of(parent)?, local, bounds))
+        // Placed from its own transform under its parent's, not from what
+        // this system wrote last frame: propagation skips the frames in
+        // which nothing but the camera moves.
+        let placed = local.and_then(|(local, parent)| Some((parent_of(parent)?, local)));
+        let axis_label = axis_label.and_then(|(gap, bounds)| {
+            let (parent, local) = placed?;
+            Some((gap, parent, local, bounds))
         });
         // A label that follows its axis to the edge the camera shows best
         // moves with it, and its tick turns to that edge's outside.
@@ -1170,9 +1171,18 @@ pub fn billboard_system(
                     parent * DMat4::from_translation(offset) * local.to_mat4()
                 }
             }
-            None => billboard.mat4,
+            None => placed.map_or(billboard.mat4, |(parent, local)| parent * local.to_mat4()),
         };
         let (scale, _rot, mut trans) = world.to_scale_rotation_translation();
+        // A group's pivot, which `move_to_3d` places, lies on its point
+        // rather than the origin of its members' frame.
+        if axis_label.is_none()
+            && let Some(point) = shift
+                .map(|shift| shift.point)
+                .filter(|point| *point != DVec3::ZERO)
+        {
+            trans = world.transform_point3(point);
+        }
         let mut at = project(trans);
         // How near an axis label seen through its box comes: in front of the
         // far faces, where its grid lies, and behind what the box holds.
@@ -2209,6 +2219,72 @@ mod tests {
         );
     }
 
+    /// A group whose members lie off its origin turns about its pivot, which
+    /// `move_to_3d` puts on its point, and puts its box's anchor there,
+    /// whatever the camera's angle. Run again without a propagation in
+    /// between, as in a frame where only the camera moves, it stays put.
+    #[test]
+    fn a_billboard_group_puts_its_anchor_on_its_point_from_every_side() {
+        use gaanim_core::glam::{DVec2, DVec3};
+        use gaanim_core::kurbo::Point;
+        // A 5 by 1 member with its right edge on the scene's origin, grouped
+        // about its center, the group's pivot, which is moved to `at`.
+        let pivot = DVec3::new(-2.5, 0.0, 0.0);
+        let at = DVec3::new(0.5, 1.0, -1.0);
+        let member_box = gaanim_math::Bounds3D {
+            min: DVec3::new(-5.0, -0.5, 0.0),
+            max: DVec3::new(0.0, 0.5, 0.0),
+        };
+        for eye in [
+            DVec3::new(0.0, 0.0, 12.0),
+            DVec3::new(7.0, 0.0, 9.0),
+            DVec3::new(6.0, 5.0, 8.0),
+            DVec3::new(11.0, 5.0, 3.0),
+        ] {
+            let camera = axis_camera(eye);
+            let mut world = World::new();
+            world.insert_resource(gaanim_math::ResolvedCamera::new(
+                camera,
+                gaanim_math::CameraViewport::default(),
+            ));
+            let mut local = SpatialTransform::identity().with_anchor(pivot);
+            local.translation = at - pivot;
+            let group = world
+                .spawn((
+                    local,
+                    GlobalSpatialTransform::from_local(&local),
+                    LocalBounds(member_box),
+                    crate::components::Billboard,
+                    crate::components::BillboardShift {
+                        anchor: Some(DVec2::new(1.0, 0.0)),
+                        point: pivot,
+                        ..Default::default()
+                    },
+                ))
+                .id();
+            let member_local = SpatialTransform::new_2d(-2.5, 0.0);
+            let member = world
+                .spawn((
+                    member_local,
+                    GlobalSpatialTransform::default(),
+                    ChildOf(group),
+                ))
+                .id();
+            let mut schedule = Schedule::default();
+            schedule.add_systems(billboard_system);
+            let expected = canvas_point(&camera, at);
+            for run in 0..2 {
+                schedule.run(&mut world);
+                let global = world.get::<GlobalSpatialTransform>(member).unwrap();
+                let right = global.affine_2d * Point::new(2.5, 0.0);
+                assert!(
+                    (DVec2::new(right.x, right.y) - expected).length() < 1e-6,
+                    "eye {eye:?}, run {run}: right edge at {right:?}, expected {expected:?}"
+                );
+            }
+        }
+    }
+
     /// A shifted billboard puts its box's anchor on its point and moves it by
     /// its offset on the canvas, whatever the point's depth, in the 2D
     /// drawing and in the plane the 3D pass draws.
@@ -2237,11 +2313,15 @@ mod tests {
                     crate::components::BillboardShift {
                         offset: DVec2::new(0.0, 0.4),
                         anchor: Some(DVec2::new(0.0, -1.0)),
+                        ..Default::default()
                     },
                 ))
                 .id();
             let mut schedule = Schedule::default();
             schedule.add_systems(billboard_system);
+            // Twice, with no propagation in between, as in a frame where
+            // only the camera moves: it stays put.
+            schedule.run(&mut world);
             schedule.run(&mut world);
 
             let point = canvas_point(&camera, local.translation);
