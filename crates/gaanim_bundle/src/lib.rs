@@ -105,9 +105,10 @@ pub const FORMAT: &str = "gaanim-bundle";
 /// blurs of 3D content, version 11 normal maps and morph targets on
 /// imported models' meshes and the weights of those targets each frame,
 /// version 12 how translucent 3D content blends, the cones of spot lights,
-/// the depth of field that blurs 3D content and volumes, and version 13 the
-/// lens shift of a perspective camera.
-pub const VERSION: u32 = 13;
+/// the depth of field that blurs 3D content and volumes, version 13 the
+/// lens shift of a perspective camera, and version 14 the camera the
+/// outgoing segment of a transition keeps.
+pub const VERSION: u32 = 14;
 /// Oldest version this build still reads: bundles published in other pages
 /// keep playing when the hosted players move to a newer version.
 pub const OLDEST_READABLE: u32 = 5;
@@ -2261,6 +2262,42 @@ mod tests {
         for (index, xs) in frames.iter().enumerate() {
             assert_eq!(&lefts(&bundle.frame(index).unwrap()), xs, "frame {index}");
         }
+    }
+
+    #[test]
+    fn the_camera_an_outgoing_segment_keeps_round_trips() {
+        let mut kept = gaanim_math::Camera::perspective_3d(1280, 720, 0.6);
+        kept.position = gaanim_core::glam::DVec3::new(9.0, 5.0, 8.0);
+        kept.lens_shift = gaanim_core::glam::DVec2::new(-3.0, 0.5);
+        let view = gaanim_core::kurbo::Affine::new([1.5, 0.0, 0.0, 1.5, -2.0, 1.0]);
+        let transition = |outgoing_camera| gaanim_renderer::pipeline::CapturedTransition {
+            outgoing_camera,
+            outgoing_view: outgoing_camera.map_or(gaanim_core::kurbo::Affine::IDENTITY, |_| view),
+            ..Default::default()
+        };
+        let mut writer = BundleWriter::new(std::io::Cursor::new(Vec::new()), "test");
+        for (index, camera) in [Some(kept), None].into_iter().enumerate() {
+            let mut recorded = frame(index as f64 / 60.0);
+            recorded.capture.elements = vec![square(1, 0.0, false)];
+            recorded.capture.transition = Some(transition(camera));
+            writer.push_frame(&recorded, [index as u8; 32]).unwrap();
+        }
+        let scene = SceneData {
+            fps: 60,
+            duration: 2.0 / 60.0,
+            ..Default::default()
+        };
+        let mut bundle =
+            Bundle::from_bytes(writer.finish(&scene).unwrap().into_inner().into()).unwrap();
+        let read = |bundle: &mut Bundle, index| {
+            let transition = bundle.frame(index).unwrap().capture.transition.unwrap();
+            (transition.outgoing_camera, transition.outgoing_view)
+        };
+        assert_eq!(read(&mut bundle, 0), (Some(kept), view));
+        assert_eq!(
+            read(&mut bundle, 1),
+            (None, gaanim_core::kurbo::Affine::IDENTITY)
+        );
     }
 
     #[test]

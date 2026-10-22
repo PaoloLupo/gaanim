@@ -46,6 +46,8 @@ pub(crate) struct CanvasState {
     pub next_id: u32,
     pub next_segment_id: u32,
     pub next_camera_binding_order: u64,
+    /// Camera constraints that let go as the next segment starts.
+    pub segment_camera_bindings: Vec<u64>,
     pub next_camera_state_id: u64,
     pub saved_camera_states: HashMap<String, gaanim_animation::CameraStateSource>,
     pub all_drawables: Vec<ObjectId>,
@@ -126,6 +128,7 @@ impl CanvasState {
             next_id: 1,
             next_segment_id: 1,
             next_camera_binding_order: 0,
+            segment_camera_bindings: Vec::new(),
             next_camera_state_id: 1,
             saved_camera_states: HashMap::new(),
             all_drawables: Vec::new(),
@@ -479,13 +482,6 @@ pub(crate) type SharedObjectSpec = Arc<Authored<ObjectSpec>>;
 
 pub(crate) type SharedCameraBindingSpec = Arc<Authored<CameraBindingSpec>>;
 
-/// Authoring-time activation window for a persistent camera constraint.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct CameraBindingWindowSpec {
-    pub start: f64,
-    pub end: Option<f64>,
-}
-
 /// Deferred, unresolved channels of a native camera binding.
 // Built once per scene or clip, not stored in bulk: boxing the large
 // variant would only add indirection.
@@ -512,7 +508,9 @@ pub(crate) struct CameraBindingSpec {
     pub order: u64,
     pub kind: CanvasCameraBindingKind,
     pub influence: ScalarSource,
-    pub windows: Vec<CameraBindingWindowSpec>,
+    /// Whether the constraint applies from its creation; later switches
+    /// are [`Op::SwitchCameraBinding`]s.
+    pub enabled: bool,
 }
 
 // -----------------------------------------------------------------------
@@ -563,6 +561,9 @@ pub(crate) enum Op {
     Spawn(SharedObjectSpec),
     /// Spawn a non-rendered persistent camera binding.
     SpawnCameraBinding(SharedCameraBindingSpec),
+    /// Enable or disable, at the cursor, the camera binding created
+    /// `order`-th (`CameraConstraint.enable` / `disable`).
+    SwitchCameraBinding { order: u64, enabled: bool },
     /// Capture the authored camera pose at the current timeline cursor.
     CaptureCameraState { id: u64 },
     /// Play a single animation sequentially (auto-queued). `active=false`

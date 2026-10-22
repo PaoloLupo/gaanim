@@ -264,6 +264,9 @@ pub enum PropertyLensSpec {
     CameraState {
         from: gaanim_animation::CameraStateSource,
         to: gaanim_animation::CameraStateSource,
+        /// Turn about the target, as [`gaanim_math::CameraPose::orbit_in_frame`]
+        /// does, rather than ease the eye straight.
+        orbit: bool,
     },
     CameraPosition {
         from: gaanim_core::glam::DVec3,
@@ -649,7 +652,7 @@ impl PropertyLensSpec {
                 from: from.clone(),
                 to: to.clone(),
             },
-            Self::CameraState { from, to } => PropertyLens::CameraState {
+            Self::CameraState { from, to, .. } => PropertyLens::CameraState {
                 from: *from,
                 to: *to,
             },

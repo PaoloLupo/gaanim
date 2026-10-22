@@ -1577,9 +1577,13 @@ impl<'a> GpuMeshes<'a> {
     /// The frames of the classes that took something, seen by `camera`,
     /// whose canvas projection maps NDC to scene units by `ndc_to_scene` and
     /// draws lines `line_width` scene units wide.
+    /// Draw the pushed content through `camera`, but a class `class_camera`
+    /// gives another camera (the side a transition takes away) through
+    /// that one, onto the same canvas.
     pub(crate) fn finish(
         self,
         camera: &Camera,
+        class_camera: impl Fn(usize) -> Camera,
         ndc_to_scene: kurbo::Affine,
         line_width: f64,
         illumination: &Illumination,
@@ -1592,14 +1596,9 @@ impl<'a> GpuMeshes<'a> {
         }
         let (width, height) = self.size;
         let shadows = shadows(illumination, &self.pending);
-        let uniforms: Arc<[u8]> = frame_uniforms(
-            camera,
-            pixels_to_ndc(width, height) * self.placement * ndc_to_scene,
-            (width, height),
-            illumination,
-            &shadows,
-        )
-        .into();
+        let ndc_map = pixels_to_ndc(width, height) * self.placement * ndc_to_scene;
+        let uniforms: Arc<[u8]> =
+            frame_uniforms(camera, ndc_map, (width, height), illumination, &shadows).into();
         let shadow_layers: Arc<[[f32; 16]]> = shadows
             .layers
             .iter()
@@ -1608,33 +1607,34 @@ impl<'a> GpuMeshes<'a> {
         // Pixels of the image per scene unit, which line widths scale by.
         let pixels_per_unit = self.placement.determinant().abs().sqrt();
         // How far along the view the content lies, which bounds its blur.
-        let forward = camera.rotation * DVec3::NEG_Z;
-        let depths = self
-            .pending
-            .iter()
-            .map(|pending| {
-                let (center, radius) = world_sphere(pending);
-                let distance = forward.dot(center - camera.position);
-                (distance - radius, distance + radius)
+        let focus_through = |camera: &Camera, pending: &mut dyn Iterator<Item = &Pending>| {
+            let forward = camera.rotation * DVec3::NEG_Z;
+            let depths = pending
+                .map(|pending| {
+                    let (center, radius) = world_sphere(pending);
+                    let distance = forward.dot(center - camera.position);
+                    (distance - radius, distance + radius)
+                })
+                .filter(|(near, far)| near.is_finite() && far.is_finite())
+                .reduce(|(a, b), (c, d)| (a.min(c), b.max(d)));
+            depths.and_then(|depths| {
+                focus::FocusDraw::new(
+                    &illumination.depth_of_field,
+                    camera,
+                    pixels_per_unit,
+                    depths,
+                )
             })
-            .filter(|(near, far)| near.is_finite() && far.is_finite())
-            .reduce(|(a, b), (c, d)| (a.min(c), b.max(d)));
-        let focus = depths.and_then(|depths| {
-            focus::FocusDraw::new(
-                &illumination.depth_of_field,
-                camera,
-                pixels_per_unit,
-                depths,
-            )
-        });
+        };
+        let focus = focus_through(camera, &mut self.pending.iter());
 
         // Opaque draws first, near ones first so that the depth test skips
         // what they hide; translucent ones after them, from back to front.
-        let view = camera.view_matrix();
         let mut pending: Vec<(f64, Pending)> = self
             .pending
             .into_iter()
             .map(|pending| {
+                let view = class_camera(pending.class).view_matrix();
                 let (center, radius) = world_sphere(&pending);
                 // Filled outlines lie in a plane: its middle orders them, where
                 // a wide text's far edge would put it behind a small shape that
@@ -1686,6 +1686,17 @@ impl<'a> GpuMeshes<'a> {
                 .unwrap_or(rest.len());
             let (members, after) = rest.split_at(end);
             rest = after;
+            // A class seen through a camera of its own takes its uniforms
+            // and its focus from it.
+            let own = class_camera(class);
+            let (uniforms, focus) = if own == *camera {
+                (Arc::clone(&uniforms), focus)
+            } else {
+                (
+                    frame_uniforms(&own, ndc_map, (width, height), illumination, &shadows).into(),
+                    focus_through(&own, &mut members.iter().map(|(_, pending)| pending)),
+                )
+            };
             let image = frame_image(width, height, self.slot + class);
             let mut draws = Vec::with_capacity(members.len());
             let mut draw_uniforms = Vec::with_capacity(members.len() * DRAW_STRIDE);
@@ -5966,7 +5977,13 @@ mod tests {
         );
         meshes.push(0, [(2, 1), (2, 1)], [None, None], &content(&opaque));
         meshes.push(1, [(3, 1), (3, 1)], [None, None], &content(&opaque));
-        let frames = meshes.finish(&camera, ndc_to_canvas, line_width, &Illumination::default());
+        let frames = meshes.finish(
+            &camera,
+            |_| camera,
+            ndc_to_canvas,
+            line_width,
+            &Illumination::default(),
+        );
         assert_eq!(frames.len(), 2);
         assert_ne!(frames[0].1.image.data.id(), frames[1].1.image.data.id());
         let translucent: Vec<bool> = frames[0]
@@ -6105,7 +6122,13 @@ mod tests {
                 },
             );
         }
-        let frames = meshes.finish(&camera, ndc_to_canvas, line_width, &Illumination::default());
+        let frames = meshes.finish(
+            &camera,
+            |_| camera,
+            ndc_to_canvas,
+            line_width,
+            &Illumination::default(),
+        );
         let half_width = |draw: usize| {
             let start = draw * DRAW_STRIDE + LINE_ROW;
             f32::from_le_bytes(
@@ -6166,7 +6189,13 @@ mod tests {
                 },
             );
         }
-        let frames = meshes.finish(&camera, ndc_to_canvas, line_width, &Illumination::default());
+        let frames = meshes.finish(
+            &camera,
+            |_| camera,
+            ndc_to_canvas,
+            line_width,
+            &Illumination::default(),
+        );
         let frame = &frames[0].1;
         let shown = |draw: usize| {
             let start = draw * DRAW_STRIDE + LINE_ROW + 4;
@@ -6234,7 +6263,13 @@ mod tests {
             },
         );
         let frames: Vec<GpuMeshFrame> = meshes
-            .finish(&camera, ndc_to_canvas, 0.1, &Illumination::default())
+            .finish(
+                &camera,
+                |_| camera,
+                ndc_to_canvas,
+                0.1,
+                &Illumination::default(),
+            )
             .into_iter()
             .map(|(_, frame)| frame)
             .collect();
@@ -6303,7 +6338,13 @@ mod tests {
             ..Default::default()
         };
         let frames: Vec<GpuMeshFrame> = meshes
-            .finish(&camera, ndc_to_canvas, line_width, &illumination)
+            .finish(
+                &camera,
+                |_| camera,
+                ndc_to_canvas,
+                line_width,
+                &illumination,
+            )
             .into_iter()
             .map(|(_, frame)| frame)
             .collect();
@@ -6418,7 +6459,13 @@ mod tests {
             ..Default::default()
         };
         let frames: Vec<GpuMeshFrame> = meshes
-            .finish(&camera, ndc_to_canvas, line_width, &illumination)
+            .finish(
+                &camera,
+                |_| camera,
+                ndc_to_canvas,
+                line_width,
+                &illumination,
+            )
             .into_iter()
             .map(|(_, frame)| frame)
             .collect();
@@ -6517,7 +6564,13 @@ mod tests {
             ..Default::default()
         };
         let frames: Vec<GpuMeshFrame> = meshes
-            .finish(&camera, ndc_to_canvas, line_width, &illumination)
+            .finish(
+                &camera,
+                |_| camera,
+                ndc_to_canvas,
+                line_width,
+                &illumination,
+            )
             .into_iter()
             .map(|(_, frame)| frame)
             .collect();
@@ -6582,7 +6635,13 @@ mod tests {
             ..Default::default()
         };
         let frames: Vec<GpuMeshFrame> = meshes
-            .finish(&camera, ndc_to_canvas, line_width, &illumination)
+            .finish(
+                &camera,
+                |_| camera,
+                ndc_to_canvas,
+                line_width,
+                &illumination,
+            )
             .into_iter()
             .map(|(_, frame)| frame)
             .collect();
@@ -6662,7 +6721,13 @@ mod tests {
                 },
             );
             meshes
-                .finish(&camera, ndc_to_canvas, line_width, &Illumination::default())
+                .finish(
+                    &camera,
+                    |_| camera,
+                    ndc_to_canvas,
+                    line_width,
+                    &Illumination::default(),
+                )
                 .remove(0)
                 .1
         };
@@ -6725,7 +6790,13 @@ mod tests {
                 },
             );
         }
-        let frames = meshes.finish(&camera, ndc_to_canvas, line_width, &Illumination::default());
+        let frames = meshes.finish(
+            &camera,
+            |_| camera,
+            ndc_to_canvas,
+            line_width,
+            &Illumination::default(),
+        );
         let frame = &frames[0].1;
         assert_eq!(frame.instances.len(), 4 * INSTANCE_BYTES);
         // The three quads alike share one source and sit next to each
@@ -6857,7 +6928,13 @@ mod tests {
             },
         );
         let frames: Vec<GpuMeshFrame> = meshes
-            .finish(&camera, ndc_to_canvas, line_width, &Illumination::default())
+            .finish(
+                &camera,
+                |_| camera,
+                ndc_to_canvas,
+                line_width,
+                &Illumination::default(),
+            )
             .into_iter()
             .map(|(_, frame)| frame)
             .collect();
@@ -6922,7 +6999,13 @@ mod tests {
             },
         );
         let frames: Vec<GpuMeshFrame> = meshes
-            .finish(&camera, ndc_to_canvas, line_width, &Illumination::default())
+            .finish(
+                &camera,
+                |_| camera,
+                ndc_to_canvas,
+                line_width,
+                &Illumination::default(),
+            )
             .into_iter()
             .map(|(_, frame)| frame)
             .collect();
@@ -7043,7 +7126,13 @@ mod tests {
             );
         }
         let frames: Vec<GpuMeshFrame> = pending
-            .finish(&camera, ndc_to_canvas, line_width, &Illumination::default())
+            .finish(
+                &camera,
+                |_| camera,
+                ndc_to_canvas,
+                line_width,
+                &Illumination::default(),
+            )
             .into_iter()
             .map(|(_, frame)| frame)
             .collect();
@@ -7128,7 +7217,13 @@ mod tests {
             );
         }
         let frames: Vec<GpuMeshFrame> = pending
-            .finish(&camera, ndc_to_canvas, line_width, &Illumination::default())
+            .finish(
+                &camera,
+                |_| camera,
+                ndc_to_canvas,
+                line_width,
+                &Illumination::default(),
+            )
             .into_iter()
             .map(|(_, frame)| frame)
             .collect();
@@ -7208,7 +7303,7 @@ mod tests {
             );
         }
         let frames: Vec<GpuMeshFrame> = pending
-            .finish(&camera, ndc_to_canvas, line_width, illumination)
+            .finish(&camera, |_| camera, ndc_to_canvas, line_width, illumination)
             .into_iter()
             .map(|(_, frame)| frame)
             .collect();
@@ -7282,7 +7377,13 @@ mod tests {
             );
         }
         let frames: Vec<GpuMeshFrame> = pending
-            .finish(&camera, ndc_to_canvas, line_width, &Illumination::default())
+            .finish(
+                &camera,
+                |_| camera,
+                ndc_to_canvas,
+                line_width,
+                &Illumination::default(),
+            )
             .into_iter()
             .map(|(_, frame)| frame)
             .collect();
@@ -7641,7 +7742,13 @@ mod tests {
                 },
             ));
             let frames: Vec<GpuMeshFrame> = meshes
-                .finish(&camera, ndc_to_canvas, line_width, &Illumination::default())
+                .finish(
+                    &camera,
+                    |_| camera,
+                    ndc_to_canvas,
+                    line_width,
+                    &Illumination::default(),
+                )
                 .into_iter()
                 .map(|(_, frame)| frame)
                 .collect();
@@ -7980,7 +8087,13 @@ mod tests {
             },
         ));
         let frames: Vec<GpuMeshFrame> = meshes
-            .finish(&camera, ndc_to_canvas, line_width, &Illumination::default())
+            .finish(
+                &camera,
+                |_| camera,
+                ndc_to_canvas,
+                line_width,
+                &Illumination::default(),
+            )
             .into_iter()
             .map(|(_, frame)| frame)
             .collect();
@@ -8075,7 +8188,13 @@ mod tests {
                 },
             ));
             let frames: Vec<GpuMeshFrame> = meshes
-                .finish(&camera, ndc_to_canvas, line_width, &Illumination::default())
+                .finish(
+                    &camera,
+                    |_| camera,
+                    ndc_to_canvas,
+                    line_width,
+                    &Illumination::default(),
+                )
                 .into_iter()
                 .map(|(_, frame)| frame)
                 .collect();
@@ -8187,7 +8306,13 @@ mod tests {
                 },
             ));
             let frames: Vec<GpuMeshFrame> = meshes
-                .finish(&camera, ndc_to_canvas, line_width, &Illumination::default())
+                .finish(
+                    &camera,
+                    |_| camera,
+                    ndc_to_canvas,
+                    line_width,
+                    &Illumination::default(),
+                )
                 .into_iter()
                 .map(|(_, frame)| frame)
                 .collect();
@@ -8305,7 +8430,13 @@ mod tests {
             },
         ));
         let frames: Vec<GpuMeshFrame> = meshes
-            .finish(&camera, ndc_to_canvas, line_width, &Illumination::default())
+            .finish(
+                &camera,
+                |_| camera,
+                ndc_to_canvas,
+                line_width,
+                &Illumination::default(),
+            )
             .into_iter()
             .map(|(_, frame)| frame)
             .collect();
@@ -8586,7 +8717,13 @@ mod tests {
                     meshes.push(0, [(1, 1), (1, 1)], [None, None], content);
                 }
                 meshes
-                    .finish(&camera, ndc_to_canvas, line_width, &Illumination::default())
+                    .finish(
+                        &camera,
+                        |_| camera,
+                        ndc_to_canvas,
+                        line_width,
+                        &Illumination::default(),
+                    )
                     .remove(0)
                     .1
             };

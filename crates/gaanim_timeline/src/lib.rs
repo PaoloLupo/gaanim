@@ -282,7 +282,26 @@ pub fn camera_binding_system(world: &mut World) {
         .unwrap_or(authored);
     world.insert_resource(authored);
     world.insert_resource(gaanim_math::CameraRigCamera(evaluated));
+    // A segment leaving through a transition keeps the camera it ended
+    // with, through the constraints active just before its end; the camera
+    // phase keeps it when it differs from the one at the playhead.
+    let Some(rest) = world
+        .get_resource::<gaanim_scene::SceneTransitionFrame>()
+        .and_then(|frame| frame.outgoing_rest)
+    else {
+        return;
+    };
+    let (camera, end) = rest;
+    let outgoing = gaanim_animation::bind_camera(world, end - OUTGOING_REST, camera);
+    let mut frame = world.resource_mut::<gaanim_scene::SceneTransitionFrame>();
+    if frame.outgoing_camera != Some(outgoing) {
+        frame.outgoing_camera = Some(outgoing);
+    }
 }
+
+/// How long before its end a segment leaving through a transition is seen
+/// for its camera: what it showed last, before the next segment's changes.
+const OUTGOING_REST: f64 = 1e-9;
 
 /// Clips with the camera lenses that [`camera_rig_system`] and seeks resolve
 /// on every frame, cached until clips are added or removed. A presentation

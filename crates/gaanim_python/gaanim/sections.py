@@ -14,13 +14,23 @@ if TYPE_CHECKING:
     )
 
 
+SegmentCamera: TypeAlias = Literal["keep", "reset"]
+"""How a segment starts its camera: as the last one left it, or from the 2D view."""
+
+
+def _check_camera(camera: object) -> None:
+    if camera not in get_args(SegmentCamera):
+        raise ValueError(f"camera must be 'keep' or 'reset', not {camera!r}")
+
+
 @dataclass(frozen=True, kw_only=True)
 class SectionStep:
     """Named content builder; the section opens its segment before calling build.
 
     The builder receives the original Scene and should author content and stops,
-    not open additional segments. Transition, notes, template and background
-    have the same meaning as their Scene.segment counterparts.
+    not open additional segments. Transition, notes, template, background and
+    camera have the same meaning as their Scene.segment counterparts; a camera
+    of None takes the section's.
     """
 
     name: str
@@ -29,6 +39,7 @@ class SectionStep:
     notes: str | None = None
     template: Callable[..., Box] | None = None
     background: BackgroundLike | None = None
+    camera: SegmentCamera | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.name, str) or not self.name.strip():
@@ -37,6 +48,8 @@ class SectionStep:
             raise TypeError("step build must be callable")
         if self.template is not None and not callable(self.template):
             raise TypeError("step template must be callable")
+        if self.camera is not None:
+            _check_camera(self.camera)
 
 
 @dataclass(frozen=True)
@@ -65,11 +78,17 @@ class Section:
 
     Names are scoped by key, visit and ordinal. Reuse the same Section instance
     to repeat a section; each build starts progress afresh. Keys must be unique
-    among Section instances used in the same Scene.
+    among Section instances used in the same Scene. camera is how its steps
+    start their camera unless a step says otherwise (see Scene.segment).
     """
 
     def __init__(
-        self, key: str, steps: Sequence[SectionStep], *, title: str | None = None,
+        self,
+        key: str,
+        steps: Sequence[SectionStep],
+        *,
+        title: str | None = None,
+        camera: SegmentCamera = "keep",
     ) -> None:
         if not isinstance(key, str) or not key.strip():
             raise ValueError("section key must be a nonempty string")
@@ -80,8 +99,10 @@ class Section:
             raise ValueError("a section requires at least one step")
         if not all(isinstance(step, SectionStep) for step in steps):
             raise TypeError("section steps must be SectionStep instances")
+        _check_camera(camera)
         self._key = key
         self._title = title
+        self._camera = camera
         self._steps = steps
         self._visits = 0
 
@@ -99,6 +120,11 @@ class Section:
     def steps(self) -> tuple[SectionStep, ...]:
         """Immutable ordered content definitions."""
         return self._steps
+
+    @property
+    def camera(self) -> SegmentCamera:
+        """How the steps start their camera unless they say otherwise."""
+        return self._camera
 
     def build(
         self,
@@ -125,6 +151,7 @@ class Section:
                 notes=step.notes,
                 template=step.template,
                 background=step.background,
+                camera=step.camera if step.camera is not None else self._camera,
             )
             segments.append(segment)
             if on_enter is not None:

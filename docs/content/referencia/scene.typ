@@ -418,7 +418,7 @@ reproducción interactiva espera al presentador.
 #api-entry(
   name: "Scene.segment",
   kind: "method",
-  signature: "segment(name: str, transition: Transition | None = None, *, notes: str | None = None, template: Callable[..., Layout] | None = None, background: BackgroundLike | None = None, post: PostProcess | Literal[False] | None = None, target: float | None = None, step_rate: float | None = None) -> Segment",
+  signature: "segment(name: str, transition: Transition | None = None, *, notes: str | None = None, template: Callable[..., Layout] | None = None, background: BackgroundLike | None = None, post: PostProcess | Literal[False] | None = None, target: float | None = None, step_rate: float | None = None, camera: Literal[\"keep\", \"reset\"] = \"keep\") -> Segment",
   params: (
     (name: "name", type: "str", default: none, desc: [Nombre no vacío, único en la escena sin distinguir mayúsculas.]),
     (name: "transition", type: "Transition | None", default: "None", desc: [Transición de entrada desde el segmento anterior. Ver #link("/referencia/animations/#api-transition-cross-fade")[Transiciones].]),
@@ -428,9 +428,10 @@ reproducción interactiva espera al presentador.
     (name: "post", type: "PostProcess | False | None", default: "None", desc: [Postprocesado del segmento: otro `PostProcess`, `False` para ninguno o `None` para heredar `scene.canvas.post`.]),
     (name: "target", type: "float | None", default: "None", desc: [Segundos que prevés dedicarle al presentar. Presenter View compara con él el tiempo que pasas en la diapositiva (ver #link("/guias/presentaciones/#tiempo-de-la-charla")[El tiempo de la charla]). La de la charla entera se fija con `scene.slides.target`.]),
     (name: "step_rate", type: "float | None", default: "None", desc: [Pasos por segundo del tiempo del segmento, como el stop-motion; `None` lo reproduce continuo.]),
+    (name: "camera", type: "Literal[\"keep\", \"reset\"]", default: "\"keep\"", desc: [Con `"reset"`, el segmento empieza en la vista 2D de la escena: todas las restricciones de cámara se sueltan y la cámara se reinicia al instante, después de una pausa en ese instante. Con `"keep"`, sigue con la cámara que dejó el anterior.]),
   ),
   returns: (type: "Segment", desc: [Handle que aceptan `link` y `bind`.]),
-  desc: [Crea el segmento y lo activa. La primera llamada sustituye al segmento implícito inicial, que aún no tiene contenido. Con `step_rate`, cada cuadro del segmento muestra el mundo en el último de sus `step_rate` pasos por segundo, contados desde el inicio del segmento y de nuevo desde cada parada, así que una parada y el final del segmento muestran su cuadro terminado. Saltan las animaciones, los updaters, la cámara, el vídeo, las partículas y el tiempo de los fondos con shader y del postprocesado; el audio y el cabezal siguen continuos. Para un solo objeto, ver `Drawable.step_rate`. Un nombre vacío o repetido, una transición en el primer segmento, un `target` que no sea un número positivo de segundos, un `step_rate` que no sea un número positivo o un guion ilegible lanzan `ValueError`; un `post` de otro tipo lanza `TypeError`.],
+  desc: [Crea el segmento y lo activa. La primera llamada sustituye al segmento implícito inicial, que aún no tiene contenido. Con `step_rate`, cada cuadro del segmento muestra el mundo en el último de sus `step_rate` pasos por segundo, contados desde el inicio del segmento y de nuevo desde cada parada, así que una parada y el final del segmento muestran su cuadro terminado. Saltan las animaciones, los updaters, la cámara, el vídeo, las partículas y el tiempo de los fondos con shader y del postprocesado; el audio y el cabezal siguen continuos. Para un solo objeto, ver `Drawable.step_rate`. Mientras una transición lo muestra salir, un segmento se dibuja con la cámara con la que terminó, y el siguiente con la suya desde el primer cuadro (ver #link("/guias/presentaciones/")[Presentaciones]). Un nombre vacío o repetido, una transición en el primer segmento, un `target` que no sea un número positivo de segundos, un `step_rate` que no sea un número positivo, un `camera` distinto de `"keep"` y `"reset"` o un guion ilegible lanzan `ValueError`; un `post` de otro tipo lanza `TypeError`.],
 )[
 ```python
 >>>from gaanim import *
@@ -861,14 +862,15 @@ desde `gaanim`.
 #api-entry(
   name: "Section",
   kind: "class",
-  signature: "Section(key: str, steps: Sequence[SectionStep], *, title: str | None = None)",
+  signature: "Section(key: str, steps: Sequence[SectionStep], *, title: str | None = None, camera: SegmentCamera = \"keep\")",
   params: (
     (name: "key", type: "str", default: none, desc: [Identidad estable de la sección; única entre las secciones de una escena.]),
     (name: "steps", type: "Sequence[SectionStep]", default: none, desc: [Pasos en orden; se copian al crear la sección.]),
     (name: "title", type: "str | None", default: "None", desc: [Nombre que muestran la agenda y la barra de progreso; sin él se usa `key`.]),
+    (name: "camera", type: "SegmentCamera", default: "\"keep\"", desc: [Cómo empiezan la cámara los pasos que no dicen otra cosa: `"keep"` o `"reset"`, como en `Scene.segment`. `SegmentCamera` se importa desde `gaanim`.]),
   ),
-  returns: (type: "Section", desc: [Tiene `key`, `title` y `steps`.]),
-  desc: [Una clave, un título o una lista de pasos vacíos lanzan `ValueError`; un paso de otro tipo, `TypeError`. `section.build(scene, *, on_enter=None)` abre cada segmento, llama a `on_enter(scene, progress)` y ejecuta la función del paso; devuelve los `Segment` en orden y no inserta pausas. Reutiliza la misma instancia para repetir la sección: el progreso vuelve a empezar y los nombres de segmento incluyen clave, visita, número y nombre del paso. Las excepciones se propagan sin deshacer lo ya creado.],
+  returns: (type: "Section", desc: [Tiene `key`, `title`, `steps` y `camera`.]),
+  desc: [Una clave, un título o una lista de pasos vacíos, o un `camera` distinto de `"keep"` y `"reset"`, lanzan `ValueError`; un paso de otro tipo, `TypeError`. `section.build(scene, *, on_enter=None)` abre cada segmento, llama a `on_enter(scene, progress)` y ejecuta la función del paso; devuelve los `Segment` en orden y no inserta pausas. Reutiliza la misma instancia para repetir la sección: el progreso vuelve a empezar y los nombres de segmento incluyen clave, visita, número y nombre del paso. Las excepciones se propagan sin deshacer lo ya creado.],
 )[
 ```python
 from gaanim import Scene, Section, SectionStep
@@ -901,14 +903,15 @@ scene.render()
 #api-entry(
   name: "SectionStep",
   kind: "class",
-  signature: "SectionStep(*, name: str, build: Callable[[Scene], None], transition: Transition | None = None, notes: str | None = None, template: Callable[..., Layout] | None = None, background: BackgroundLike | None = None)",
+  signature: "SectionStep(*, name: str, build: Callable[[Scene], None], transition: Transition | None = None, notes: str | None = None, template: Callable[..., Layout] | None = None, background: BackgroundLike | None = None, camera: SegmentCamera | None = None)",
   params: (
     (name: "name", type: "str", default: none, desc: [Nombre del paso.]),
     (name: "build", type: "Callable[[Scene], None]", default: none, desc: [Función que crea el contenido del paso.]),
     (name: "transition, notes, template, background", type: "", default: "None", desc: [Igual que en `Scene.segment`.]),
+    (name: "camera", type: "SegmentCamera | None", default: "None", desc: [Igual que en `Scene.segment`; `None` toma el de la sección.]),
   ),
   returns: (type: "SectionStep", desc: [Valor inmutable.]),
-  desc: [Un nombre vacío lanza `ValueError`; una función o plantilla que no se puede llamar, `TypeError`.],
+  desc: [Un nombre vacío o un `camera` distinto de `"keep"` y `"reset"` lanzan `ValueError`; una función o plantilla que no se puede llamar, `TypeError`.],
   none,
 )
 
@@ -1324,11 +1327,24 @@ scene.camera.reset()
 #api-entry(
   name: "CameraAnimation.to",
   kind: "method",
-  params: ((name: "state", type: "CameraState", default: none, desc: [Pose de esta escena.]),),
+  params: (
+    (name: "state", type: "CameraState", default: none, desc: [Pose de esta escena.]),
+    (name: "path", type: "Literal[\"linear\", \"orbit\"]", default: "\"linear\"", desc: [Con `"orbit"`, entre dos poses en perspectiva, el ojo rodea el objetivo en vez de ir en línea recta.]),
+  ),
   returns: (type: "Anim", desc: [Movimiento hasta la pose.]),
-  desc: [Entre una pose ortográfica y una en perspectiva, el movimiento va en perspectiva desde o hacia la vista equivalente a la ortográfica, y solo es ortográfico en su extremo ortográfico: el contenido 3D queda siempre delante del ojo. Una pose de otra escena lanza `ValueError`.],
-  none,
-)
+  desc: [Entre una pose ortográfica y una en perspectiva, el movimiento va en perspectiva desde o hacia la vista equivalente a la ortográfica, y solo es ortográfico en su extremo ortográfico: el contenido 3D queda siempre delante del ojo. Con `path="orbit"`, el ojo gira alrededor del `up` de la pose final por el camino corto, pasa de una elevación a la otra y se acerca o aleja en proporción (interpola el logaritmo de la distancia), mientras el objetivo, el campo de visión y `screen_offset` se mueven con la misma curva: entre dos tomas separadas 90° de azimut, la cámara no atraviesa el modelo ni se acerca de más. Si alguna pose es ortográfica, el movimiento es el lineal. Una pose de otra escena u otro `path` lanzan `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>import math
+>>>scene = Scene(frame=(16, 9))
+scene.geometry.cube(2.0)
+frente = scene.camera.state_orbit((0, 0, 0), 0.0, math.radians(20), scale=0.7)
+lado = scene.camera.state_orbit((0, 0, 0), math.radians(90), math.radians(35), scale=0.9)
+scene.camera.to(frente)
+scene.play([scene.camera.animate.to(lado, path="orbit")], duration=2)
+```
+]
 
 #api-entry(
   name: "CameraAnimation.restore",
@@ -1693,9 +1709,10 @@ suma al final.
     (name: "rotation", type: "ScalarSource | None", default: "None", desc: [Giro reactivo en radianes.]),
     (name: "influence", type: "ScalarSource | None", default: "None", desc: [Peso en `[0, 1]`; sin él, 1.]),
     (name: "enabled", type: "bool", default: "True", desc: [Activo desde el cursor actual.]),
+    (name: "scope", type: "Literal[\"scene\", \"segment\"]", default: "\"scene\"", desc: [Con `"segment"`, el binding se suelta solo al empezar el segmento siguiente (ver `Camera.bind_3d`).]),
   ),
   returns: (type: "CameraConstraint", desc: [El binding, con `enable()` y `disable()`.]),
-  desc: [Necesita `center`, `zoom` o `rotation`, y selecciona la proyección ortográfica.],
+  desc: [Necesita `center`, `zoom` o `rotation`, y selecciona la proyección ortográfica. Otro `scope` lanza `ValueError`.],
 )[
 ```python
 >>>from gaanim import *
@@ -1724,7 +1741,7 @@ rig.disable()
   name: "CameraConstraint.disable",
   kind: "method",
   returns: (type: "None", desc: [Desactiva el binding en el cursor actual.]),
-  desc: [Los cambios quedan registrados en la línea de tiempo: un seek anterior vuelve a verlo activo.],
+  desc: [Los cambios quedan registrados en la línea de tiempo: un seek anterior vuelve a verlo activo. Como un corte, `enable()` o `disable()` llamado después de una pausa, en su mismo instante, se aplica justo después de ella: la pausa sigue mostrando la cámara que tenía.],
   none,
 )
 
@@ -1918,6 +1935,32 @@ introducción, consulta la guía #link("/guias/camara-y-3d/")[Cámara y 3D].
 )
 
 #api-entry(
+  name: "Camera.state_orbit",
+  kind: "method",
+  params: (
+    (name: "target", type: "tuple[float, float, float]", default: none, desc: [Punto al que mira.]),
+    (name: "azimuth", type: "float", default: none, desc: [Giro del ojo alrededor de `up`, en radianes, desde el lado del que mira la cámara por defecto (+z con y hacia arriba, −y con z hacia arriba) hacia +x.]),
+    (name: "elevation", type: "float", default: none, desc: [Altura del ojo sobre el plano perpendicular a `up`, en radianes, hasta un cuarto de vuelta: ahí mira en planta y el azimut gira la vista.]),
+    (name: "distance", type: "float | None", default: "None", desc: [Distancia del ojo al objetivo, en unidades del mundo.]),
+    (name: "scale", type: "float | None", default: "None", desc: [Unidades de escena que mide una unidad del mundo en el plano del objetivo, en lugar de `distance`: la distancia sale de `fov_y` y del alto del encuadre.]),
+    (name: "up", type: "tuple[float, float, float]", default: "(0.0, 1.0, 0.0)", desc: [Dirección vertical del mundo.]),
+    (name: "fov_y, near, far", type: "float", default: "0.785…, 0.1, 1000.0", desc: [Como en `state_3d`.]),
+    (name: "screen_offset", type: "tuple[float, float]", default: "(0.0, 0.0)", desc: [Como en `state_3d`.]),
+  ),
+  returns: (type: "CameraState", desc: [Una pose en perspectiva reutilizable.]),
+  desc: [Describe una toma como se piensa: alrededor de un foco, por azimut y elevación, y por cuánto mide un metro en la pantalla. `CameraAnimation.to(toma, path="orbit")` pasa de una toma a otra rodeando el objetivo, y `project` coloca notas 2D sobre lo que muestra. Dar `distance` y `scale` a la vez o ninguno, uno no positivo o un `up` nulo lanzan `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>import math
+>>>scene = Scene(frame=(16, 9))
+planta = scene.camera.state_orbit((0, 0, 0), 0.0, math.pi / 2, scale=0.6)
+esquina = scene.camera.state_orbit((0, 1, 0), math.radians(35), math.radians(25), scale=0.8, screen_offset=(-3, 0))
+x, y = scene.camera.project((1, 2, 0), esquina)
+```
+]
+
+#api-entry(
   name: "Camera.perspective",
   kind: "method",
   params: (
@@ -2001,9 +2044,10 @@ scene.play([tag.animate.fade_in(), scene.camera.animate.orbit(0.6, 0)], duration
     (name: "screen_offset", type: "tuple[ScalarSource, ScalarSource] | None", default: "None", desc: [Dónde dibuja la cámara su objetivo (ver `CameraAnimation.screen_offset`).]),
     (name: "influence", type: "ScalarSource | None", default: "None", desc: [Peso en `[0, 1]`.]),
     (name: "enabled", type: "bool", default: "True", desc: [Activo desde el cursor actual.]),
+    (name: "scope", type: "Literal[\"scene\", \"segment\"]", default: "\"scene\"", desc: [Con `"segment"`, el binding vale para el segmento en que se crea: se suelta solo al empezar el siguiente.]),
   ),
   returns: (type: "CameraConstraint", desc: [El binding.]),
-  desc: [Necesita `eye`, `target`, `fov_y` o `screen_offset`, y selecciona la proyección en perspectiva. `eye` y `target` aceptan un objeto, un punto de anclaje, un punto o una tupla `(x, y, z)` cuyas coordenadas pueden ser números, `Parameter`, `Variable`, `Computed` o `scene.time`: animar los parámetros mueve la cámara sin puntos auxiliares. `up` acepta coordenadas así también. Un `up` nulo lanza `ValueError`; uno que un valor reactivo vuelve nulo deja la cámara como estaba en ese fotograma.],
+  desc: [Necesita `eye`, `target`, `fov_y` o `screen_offset`, y selecciona la proyección en perspectiva. `eye` y `target` aceptan un objeto, un punto de anclaje, un punto o una tupla `(x, y, z)` cuyas coordenadas pueden ser números, `Parameter`, `Variable`, `Computed` o `scene.time`: animar los parámetros mueve la cámara sin puntos auxiliares. `up` acepta coordenadas así también. Un `up` nulo lanza `ValueError`; uno que un valor reactivo vuelve nulo deja la cámara como estaba en ese fotograma. El binding dura hasta `disable()`; con `scope="segment"`, hasta que empieza el segmento siguiente: su segmento lo conserva hasta su última pausa y mientras una transición lo muestra salir, y el siguiente parte de la cámara sin él. Otro `scope` lanza `ValueError`.],
 )[
 ```python
 >>>from gaanim import *

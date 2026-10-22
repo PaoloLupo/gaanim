@@ -113,6 +113,17 @@ impl TransitionType {
         }
     }
 
+    /// Whether the outgoing segment keeps the camera it ended with while
+    /// this transition shows it beside the incoming one: all but a cut, a
+    /// zoom through, which moves the camera itself, and the morphs, whose
+    /// drawables travel from one side to the other.
+    pub fn keeps_outgoing_camera(&self) -> bool {
+        !matches!(
+            self.base(),
+            Self::Cut | Self::ZoomThrough { .. } | Self::Morph { .. } | Self::MagicMove { .. }
+        )
+    }
+
     /// The underlying effect, without easing or overlay decoration.
     pub fn base(&self) -> &TransitionType {
         match self {

@@ -21,8 +21,10 @@ morph targets y sus mapas de normales, el contenido 3D translúcido puede
 mezclarse en el orden en que está en cada píxel, hay focos, la
 profundidad de campo de la cámara desenfoca también el contenido 3D, y los
 campos escalares se dibujan como isosuperficies y volúmenes. La cámara 3D
-puede dejar su objetivo a un lado del encuadre y moverse con parámetros, y
-los rótulos 3D se colocan en pantalla sobre su punto.
+puede dejar su objetivo a un lado del encuadre, moverse con parámetros,
+describir tomas en órbita y pasar de una a otra rodeando el objetivo, y
+valer para una sola diapositiva; los rótulos 3D se colocan en pantalla
+sobre su punto.
 
 == Morph entre mallas 3D
 
@@ -171,6 +173,31 @@ los rótulos 3D se colocan en pantalla sobre su punto.
   `screen_offset` así.
 - Nuevo ejemplo, `3d/framing_3d`.
 
+== Tomas en órbita y una cámara por diapositiva
+
+- `camera.state_orbit(target, azimuth, elevation, scale=)` describe una toma
+  por el lado desde el que mira, su altura y cuánto mide una unidad del
+  mundo en la pantalla (o por su `distance=`). Una elevación de un cuarto de
+  vuelta mira en planta. Ver
+  #link("/guias/camara-y-3d/#tomas-en-orbita")[Cámara y 3D].
+- `camera.animate.to(toma, path="orbit")` pasa de una toma a otra rodeando
+  el objetivo: gira por el camino corto, sube o baja y se acerca en
+  proporción, en lugar de mover el ojo en línea recta y atravesar el modelo.
+- `bind_3d(..., scope="segment")` (y `bind_2d`) crea una restricción que se
+  suelta sola al empezar el segmento siguiente, y `scene.segment(...,
+  camera="reset")`, `Section(..., camera=)` y `SectionStep(..., camera=)`
+  empiezan una diapositiva en la vista 2D. Ver
+  #link("/guias/presentaciones/#camara-por-diapositiva")[Presentaciones].
+- Durante una transición, el segmento que sale se dibuja con la cámara con
+  la que terminó, restricciones incluidas, y el que entra con la suya desde
+  el primer cuadro. Antes los dos usaban la cámara del instante, así que un
+  modelo 3D que salía se veía con la cámara 2D de la diapositiva siguiente.
+  Valen todas las transiciones que muestran los dos lados (fundidos,
+  barridos, deslizamientos, shaders), salvo el zoom a través y los morphs.
+- En el modo interactivo (`I`), la cámara de inspección parte de la que
+  muestra la vista previa, con sus restricciones: antes partía de la cámara
+  sin `bind_3d` y el modelo saltaba.
+
 == Correcciones
 
 - `animate.move_to_3d(p)` de un grupo llevaba su traslación a `p`, así que
@@ -200,17 +227,33 @@ los rótulos 3D se colocan en pantalla sobre su punto.
   pausa*. El rastro solo se reconstruye con todo el mundo cuando algo
   reactivo mueve su fuente, y los clips de la cámara ya no cuentan como
   movimientos de la fuente.
+- `CameraConstraint.disable()` y `enable()` llamados al empezar el segmento
+  siguiente ya se veían en la última pausa del anterior. Se aplican ahora un
+  microsegundo después, como un `camera.reset()`.
+- Un texto escrito a mitad de segmento con `write()`, `reveal(by="word")` o
+  `reveal(style="slide_up")` que más adelante tenía `fade_out()` y
+  `fade_in()` quedaba invisible hasta el `fade_out`. Un objeto declarado a
+  mitad de segmento solo espera a su `fade_in` cuando ese fundido es su
+  entrada.
+- Un texto oculto con `hidden()` que se movía con `animate.move_to_3d` (o
+  `move_to`) no aparecía nunca, ni con un `fade_in`: el movimiento mostraba
+  la raíz del texto pero no sus glifos.
 
 == Al actualizar
 
-- Los paquetes `.gaanim` pasan al formato 13, que guarda los morphs 3D, las
+- Los paquetes `.gaanim` pasan al formato 14, que guarda los morphs 3D, las
   copias de mallas, las imágenes de los objetos en el mundo 3D, la sombra y
   el desenfoque de los objetos 3D, los morph targets y mapas de normales de
   los modelos glTF, cómo se mezcla el contenido 3D translúcido, los conos de
-  los focos, la profundidad de campo del contenido 3D, los volúmenes y el
-  desplazamiento de la lente de la cámara. Gaanim sigue abriendo los de
-  formato 5 a 12; un Gaanim anterior no abre los nuevos, así que actualiza
-  los reproductores que los publican.
+  los focos, la profundidad de campo del contenido 3D, los volúmenes, el
+  desplazamiento de la lente de la cámara y la cámara del segmento que sale
+  en una transición. Gaanim sigue abriendo los de formato 5 a 13; un Gaanim
+  anterior no abre los nuevos, así que actualiza los reproductores que los
+  publican.
+- Un segmento que sale con una transición mientras el siguiente cambia la
+  cámara al empezar se dibuja ahora con su propia cámara hasta que termina la
+  transición. Si contabas con lo contrario, suelta la cámara antes de la
+  última pausa.
 - Una escena que desenfoca sus capas de parallax con
   `camera.depth_of_field` mientras una cámara 3D está apartada de su
   objetivo desenfoca ahora también su contenido 3D, que antes quedaba

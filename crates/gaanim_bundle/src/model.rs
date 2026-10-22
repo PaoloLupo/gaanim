@@ -2457,6 +2457,14 @@ fn write_transition(w: &mut Writer, tables: &mut Tables, transition: &CapturedTr
             w.f32(*value);
         }
     });
+    // The camera the outgoing side keeps (version 14 on), only when it
+    // has one: a transition without it is written as before.
+    if let Some(camera) = &transition.outgoing_camera {
+        write_camera(w, camera);
+        for value in transition.outgoing_view.as_coeffs() {
+            w.f64(value);
+        }
+    }
 }
 
 /// Write a shader transition table entry.
@@ -2539,12 +2547,24 @@ fn read_transition(r: &mut Reader<'_>, tables: &DecodedTables) -> Result<Capture
             values,
         })
     })?;
+    let (outgoing_camera, outgoing_view) = if r.is_empty() {
+        (None, kurbo::Affine::IDENTITY)
+    } else {
+        let camera = read_camera(r)?;
+        let mut coefficients = [0.0; 6];
+        for value in &mut coefficients {
+            *value = r.f64()?;
+        }
+        (Some(camera), kurbo::Affine::new(coefficients))
+    };
     Ok(CapturedTransition {
         outgoing_mask,
         incoming_mask,
         backgrounds,
         overlays,
         shader,
+        outgoing_camera,
+        outgoing_view,
     })
 }
 

@@ -2417,6 +2417,65 @@ impl PyCamera {
         Ok(PyCameraState { inner })
     }
 
+    /// Create a concrete perspective state that looks at `target` from
+    /// `azimuth` and `elevation` radians around `up`, `distance` away or as
+    /// far as shows `scale` scene units per world unit across the target's
+    /// plane.
+    #[pyo3(signature = (target, azimuth, elevation, *, distance=None, scale=None, up=(0.0, 1.0, 0.0), fov_y=std::f64::consts::FRAC_PI_4, near=0.1, far=1000.0, screen_offset=(0.0, 0.0)))]
+    #[allow(clippy::too_many_arguments)]
+    fn state_orbit(
+        &self,
+        target: (f64, f64, f64),
+        azimuth: f64,
+        elevation: f64,
+        distance: Option<f64>,
+        scale: Option<f64>,
+        up: (f64, f64, f64),
+        fov_y: f64,
+        near: f64,
+        far: f64,
+        screen_offset: (f64, f64),
+    ) -> PyResult<PyCameraState> {
+        crate::custom::ensure_authoring_allowed()?;
+        let positive = |value: f64, name: &str| {
+            if value.is_finite() && value > 0.0 {
+                Ok(value)
+            } else {
+                Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "{name} must be finite and greater than zero"
+                )))
+            }
+        };
+        let reach = match (distance, scale) {
+            (Some(distance), None) => {
+                gaanim_api::canvas::OrbitReach::Distance(positive(distance, "distance")?)
+            }
+            (None, Some(scale)) => gaanim_api::canvas::OrbitReach::Scale(positive(scale, "scale")?),
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "state_orbit takes either distance= or scale=",
+                ));
+            }
+        };
+        let inner = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .camera_state_orbit(
+                gaanim_core::glam::DVec3::new(target.0, target.1, target.2),
+                azimuth,
+                elevation,
+                reach,
+                gaanim_core::glam::DVec3::new(up.0, up.1, up.2),
+                fov_y,
+                near,
+                far,
+                gaanim_core::glam::DVec2::new(screen_offset.0, screen_offset.1),
+            )
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        Ok(PyCameraState { inner })
+    }
+
     /// Where a camera in `state` draws the world `point` on the frame, in
     /// HUD units.
     fn project(&self, point: (f64, f64, f64), state: &PyCameraState) -> PyResult<(f64, f64)> {
@@ -2527,15 +2586,22 @@ const DEFAULT_FRAME_MARGIN: f64 = 0.5;
 
 #[pymethods]
 impl PyCameraAnimation {
-    /// Animate to a reusable camera state.
-    fn to(&self, state: &PyCameraState) -> PyResult<PyCanvasAnim> {
+    /// Animate to a reusable camera state: straight, or around the target
+    /// with `path="orbit"`.
+    #[pyo3(signature = (state, *, path="linear"))]
+    fn to(&self, state: &PyCameraState, path: &str) -> PyResult<PyCanvasAnim> {
         crate::custom::ensure_authoring_allowed()?;
-        let inner = self
-            .inner
-            .lock()
-            .expect("scene canvas poisoned")
-            .camera_to(&state.inner, 1.0)
-            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        let canvas = self.inner.lock().expect("scene canvas poisoned");
+        let inner = match path {
+            "linear" => canvas.camera_to(&state.inner, 1.0),
+            "orbit" => canvas.camera_orbit_to(&state.inner, 1.0),
+            other => {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "path must be 'linear' or 'orbit', not {other:?}"
+                )));
+            }
+        }
+        .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
         Ok(PyCanvasAnim { inner })
     }
 
@@ -3033,7 +3099,7 @@ impl PyCamera {
         let animation = PyCameraAnimation {
             inner: self.inner.clone(),
         }
-        .to(state)?;
+        .to(state, "linear")?;
         self.commit_immediate(animation)?;
         Ok(self.clone())
     }
@@ -3171,7 +3237,8 @@ impl PyCamera {
     }
 
     /// Persistently bind orthographic camera channels to native reactive sources.
-    #[pyo3(signature = (*, center=None, zoom=None, rotation=None, influence=None, enabled=true))]
+    #[pyo3(signature = (*, center=None, zoom=None, rotation=None, influence=None, enabled=true, scope="scene"))]
+    #[allow(clippy::too_many_arguments)]
     fn bind_2d(
         &self,
         center: Option<Bound<'_, PyAny>>,
@@ -3179,8 +3246,10 @@ impl PyCamera {
         rotation: Option<Bound<'_, PyAny>>,
         influence: Option<Bound<'_, PyAny>>,
         enabled: bool,
+        scope: &str,
     ) -> PyResult<PyCameraConstraint> {
         crate::custom::ensure_authoring_allowed()?;
+        let segment_scoped = constraint_scope(scope)?;
         let center = center.as_ref().map(resolve_endpoint).transpose()?;
         let zoom = zoom
             .map(|value| extract_scalar_source(value, &self.inner))
@@ -3198,11 +3267,14 @@ impl PyCamera {
             .expect("scene canvas poisoned")
             .camera_bind_2d(center, zoom, rotation, influence, enabled)
             .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        if segment_scoped {
+            handle.until_segment_end();
+        }
         Ok(PyCameraConstraint { inner: handle })
     }
 
     /// Persistently bind perspective camera channels to native reactive sources.
-    #[pyo3(signature = (*, eye=None, target=None, fov_y=None, up=None, screen_offset=None, influence=None, enabled=true))]
+    #[pyo3(signature = (*, eye=None, target=None, fov_y=None, up=None, screen_offset=None, influence=None, enabled=true, scope="scene"))]
     #[allow(clippy::too_many_arguments)]
     fn bind_3d(
         &self,
@@ -3213,8 +3285,10 @@ impl PyCamera {
         screen_offset: Option<(Bound<'_, PyAny>, Bound<'_, PyAny>)>,
         influence: Option<Bound<'_, PyAny>>,
         enabled: bool,
+        scope: &str,
     ) -> PyResult<PyCameraConstraint> {
         crate::custom::ensure_authoring_allowed()?;
+        let segment_scoped = constraint_scope(scope)?;
         let eye = eye
             .as_ref()
             .map(|eye| resolve_reactive_endpoint_3d(eye, &self.inner))
@@ -3248,7 +3322,21 @@ impl PyCamera {
             .expect("scene canvas poisoned")
             .camera_bind_3d(eye, target, fov_y, up, screen_offset, influence, enabled)
             .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        if segment_scoped {
+            handle.until_segment_end();
+        }
         Ok(PyCameraConstraint { inner: handle })
+    }
+}
+
+/// Whether a constraint's `scope` lets it go as its segment ends.
+fn constraint_scope(scope: &str) -> PyResult<bool> {
+    match scope {
+        "scene" => Ok(false),
+        "segment" => Ok(true),
+        other => Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "scope must be 'scene' or 'segment', not {other:?}"
+        ))),
     }
 }
 
@@ -7615,7 +7703,7 @@ impl PyTypography {
 
 #[pymethods]
 impl PyScene {
-    #[pyo3(signature = (name, transition=None, *, notes=None, template=None, background=None, post=None, target=None, step_rate=None))]
+    #[pyo3(signature = (name, transition=None, *, notes=None, template=None, background=None, post=None, target=None, step_rate=None, camera="keep"))]
     #[allow(clippy::too_many_arguments)]
     fn segment<'py>(
         slf: &Bound<'py, Self>,
@@ -7627,8 +7715,18 @@ impl PyScene {
         post: Option<&Bound<'py, PyAny>>,
         target: Option<f64>,
         step_rate: Option<f64>,
+        camera: &str,
     ) -> PyResult<PySegment> {
         crate::custom::ensure_authoring_allowed()?;
+        let release_camera = match camera {
+            "keep" => false,
+            "reset" => true,
+            other => {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "camera must be 'keep' or 'reset', not {other:?}"
+                )));
+            }
+        };
         let post = crate::brush::segment_post_process(post, &slf.borrow().inner)?;
         // Checked before the segment exists, so a bad target leaves none.
         let target = gaanim_api::canvas::segment_target(target)
@@ -7668,6 +7766,11 @@ impl PyScene {
             canvas
                 .set_segment_step_rate(&handle, step_rate)
                 .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+            if release_camera {
+                canvas
+                    .release_camera()
+                    .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+            }
             handle
         };
         drop(scene);

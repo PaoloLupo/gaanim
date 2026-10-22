@@ -39,7 +39,9 @@ pub mod tween;
 pub mod updaters;
 pub mod writing;
 
-pub use camera::{CameraBinding, CameraBindingKind, CameraBindingWindow, apply_camera_bindings};
+pub use camera::{
+    CameraBinding, CameraBindingKind, CameraBindingWindow, apply_camera_bindings, bind_camera,
+};
 pub use custom::{
     CustomAnimation, CustomAnimationDiagnostic, CustomAnimationDiagnostics, CustomBaseline,
     CustomChannel, CustomPropertyLens, CustomValues,

@@ -675,6 +675,12 @@ impl ExtractedElement {
         self.backdrop.unwrap_or(u32::MAX)
     }
 
+    /// Whether this is the image the GPU draws 3D content into (see
+    /// [`gpu_three_d_element`]), which lies on the output as it is.
+    fn is_three_d_image(&self) -> bool {
+        self.entity == Entity::PLACEHOLDER
+    }
+
     /// This element drawn inside its group's layer, which applies the
     /// group's opacity.
     fn inside_group(&self) -> Self {
@@ -1942,7 +1948,10 @@ fn append_extracted_elements(
         if let Some(mask) = mask {
             push_transition_mask(main_scene, mask);
         }
-        append_element_run(main_scene, &main[index..end], Some(&views));
+        match transition.and_then(|frame| frame.view_for(side)) {
+            Some(view) => append_viewed_run(main_scene, &main[index..end], &views, view),
+            None => append_element_run(main_scene, &main[index..end], Some(&views)),
+        }
         if let Some(mask) = mask {
             pop_transition_mask(main_scene, mask);
         }
@@ -2055,6 +2064,33 @@ fn fill_transition_background(
         gpu,
     );
     pop_transition_mask(scene, mask);
+}
+
+/// Draw `elements`, a side a transition takes away, through `view`, which
+/// shows its 2D drawables where the camera it keeps shows them; the images
+/// of its 3D content are drawn through that camera already.
+fn append_viewed_run(
+    main_scene: &mut vello::Scene,
+    elements: &[ExtractedElement],
+    views: &ViewContext<'_>,
+    view: kurbo::Affine,
+) {
+    let mut index = 0;
+    while let Some(first) = elements.get(index) {
+        let three_d = first.is_three_d_image();
+        let end = elements[index..]
+            .iter()
+            .position(|element| element.is_three_d_image() != three_d)
+            .map_or(elements.len(), |length| index + length);
+        if three_d {
+            append_element_run(main_scene, &elements[index..end], Some(views));
+        } else {
+            let mut run = vello::Scene::new();
+            append_element_run(&mut run, &elements[index..end], Some(views));
+            main_scene.append(&run, Some(view));
+        }
+        index = end;
+    }
 }
 
 /// Composite a run of elements. Without `views` (inside a camera view)
@@ -3651,7 +3687,11 @@ fn extract_world(
             .and_then(|(cam, width)| output_pixels_per_unit(cam, width)),
     );
 
-    let cam_bounds = camera.filter(|_| cull).and_then(|cam| {
+    // The side a transition takes away may show what the camera does not.
+    let outgoing_camera = transition_frame
+        .as_ref()
+        .is_some_and(|frame| frame.outgoing_camera.is_some());
+    let cam_bounds = camera.filter(|_| cull && !outgoing_camera).and_then(|cam| {
         if let gaanim_math::Projection::Orthographic { zoom } = cam.projection {
             let effective = zoom;
             let hw = cam.frame_width / (2.0 * effective);
@@ -4560,6 +4600,7 @@ pub struct CapturedGpuThreeD<'a> {
 fn captured_gpu_three_d(
     captured: &CapturedThreeD,
     target: CapturedGpuThreeD<'_>,
+    outgoing: Option<&gaanim_math::Camera>,
     sources: &mut crate::three_d::MeshSources,
     extracted: &mut Vec<ExtractedElement>,
     within_frame: bool,
@@ -4652,6 +4693,7 @@ fn captured_gpu_three_d(
     ) {
         Some(gpu) => take_gpu_three_d(
             target.camera,
+            outgoing,
             &lighting,
             &mut contents,
             keys,
@@ -4714,6 +4756,7 @@ fn frozen_three_d_frames<'a>(
         frames.extend(captured_gpu_three_d(
             &frozen.three_d,
             target,
+            None,
             sources,
             extracted,
             true,
@@ -4980,6 +5023,7 @@ fn three_d_elements<'a>(
         .collect();
     take_gpu_three_d(
         camera,
+        transition_frame.and_then(|frame| frame.outgoing_camera.as_ref()),
         lighting,
         &mut sources,
         keys,
@@ -4997,8 +5041,10 @@ type GpuThreeDKeys = ([(u64, u32); 3], [Option<crate::three_d::Keep>; 3]);
 /// Leave the meshes and lines of `sources` to the GPU, identified by `keys`:
 /// one image for each way their elements compose, whose elements this pushes
 /// into `extracted` and whose frames it returns.
+#[allow(clippy::too_many_arguments)]
 fn take_gpu_three_d(
     camera: &gaanim_math::Camera,
+    outgoing: Option<&gaanim_math::Camera>,
     lighting: &crate::three_d::Illumination,
     sources: &mut [(Entity, crate::three_d::Content<'_>, ThreeDComposition)],
     keys: Vec<GpuThreeDKeys>,
@@ -5046,7 +5092,13 @@ fn take_gpu_three_d(
             content.fill = None;
         }
     }
-    gpu.finish(camera, ndc_to_canvas, line_width, lighting)
+    // The side a transition takes away is seen through the camera it
+    // keeps, onto the same canvas.
+    let class_camera = |class: usize| match (classes[class].transition_side, outgoing) {
+        (gaanim_scene::TransitionSide::Outgoing, Some(outgoing)) => *outgoing,
+        _ => *camera,
+    };
+    gpu.finish(camera, class_camera, ndc_to_canvas, line_width, lighting)
         .into_iter()
         .map(|(class, frame)| {
             extracted.push(gpu_three_d_element(
@@ -5975,6 +6027,12 @@ fn compose_frame(
             .collect()
     };
     let (outgoing_time, incoming_time) = frame.backgrounds.unwrap_or((time_seconds, time_seconds));
+    // The outgoing side, drawn alone, through the camera it keeps.
+    let outgoing_camera = gaanim_scene::SceneTransitionFrame {
+        outgoing_camera: frame.outgoing_camera,
+        outgoing_view: frame.outgoing_view,
+        ..Default::default()
+    };
     let mut outgoing = vello::Scene::new();
     let outgoing_paint = background.map(|(canvas, pixel_size)| {
         fill_segment_background(
@@ -5990,7 +6048,7 @@ fn compose_frame(
     append_extracted_elements(
         &mut outgoing,
         &side(gaanim_scene::TransitionSide::Outgoing),
-        None,
+        Some(&outgoing_camera),
         outgoing_paint.as_ref(),
         false,
     );
@@ -6062,7 +6120,7 @@ fn compose_frame(
                     &everywhere,
                 );
             }
-            append_extracted_elements(&mut scene, &members, None, paint, true);
+            append_extracted_elements(&mut scene, &members, Some(&outgoing_camera), paint, true);
             if faded {
                 scene.pop_layer();
             }
@@ -6189,6 +6247,12 @@ pub struct CapturedTransition {
     pub overlays: Vec<gaanim_scene::TransitionOverlayLayer>,
     /// A shader transition blending the two sides.
     pub shader: Option<gaanim_scene::TransitionShaderFrame>,
+    /// The camera the outgoing side keeps while it differs from the frame's
+    /// (see [`gaanim_scene::SceneTransitionFrame::outgoing_camera`]).
+    pub outgoing_camera: Option<gaanim_math::Camera>,
+    /// Where the outgoing side's 2D drawables lie in the frame camera's
+    /// scene units (see [`gaanim_scene::SceneTransitionFrame::outgoing_view`]).
+    pub outgoing_view: kurbo::Affine,
 }
 
 impl CapturedTransition {
@@ -6199,6 +6263,8 @@ impl CapturedTransition {
             backgrounds: self.backgrounds,
             overlays: self.overlays.clone(),
             shader: self.shader.clone(),
+            outgoing_camera: self.outgoing_camera,
+            outgoing_view: self.outgoing_view,
             ..Default::default()
         }
     }
@@ -6326,6 +6392,8 @@ fn capture_extraction(
                 backgrounds: frame.backgrounds,
                 overlays: frame.overlays,
                 shader: frame.shader,
+                outgoing_camera: frame.outgoing_camera,
+                outgoing_view: frame.outgoing_view,
             }),
         elements: extraction
             .elements
@@ -6522,7 +6590,18 @@ fn compose_captured_layers(
     let mut three_d_frames = Vec::new();
     if let (Some(captured), Some(target)) = (&frame.three_d, three_d) {
         let mut sources = std::mem::take(&mut store.three_d);
-        three_d_frames = captured_gpu_three_d(captured, target, &mut sources, &mut elements, false);
+        let outgoing = frame
+            .transition
+            .as_ref()
+            .and_then(|transition| transition.outgoing_camera.as_ref());
+        three_d_frames = captured_gpu_three_d(
+            captured,
+            target,
+            outgoing,
+            &mut sources,
+            &mut elements,
+            false,
+        );
         store.three_d = sources;
     }
     // The 3D content snapshots froze, beneath what else they froze.
@@ -7073,24 +7152,32 @@ pub fn gaanim_render_system(
         _ => None,
     }));
 
-    // 1. Calculate orthographic camera bounds for culling
-    let cam_bounds = gaanim_camera.as_ref().and_then(|cam| {
-        if let gaanim_math::Projection::Orthographic { zoom } = cam.projection {
-            let effective = zoom * cam.viewport.scale;
-            let hw = (cam.viewport_width as f64) / (2.0 * effective);
-            let hh = (cam.viewport_height as f64) / (2.0 * effective);
-            // Generous margin to avoid popping at boundaries
-            let margin = 100.0 / effective.max(0.1);
-            Some(gaanim_math::Bounds3D::new_2d(
-                cam.position.x - hw - margin,
-                cam.position.y - hh - margin,
-                cam.position.x + hw + margin,
-                cam.position.y + hh + margin,
-            ))
-        } else {
-            None
-        }
-    });
+    // 1. Calculate orthographic camera bounds for culling, but while the
+    // side a transition takes away keeps a camera of its own, which may
+    // show what this one does not.
+    let outgoing_camera = transition_frame
+        .as_deref()
+        .is_some_and(|frame| frame.outgoing_camera.is_some());
+    let cam_bounds = gaanim_camera
+        .as_ref()
+        .filter(|_| !outgoing_camera)
+        .and_then(|cam| {
+            if let gaanim_math::Projection::Orthographic { zoom } = cam.projection {
+                let effective = zoom * cam.viewport.scale;
+                let hw = (cam.viewport_width as f64) / (2.0 * effective);
+                let hh = (cam.viewport_height as f64) / (2.0 * effective);
+                // Generous margin to avoid popping at boundaries
+                let margin = 100.0 / effective.max(0.1);
+                Some(gaanim_math::Bounds3D::new_2d(
+                    cam.position.x - hw - margin,
+                    cam.position.y - hh - margin,
+                    cam.position.x + hw + margin,
+                    cam.position.y + hh + margin,
+                ))
+            } else {
+                None
+            }
+        });
     let segmented = order_query.iter().any(|(_, member, _)| member);
     let opacity_fallback = canvas_bg
         .as_ref()

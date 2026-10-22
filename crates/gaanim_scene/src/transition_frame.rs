@@ -10,7 +10,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use bevy::prelude::{Entity, Resource};
-use gaanim_core::kurbo::{BezPath, Point};
+use gaanim_core::kurbo::{Affine, BezPath, Point};
 use gaanim_core::peniko::{BlendMode, Brush, Fill};
 
 /// World-space region in which one side of a transition stays visible.
@@ -105,6 +105,17 @@ pub struct SceneTransitionFrame {
     /// A shader transition: each side is rendered alone and the shader
     /// blends them; drawables of neither side and overlays go above.
     pub shader: Option<TransitionShaderFrame>,
+    /// The authored camera as the outgoing segment ended, and that instant,
+    /// written by the seek: the outgoing side keeps that camera, with the
+    /// constraints active then, while it leaves.
+    pub outgoing_rest: Option<(gaanim_math::Camera, f64)>,
+    /// The camera the outgoing side is drawn with, while it differs from
+    /// the camera at the playhead (see `resolve_camera_system`).
+    pub outgoing_camera: Option<gaanim_math::Camera>,
+    /// Where the outgoing side's scene units lie in the scene units the
+    /// camera at the playhead draws: through it, a 2D drawable of that side
+    /// shows where `outgoing_camera` shows it.
+    pub outgoing_view: Affine,
 }
 
 impl SceneTransitionFrame {
@@ -114,11 +125,52 @@ impl SceneTransitionFrame {
             && self.incoming_mask.is_none()
             && self.overlays.is_empty()
             && self.shader.is_none()
+            && self.outgoing_camera.is_none()
     }
 
     /// Whether the frame splits its drawables into sides.
     fn splits(&self) -> bool {
-        self.outgoing_mask.is_some() || self.incoming_mask.is_some() || self.shader.is_some()
+        self.outgoing_mask.is_some()
+            || self.incoming_mask.is_some()
+            || self.shader.is_some()
+            || self.outgoing_camera.is_some()
+    }
+
+    /// The camera the drawables of `side` are drawn with: the outgoing
+    /// camera for the outgoing side, `current` for the rest.
+    pub fn camera_for<'a>(
+        &'a self,
+        side: TransitionSide,
+        current: &'a gaanim_math::Camera,
+    ) -> &'a gaanim_math::Camera {
+        match (side, &self.outgoing_camera) {
+            (TransitionSide::Outgoing, Some(camera)) => camera,
+            _ => current,
+        }
+    }
+
+    /// The map that draws the 2D drawables of `side` through the camera at
+    /// the playhead where their own camera shows them, if they have one.
+    pub fn view_for(&self, side: TransitionSide) -> Option<Affine> {
+        (side == TransitionSide::Outgoing && self.outgoing_camera.is_some())
+            .then_some(self.outgoing_view)
+    }
+
+    /// Keep `outgoing` as the outgoing side's camera while it differs from
+    /// `current`, the camera at the playhead; written only when it changes.
+    pub fn set_outgoing_camera(
+        &mut self,
+        outgoing: Option<gaanim_math::Camera>,
+        current: &gaanim_math::Camera,
+    ) {
+        let outgoing = outgoing.filter(|camera| camera != current);
+        let view = outgoing.map_or(Affine::IDENTITY, |camera| {
+            current.canvas_transform().inverse() * camera.canvas_transform()
+        });
+        if self.outgoing_camera != outgoing || self.outgoing_view != view {
+            self.outgoing_camera = outgoing;
+            self.outgoing_view = view;
+        }
     }
 
     /// Classify an entity, walking up its ancestors so untagged descendants

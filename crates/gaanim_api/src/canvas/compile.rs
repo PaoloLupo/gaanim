@@ -3412,6 +3412,11 @@ impl SceneModel {
                 })
                 .collect(),
         );
+        // Camera constraints spawn once their switches, in whatever segment,
+        // have set their windows on the compiled clock.
+        for binding in std::mem::take(&mut builder.camera_bindings) {
+            builder.commands.spawn(binding);
+        }
         builder
             .timeline
             .set_step_windows(step_windows(&segments, &segment_metadata));
@@ -3835,7 +3840,9 @@ impl SceneModel {
                 })
             })
             .collect();
-        fade_in_targets.extend(Self::camera_view_entries(&seg.ops));
+        let camera_entries: HashSet<ObjectId> =
+            Self::camera_view_entries(&seg.ops).into_iter().collect();
+        fade_in_targets.extend(camera_entries.iter().copied());
         let track_origins = crate::canvas::tracks_script_lines();
         for (op_index, op) in seg.ops.iter().enumerate() {
             // The editor's animation timeline traces each clip to its `play`.
@@ -3964,9 +3971,15 @@ impl SceneModel {
                     {
                         builder.hide_visuals_now(&state);
                         // A declaration makes new geometry available, but must not
-                        // override a later fade-in, including on a group member.
+                        // override a later fade-in that is the entry, including on
+                        // a group member: one a write or reveal shows first shows
+                        // from then on.
                         let fade_roots: HashSet<ObjectId> = fade_in_targets
                             .iter()
+                            .filter(|id| {
+                                camera_entries.contains(id)
+                                    || Self::fade_in_is_entry(&seg.ops, op_index, **id)
+                            })
                             .filter_map(|id| id_map.get(id).copied())
                             .collect();
                         if fade_roots.is_empty() {
@@ -4028,23 +4041,36 @@ impl SceneModel {
                             }),
                         },
                     };
-                    builder.commands.spawn(gaanim_animation::CameraBinding {
-                        order: spec.order,
-                        kind,
-                        influence: compile_tracking_scalar(
-                            &spec.influence,
-                            id_map,
-                            &builder.states,
-                        ),
-                        windows: spec
-                            .windows
-                            .into_iter()
-                            .map(|window| gaanim_animation::CameraBindingWindow {
-                                start: window.start,
-                                end: window.end,
-                            })
-                            .collect(),
-                    });
+                    let start = builder.current_time;
+                    builder
+                        .camera_bindings
+                        .push(gaanim_animation::CameraBinding {
+                            order: spec.order,
+                            kind,
+                            influence: compile_tracking_scalar(
+                                &spec.influence,
+                                id_map,
+                                &builder.states,
+                            ),
+                            windows: spec
+                                .enabled
+                                .then_some(gaanim_animation::CameraBindingWindow {
+                                    start,
+                                    end: None,
+                                })
+                                .into_iter()
+                                .collect(),
+                        });
+                }
+                Op::SwitchCameraBinding { order, enabled } => {
+                    let time = builder.current_time;
+                    if let Some(binding) = builder
+                        .camera_bindings
+                        .iter_mut()
+                        .find(|binding| binding.order == *order)
+                    {
+                        binding.switch(time, *enabled);
+                    }
                 }
                 Op::CaptureCameraState { id } => {
                     builder.timeline.add_clip(
@@ -4168,7 +4194,19 @@ impl SceneModel {
                 }
                 Op::Play(anims) | Op::Launch(anims) => {
                     let time_maps = std::mem::take(&mut builder.pending_time_maps);
-                    for anim in anims {
+                    // A fade-in reveals its target first: it owns the root's
+                    // opacity, which a move played with it would show at once.
+                    let fades_in = |anim: &&AnimationBuilder| {
+                        matches!(
+                            anim.anim_type,
+                            AnimationType::FadeIn | AnimationType::FadeInFrom { .. }
+                        )
+                    };
+                    for anim in anims
+                        .iter()
+                        .filter(fades_in)
+                        .chain(anims.iter().filter(|anim| !fades_in(anim)))
+                    {
                         Self::reveal_deferred_on_play(
                             builder,
                             deferred_visibility,
@@ -8745,7 +8783,8 @@ impl SceneModel {
             AnimationType::Properties(properties) if properties.is_transform_only()
         ) {
             if deferred_visibility.contains(&anim.target) && revealed_deferred.insert(anim.target) {
-                builder.schedule_show_root_at(actual, builder.current_time + anim.delay.max(0.0));
+                builder
+                    .schedule_show_visuals_at(actual, builder.current_time + anim.delay.max(0.0));
             }
             return;
         }
@@ -8806,7 +8845,8 @@ impl SceneModel {
             | Op::Remove(_)
             | Op::SetPropertyBinding { .. }
             | Op::ClearPropertyBinding { .. }
-            | Op::SpawnCameraBinding(_) => true,
+            | Op::SpawnCameraBinding(_)
+            | Op::SwitchCameraBinding { .. } => true,
             Op::Spawn(_) => mid_segment,
             Op::Play(anims) | Op::Launch(anims) => anims.iter().any(instant),
             Op::Animate { anim, active } => *active && instant(anim),
@@ -8841,15 +8881,10 @@ impl SceneModel {
     }
 
     /// Whether `target`'s first fade-in in this segment comes after the op at
-    /// `index`, i.e. the object is still waiting for that entry animation.
+    /// `index` and is its entry, i.e. the object is still waiting for it.
     fn fade_in_pending(ops: &[Op], index: usize, target: ObjectId) -> bool {
         let fades_in = |op: &Op| {
-            let anims: &[AnimationBuilder] = match op {
-                Op::Animate { anim, active: true } => std::slice::from_ref(anim),
-                Op::Play(anims) | Op::Launch(anims) => anims,
-                _ => &[],
-            };
-            anims.iter().any(|anim| {
+            Self::played(op).iter().any(|anim| {
                 anim.target == target
                     && matches!(
                         anim.anim_type,
@@ -8857,7 +8892,33 @@ impl SceneModel {
                     )
             })
         };
-        !ops[..index].iter().any(fades_in) && ops[index + 1..].iter().any(fades_in)
+        !ops[..index].iter().any(fades_in) && Self::fade_in_is_entry(ops, index, target)
+    }
+
+    /// Whether the first animation after `ops[index]` that shows `target`,
+    /// or changes how opaque it is, is a fade-in: then that fade-in is its
+    /// entry. A later fade-in of an object that a write, reveal, create or
+    /// grow shows first is not.
+    fn fade_in_is_entry(ops: &[Op], index: usize, target: ObjectId) -> bool {
+        ops[index + 1..]
+            .iter()
+            .flat_map(Self::played)
+            .find(|anim| anim.target == target && anim.anim_type.shows_target())
+            .is_some_and(|anim| {
+                matches!(
+                    anim.anim_type,
+                    AnimationType::FadeIn | AnimationType::FadeInFrom { .. }
+                )
+            })
+    }
+
+    /// The animations `op` plays.
+    fn played(op: &Op) -> &[AnimationBuilder] {
+        match op {
+            Op::Animate { anim, active: true } => std::slice::from_ref(anim),
+            Op::Play(anims) | Op::Launch(anims) => anims,
+            _ => &[],
+        }
     }
 
     /// Whether `target` has a grow from scale zero (or a spin in) still to
@@ -9394,7 +9455,7 @@ impl SceneModel {
         use gaanim_timeline::clip::PropertyLensSpec;
 
         match &anim.anim_type {
-            AnimationType::CameraState { from, to } => {
+            AnimationType::CameraState { from, to, orbit } => {
                 if let gaanim_animation::CameraStateSource::Captured(id) = from {
                     builder.timeline.add_clip(
                         builder.default_track,
@@ -9410,6 +9471,7 @@ impl SceneModel {
                     PropertyLensSpec::CameraState {
                         from: *from,
                         to: *to,
+                        orbit: *orbit,
                     },
                 );
                 if let gaanim_animation::CameraStateSource::Concrete(pose) = to {
@@ -16242,6 +16304,184 @@ mod tests {
         }
     }
 
+    /// A camera constraint switched after a stop at its instant switches as
+    /// a cut does: the stop shows the camera as it was, the next frame the
+    /// camera with the switch.
+    #[test]
+    fn a_stop_shows_the_camera_before_a_constraint_switched_after_it() {
+        let mut canvas = SceneModel::new(1280, 720);
+        canvas.segment("first", None).unwrap();
+        let constraint = canvas
+            .camera_bind_2d(
+                Some(CanvasEndpoint::Static(DVec3::new(120.0, -35.0, 0.0))),
+                None,
+                None,
+                ScalarSource::constant(1.0),
+                true,
+            )
+            .unwrap();
+        canvas.wait(1.0);
+        canvas.stop(None).unwrap();
+        canvas.segment("second", None).unwrap();
+        constraint.disable();
+        canvas.wait(1.0);
+        canvas.stop(None).unwrap();
+        canvas.segment("third", None).unwrap();
+        constraint.enable();
+        canvas.wait(1.0);
+        let (mut world, timeline) = compile_camera_timeline(canvas);
+        let stops: Vec<f64> = timeline
+            .segments
+            .iter()
+            .flat_map(|segment| segment.stops.iter().map(|stop| stop.time))
+            .collect();
+        let mut camera_x = |time: f64| {
+            world.insert_resource(gaanim_math::Camera::ortho_2d(1280, 720));
+            gaanim_animation::apply_camera_bindings(&mut world, time);
+            world.resource::<gaanim_math::Camera>().position.x
+        };
+        let frame = 1.0 / 60.0;
+        assert_eq!(camera_x(stops[0]), 120.0, "{stops:?}");
+        assert_eq!(camera_x(stops[0] + frame), 0.0);
+        assert_eq!(camera_x(stops[1]), 0.0);
+        assert_eq!(camera_x(stops[1] + frame), 120.0);
+    }
+
+    /// A constraint made for its segment holds to the segment's last stop
+    /// and lets go as the next segment starts; one made for the scene holds
+    /// on until a segment that starts by releasing the camera, which shows
+    /// the 2D view from its first frame.
+    #[test]
+    fn segment_cameras_let_go_as_the_next_segment_starts() {
+        let mut canvas = SceneModel::new(1280, 720);
+        let eye = DVec3::new(9.0, 5.0, 8.0);
+        let bind = |canvas: &mut SceneModel| {
+            canvas
+                .camera_bind_3d(
+                    Some(CanvasEndpoint::Static(eye)),
+                    Some(CanvasEndpoint::Static(DVec3::ZERO)),
+                    None,
+                    CanvasEndpoint::Static(DVec3::Y),
+                    None,
+                    ScalarSource::constant(1.0),
+                    true,
+                )
+                .unwrap()
+        };
+        canvas.segment("model", None).unwrap();
+        bind(&mut canvas).until_segment_end();
+        canvas.wait(1.0);
+        canvas.stop(None).unwrap();
+        canvas.segment("plain", None).unwrap();
+        canvas.wait(1.0);
+        canvas.stop(None).unwrap();
+        canvas.segment("again", None).unwrap();
+        let _kept = bind(&mut canvas);
+        canvas.wait(1.0);
+        canvas.stop(None).unwrap();
+        canvas.segment("flat", None).unwrap();
+        canvas.release_camera().unwrap();
+        canvas.wait(1.0);
+        let (mut world, mut timeline) = compile_camera_timeline(canvas);
+        let stops: Vec<f64> = timeline
+            .segments
+            .iter()
+            .flat_map(|segment| segment.stops.iter().map(|stop| stop.time))
+            .collect();
+        let mut rig_at = |time: f64| {
+            timeline.seek(&mut world, time);
+            world.insert_resource(std::mem::replace(&mut timeline, Timeline::new()));
+            gaanim_timeline::camera_binding_system(&mut world);
+            timeline = world.remove_resource::<Timeline>().unwrap();
+            world.resource::<gaanim_math::CameraRigCamera>().0
+        };
+        let bound = |camera: gaanim_math::Camera| (camera.position - eye).length() < 1e-9;
+        let frame = 1.0 / 60.0;
+        assert!(bound(rig_at(0.5)));
+        assert!(bound(rig_at(stops[0])), "{stops:?}");
+        assert!(!bound(rig_at(stops[0] + frame)));
+        assert!(bound(rig_at(stops[1] + 0.5)));
+        assert!(bound(rig_at(stops[2])));
+        let flat = rig_at(stops[2] + frame);
+        assert!(!bound(flat));
+        assert!(matches!(
+            flat.projection,
+            gaanim_math::Projection::Orthographic { zoom } if (zoom - 1.0).abs() < 1e-9
+        ));
+        assert!(flat.position.truncate().length() < 1e-9);
+    }
+
+    /// While a transition shows it, the outgoing segment keeps the camera it
+    /// ended with, its constraint included, though the incoming segment
+    /// releases the constraint and resets the camera as it starts; the
+    /// incoming segment has its own camera from the transition's first frame.
+    #[test]
+    fn the_outgoing_segment_keeps_its_camera_while_it_leaves() {
+        let mut canvas = SceneModel::new(1280, 720);
+        canvas.segment("model", None).unwrap();
+        let _cube = canvas
+            .cube(1.0, gaanim_scene::Material3D::default())
+            .unwrap();
+        let eye = DVec3::new(9.0, 5.0, 8.0);
+        let constraint = canvas
+            .camera_bind_3d(
+                Some(CanvasEndpoint::Static(eye)),
+                Some(CanvasEndpoint::Static(DVec3::new(3.0, 1.0, -2.0))),
+                Some(ScalarSource::constant(0.6)),
+                CanvasEndpoint::Static(DVec3::Y),
+                None,
+                ScalarSource::constant(1.0),
+                true,
+            )
+            .unwrap();
+        canvas.wait(1.0);
+        canvas.stop(None).unwrap();
+        canvas
+            .segment(
+                "next",
+                Some(gaanim_timeline::transition::TransitionType::cross_fade(0.6)),
+            )
+            .unwrap();
+        constraint.disable();
+        let reset = canvas.camera_reset(0.0);
+        canvas.play(vec![reset]);
+        canvas.wait(1.0);
+        let (mut world, mut timeline) = compile_camera_timeline(canvas);
+        world.init_resource::<gaanim_math::ResolvedCamera>();
+        world.init_resource::<gaanim_math::CameraViewOverride>();
+        world.init_resource::<gaanim_math::CameraViewport>();
+        let mut camera_phase = bevy::prelude::Schedule::default();
+        camera_phase.add_systems(gaanim_scene::systems::resolve_camera_system);
+        let mut at = |time: f64| {
+            timeline.seek(&mut world, time);
+            world.insert_resource(std::mem::replace(&mut timeline, Timeline::new()));
+            gaanim_timeline::camera_binding_system(&mut world);
+            gaanim_timeline::camera_rig_system(&mut world);
+            camera_phase.run(&mut world);
+            timeline = world.remove_resource::<Timeline>().unwrap();
+            let shown = world.resource::<gaanim_math::ResolvedCamera>().camera;
+            let outgoing = world
+                .get_resource::<gaanim_scene::SceneTransitionFrame>()
+                .and_then(|frame| frame.outgoing_camera);
+            (shown, outgoing)
+        };
+        let is_bound = |camera: &gaanim_math::Camera| (camera.position - eye).length() < 1e-9;
+        // Before the transition, one camera: the constraint's.
+        let (shown, outgoing) = at(0.95);
+        assert!(is_bound(&shown) && outgoing.is_none());
+        // While it fades, the model keeps that camera and the next segment
+        // shows the reset one.
+        for time in [1.02, 1.3, 1.55] {
+            let (shown, outgoing) = at(time);
+            assert!(!is_bound(&shown), "at {time}: {shown:?}");
+            let outgoing = outgoing.unwrap_or_else(|| panic!("no outgoing camera at {time}"));
+            assert!(is_bound(&outgoing), "at {time}: {outgoing:?}");
+        }
+        // Once it ends, one camera again.
+        let (shown, outgoing) = at(1.8);
+        assert!(!is_bound(&shown) && outgoing.is_none());
+    }
+
     /// What only says which segment holds a drawable, as `reuse` made just
     /// after a stop, stays at the stop's instant, with what follows it.
     #[test]
@@ -18421,6 +18661,67 @@ mod tests {
         assert_eq!(glyph_text(&visible_glyphs(&mut world)), "Later");
         timeline.seek(&mut world, 3.0);
         assert_eq!(glyph_text(&visible_glyphs(&mut world)), "");
+    }
+
+    /// A text declared after earlier animations, which enters with a write
+    /// and later fades out and in, shows from its write on: the later
+    /// fade-in is not its entry.
+    #[test]
+    fn a_text_written_mid_segment_shows_before_its_later_fade_in() {
+        let mut canvas = SceneModel::new(640, 360);
+        canvas.wait(0.5);
+        let text = canvas.text("Late");
+        canvas.play(vec![text.animate().write().duration(0.5)]);
+        canvas.wait(1.0);
+        canvas.play(vec![text.animate().fade_out().duration(0.5)]);
+        canvas.play(vec![text.animate().fade_in().duration(0.5)]);
+        canvas.wait(0.5);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        for (time, expected) in [
+            (0.25, ""),
+            (1.5, "Late"),
+            (2.5, ""),
+            (3.25, "Late"),
+            (1.5, "Late"),
+        ] {
+            timeline.seek(&mut world, time);
+            assert_eq!(
+                glyph_text(&visible_glyphs(&mut world)),
+                expected,
+                "at {time}"
+            );
+        }
+    }
+
+    /// A hidden text that a move shows draws its glyphs, whether the move
+    /// plays alone or with a fade-in.
+    #[test]
+    fn a_hidden_text_a_move_shows_draws_its_glyphs() {
+        let mut canvas = SceneModel::new(640, 360);
+        let moved = canvas.text("Moved").hidden().unwrap();
+        let faded = canvas.text("Faded").hidden().unwrap();
+        canvas.wait(0.5);
+        canvas.play(vec![
+            moved.animate().move_to_3d(2.0, 1.0, 0.0).duration(0.5),
+            faded.animate().move_to_3d(-2.0, 1.0, 0.0).duration(0.5),
+            faded.animate().fade_in().duration(0.5),
+        ]);
+        canvas.wait(0.5);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        timeline.seek(&mut world, 0.25);
+        assert_eq!(glyph_text(&visible_glyphs(&mut world)), "");
+        timeline.seek(&mut world, 1.25);
+        assert_eq!(glyph_text(&visible_glyphs(&mut world)), "MovedFaded");
+        // The fade-in owns the faded text's opacity: halfway, it is half on.
+        timeline.seek(&mut world, 0.75);
+        let faded = world
+            .query::<(&gaanim_scene::components::TextSpan, &bevy::prelude::ChildOf)>()
+            .iter(&world)
+            .find(|(span, _)| span.character == 'F')
+            .map(|(_, parent)| parent.parent())
+            .unwrap();
+        let opacity = world.get::<Opacity>(faded).unwrap().0;
+        assert!((opacity - 0.5).abs() < 0.05, "{opacity}");
     }
 
     #[test]

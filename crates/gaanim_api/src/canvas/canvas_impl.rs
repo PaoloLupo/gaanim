@@ -24,9 +24,8 @@ use crate::canvas::SceneMarker;
 use crate::canvas::authored::Authored;
 use crate::canvas::drawable::DrawableHandle;
 use crate::canvas::ops::{
-    CameraBindingSpec, CameraBindingWindowSpec, CanvasCameraBindingKind, CanvasEndpoint, CanvasRay,
-    CanvasState, LocalSegmentStop, Op, PointRef, Segment, SharedCameraBindingSpec,
-    SharedCanvasState,
+    CameraBindingSpec, CanvasCameraBindingKind, CanvasEndpoint, CanvasRay, CanvasState,
+    LocalSegmentStop, Op, PointRef, Segment, SharedCameraBindingSpec, SharedCanvasState,
 };
 use crate::canvas::types::{
     Anim, BooleanOperation, BooleanRule, FillLevelDirection, ImageFit, ImageOptions,
@@ -1835,6 +1834,16 @@ pub struct CameraConstraintHandle {
     state: SharedCanvasState,
 }
 
+/// How far a camera in an orbit shot stands from what it looks at.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum OrbitReach {
+    /// This far, in world units.
+    Distance(f64),
+    /// As far as shows this many scene units per world unit across the
+    /// plane through the target (see [`gaanim_math::orbit_distance`]).
+    Scale(f64),
+}
+
 /// Reusable complete camera state owned by one scene.
 #[derive(Clone)]
 pub struct CameraStateHandle {
@@ -1872,41 +1881,37 @@ impl std::fmt::Debug for CameraConstraintHandle {
 }
 
 impl CameraConstraintHandle {
-    fn current_time(&self) -> f64 {
+    /// Switch this constraint on or off at the current timeline cursor. Like
+    /// a cut, a switch made after a stop at its instant comes after it, so
+    /// the stop still shows the camera as it was.
+    fn switch(&self, enabled: bool) {
+        let order = self.spec.lock().expect("camera binding poisoned").order;
         self.state
             .lock()
             .expect("canvas state poisoned")
-            .segments
-            .iter()
-            .map(|segment| segment.cursor)
-            .sum()
+            .active_mut()
+            .ops
+            .push(Op::SwitchCameraBinding { order, enabled });
     }
 
     /// Enable this constraint at the current timeline cursor.
     pub fn enable(&self) {
-        let time = self.current_time();
-        let mut spec = self.spec.lock().expect("camera binding poisoned");
-        if spec
-            .windows
-            .last()
-            .is_some_and(|window| window.end.is_none())
-        {
-            return;
-        }
-        spec.windows.push(CameraBindingWindowSpec {
-            start: time,
-            end: None,
-        });
+        self.switch(true);
     }
 
     /// Disable this constraint at the current timeline cursor.
     pub fn disable(&self) {
-        let time = self.current_time();
-        let mut spec = self.spec.lock().expect("camera binding poisoned");
-        if let Some(window) = spec.windows.last_mut()
-            && window.end.is_none()
-        {
-            window.end = Some(time.max(window.start));
+        self.switch(false);
+    }
+
+    /// Let this constraint go as the next segment starts, so it holds for
+    /// the segment it was made in, and for that segment alone while a
+    /// transition shows it leave.
+    pub fn until_segment_end(&self) {
+        let order = self.spec.lock().expect("camera binding poisoned").order;
+        let mut state = self.state.lock().expect("canvas state poisoned");
+        if !state.segment_camera_bindings.contains(&order) {
+            state.segment_camera_bindings.push(order);
         }
     }
 }
@@ -3385,6 +3390,13 @@ impl SceneModel {
             guard.segments.push(segment);
             guard.active_idx = index;
         }
+        // Constraints made for one segment let go as the next starts.
+        for order in std::mem::take(&mut guard.segment_camera_bindings) {
+            guard.active_mut().ops.push(Op::SwitchCameraBinding {
+                order,
+                enabled: false,
+            });
+        }
         let segment_number = guard
             .segments
             .iter()
@@ -3398,6 +3410,26 @@ impl SceneModel {
         }
         self.spawn_segment_branding(template.as_deref(), segment_number)?;
         Ok(SegmentHandle::new(id, self.state.clone()))
+    }
+
+    /// Return the camera to the scene's 2D view at the cursor, at once: every
+    /// camera constraint made so far lets go and the camera resets. A
+    /// segment that starts with it (`segment(..., camera="reset")`) shows its
+    /// own view from its first frame; like a cut, it comes after a stop at
+    /// its instant, and the segment before keeps its camera while a
+    /// transition shows it leave.
+    pub fn release_camera(&mut self) -> Result<(), PlayError> {
+        {
+            let mut state = self.state.lock().expect("canvas state poisoned");
+            let made = state.next_camera_binding_order;
+            let ops = &mut state.active_mut().ops;
+            ops.extend((0..made).map(|order| Op::SwitchCameraBinding {
+                order,
+                enabled: false,
+            }));
+        }
+        let reset = self.camera_reset(0.0);
+        self.play_items_configured(vec![PlayItem::Animation(reset)], None, None)
     }
 
     /// Explicitly link two segments created by this canvas.
@@ -5793,6 +5825,38 @@ impl SceneModel {
         Ok(self.camera_state_handle(gaanim_animation::CameraStateSource::Concrete(pose)))
     }
 
+    /// A concrete perspective state that looks at `target` from `azimuth`
+    /// and `elevation` radians around `up` (see
+    /// [`gaanim_math::orbit_direction`]), from as far as `reach` says.
+    #[allow(clippy::too_many_arguments)]
+    pub fn camera_state_orbit(
+        &self,
+        target: DVec3,
+        azimuth: f64,
+        elevation: f64,
+        reach: OrbitReach,
+        up: DVec3,
+        fov_y: f64,
+        near: f64,
+        far: f64,
+        lens_shift: DVec2,
+    ) -> Result<CameraStateHandle, gaanim_math::CameraValidationError> {
+        let distance = match reach {
+            OrbitReach::Distance(distance) => distance,
+            OrbitReach::Scale(scale) => {
+                gaanim_math::orbit_distance(scale, fov_y, self.frame.height)
+            }
+        };
+        let pose = gaanim_math::CameraPose {
+            lens_shift,
+            ..gaanim_math::CameraPose::orbit_3d(
+                target, azimuth, elevation, distance, up, fov_y, near, far,
+            )?
+        };
+        pose.validate()?;
+        Ok(self.camera_state_handle(gaanim_animation::CameraStateSource::Concrete(pose)))
+    }
+
     /// Capture the authored camera at the current timeline cursor.
     pub fn camera_capture(&self) -> CameraStateHandle {
         let mut state = self.state.lock().expect("canvas state poisoned");
@@ -5854,6 +5918,26 @@ impl SceneModel {
         state_handle: &CameraStateHandle,
         duration: f64,
     ) -> Result<Anim, CameraStateError> {
+        self.camera_to_along(state_handle, duration, false)
+    }
+
+    /// Animate to a camera state turning about the target, as
+    /// [`gaanim_math::CameraPose::orbit_in_frame`] does: the eye goes around
+    /// what it looks at instead of cutting straight across.
+    pub fn camera_orbit_to(
+        &self,
+        state_handle: &CameraStateHandle,
+        duration: f64,
+    ) -> Result<Anim, CameraStateError> {
+        self.camera_to_along(state_handle, duration, true)
+    }
+
+    fn camera_to_along(
+        &self,
+        state_handle: &CameraStateHandle,
+        duration: f64,
+        orbit: bool,
+    ) -> Result<Anim, CameraStateError> {
         if !Arc::ptr_eq(&self.state, &state_handle.state) {
             return Err(CameraStateError::ForeignScene);
         }
@@ -5867,6 +5951,7 @@ impl SceneModel {
                 AnimationType::CameraState {
                     from: gaanim_animation::CameraStateSource::Captured(from_id),
                     to: state_handle.source,
+                    orbit,
                 },
                 duration,
             )
@@ -6235,17 +6320,13 @@ impl SceneModel {
         enabled: bool,
     ) -> CameraConstraintHandle {
         let mut state = self.state.lock().expect("canvas state poisoned");
-        let start = state.segments.iter().map(|segment| segment.cursor).sum();
         let order = state.next_camera_binding_order();
         let spec = Arc::new(Authored::sharing(
             CameraBindingSpec {
                 order,
                 kind,
                 influence,
-                windows: enabled
-                    .then_some(CameraBindingWindowSpec { start, end: None })
-                    .into_iter()
-                    .collect(),
+                enabled,
             },
             &self.state,
         ));

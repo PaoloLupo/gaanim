@@ -105,10 +105,10 @@ pub use canvas_impl::{
     BooleanError, CameraBindingError, CameraConstraintHandle, CameraStateError, CameraStateHandle,
     CodeThemeError, Composition, DEFAULT_REACTIVE_TEXT_SIZE, DimensionExtensionStyle,
     DimensionHandle, DimensionOptions, ForceVectorHandle, ImageLoadError, Line3DError, LottieClip,
-    LottieLoadError, PlayError, PlayItem, SceneModel, SceneObjectError, Schedule, ScheduleEntry,
-    StaggerLayout, StaggerOrigin, StopLoopError, SupportHandle, SurroundingRectError,
-    SurroundingRectHandle, ThemeError, TypstAssetError, VideoClip, VideoLoadError, VideoSegment,
-    stagger_weights,
+    LottieLoadError, OrbitReach, PlayError, PlayItem, SceneModel, SceneObjectError, Schedule,
+    ScheduleEntry, StaggerLayout, StaggerOrigin, StopLoopError, SupportHandle,
+    SurroundingRectError, SurroundingRectHandle, ThemeError, TypstAssetError, VideoClip,
+    VideoLoadError, VideoSegment, stagger_weights,
 };
 pub use canvas_impl::{InsertPosition, ScheduleLabel};
 pub use canvas_impl::{background_image, clear_asset_caches, forget_assets, image_overlay};

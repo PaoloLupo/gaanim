@@ -70,6 +70,39 @@ Una presentación de Gaanim es una escena normal organizada así:
   diapositiva siguiente), se ve al avanzar.
 - `segment.bind(...)` rellena los huecos de la plantilla con tus objetos.
 
+== Una cámara por diapositiva <camara-por-diapositiva>
+
+En una diapositiva 3D la cámara es parte de la diapositiva: la siguiente,
+casi siempre 2D, debe volver a la vista de siempre. Dos opciones lo dicen sin
+llevar la cuenta de qué restricciones creaste:
+
+- `scene.camera.bind_3d(..., scope="segment")` (o `bind_2d`) crea una
+  restricción que se suelta sola al empezar el segmento siguiente.
+- `scene.segment(..., camera="reset")` empieza la diapositiva en la vista 2D:
+  suelta todas las restricciones y reinicia la cámara. `Section(...,
+  camera="reset")` y `SectionStep(..., camera=)` lo piden para sus pasos.
+
+Las dos actúan como un corte después de la última pausa de la diapositiva
+anterior, así que esa pausa todavía muestra su toma 3D. Y mientras una
+transición (`cross_fade`, `wipe`…) muestra salir una diapositiva, esta se
+dibuja con la cámara con la que terminó, y la que entra con la suya desde el
+primer cuadro: el guion no necesita conocer la duración de las transiciones.
+
+```python
+from gaanim import Material3D, Scene, Transition
+
+scene = Scene(frame=(16, 9), theme="paper")
+scene.segment("modelo")
+scene.geometry.cube(2.0, material=Material3D.matte("#2E5B87"))
+scene.camera.bind_3d(eye=(6, 4, 10), target=(0, 0, 0), fov_y=0.6, scope="segment")
+scene.wait(1)
+scene.stop("fin-modelo")
+scene.segment("resumen", Transition.cross_fade(0.4))
+scene.text("Diapositiva 2D", size=0.4)
+scene.wait(1)
+scene.render()
+```
+
 `scene.slides.brand(...)` configura para toda la presentación el logo, el pie,
 la numeración y la línea separadora. Las plantillas `title_slide`, `lecture`,
 `comparison` y `credits` devuelven un layout adaptable y puedes reemplazarlas
