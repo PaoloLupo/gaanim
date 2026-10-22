@@ -3864,11 +3864,17 @@ impl Timeline {
                 }
                 _ => {
                     self.replay_trace_drivers(world, &drivers, sample_time);
-                    gaanim_animation::advance_updaters_by(
-                        world,
-                        sample_time - previous_sample_time,
-                    );
-                    previous_sample_time = sample_time;
+                    if plan.is_none() {
+                        gaanim_animation::advance_updaters_by(
+                            world,
+                            sample_time - previous_sample_time,
+                        );
+                        previous_sample_time = sample_time;
+                    } else if index + 1 == sample_times.len() {
+                        // The updaters move none of the sources: they
+                        // catch up with the seek once, as without traces.
+                        resync_updaters(world, sample_time);
+                    }
                     // Sample sources exactly as playback moves them; stale
                     // reactive positions would otherwise join old points to
                     // the live trail.
@@ -3923,20 +3929,18 @@ impl Timeline {
     }
 
     /// What a trace rebuild must replay, when nothing but clips and bindings
-    /// moves drawables and no binding moves a trace or its source: the
-    /// clips of the `drivers` that place a source, or every driver's when one
-    /// of those clips reads the world (and may read a signal). The sources
-    /// hold still once these have ended and replay from the latest keyframe.
-    /// `None` when something else may move a source.
+    /// moves the traces, their sources and their ancestors: the clips of the
+    /// `drivers` that place a source, or every driver's when one of those
+    /// clips reads the world (and may read a signal). The sources hold
+    /// still once these have ended and replay from the latest keyframe.
+    /// Reactive positions elsewhere move only what they are on. `None` when
+    /// something else may move a source.
     fn trace_sampling(
         &self,
         world: &mut World,
         drivers: &[TraceDriver<'_>],
         traces: impl IntoIterator<Item = Entity>,
     ) -> Option<TraceSampling> {
-        if gaanim_animation::has_reactive_positions(world) {
-            return None;
-        }
         // Each trace and source, with their ancestors, places the trail.
         let mut placing = HashSet::new();
         for mut entity in traces {
@@ -3949,6 +3953,9 @@ impl Timeline {
                     None => break,
                 }
             }
+        }
+        if gaanim_animation::reactive_positions_move(world, &placing) {
+            return None;
         }
         let mut changes = Vec::new();
         let mut bindings = world.query::<&gaanim_animation::PropertyBinding>();
@@ -3971,6 +3978,10 @@ impl Timeline {
                     ClipPayload::Animation(anim) if matches!(anim.lens, PropertyLensSpec::Dynamic(_))
                 )
             });
+        // A clip that reads the world may read what a reactive position moves.
+        if reads_world && gaanim_animation::has_reactive_positions(world) {
+            return None;
+        }
         let clips_end = drivers
             .iter()
             .filter(|driver| driver.places || reads_world)
@@ -4019,8 +4030,10 @@ impl Timeline {
             .flatten()
             .filter_map(|id| self.clips.get(*id))
         {
+            // A camera clip's target is no drawable, though its id may be one's.
             if let ClipPayload::Animation(anim) = &clip.payload
                 && ids.contains_key(&anim.target)
+                && !anim.lens.moves_the_camera()
             {
                 clips.entry(anim.target).or_default().push(clip);
             }
@@ -6958,13 +6971,22 @@ mod tests {
         OnSource,
     }
 
+    /// Where a [`settling_trace_world`] has an updater.
+    #[derive(Clone, Copy, PartialEq, Debug)]
+    enum Reactive {
+        None,
+        /// On another entity, which it alone moves.
+        Elsewhere,
+        /// On the source, so rebuilds replay every sample.
+        OnSource,
+    }
+
     /// A trace of a source that clips move for its first two seconds, and
     /// its group from 6 to 7 s, with `checkpoints` at segment starts every
-    /// 2 s up to 40 s. `reactive` adds an updater on another entity, so
-    /// rebuilds replay every sample. The drawable the bindings target, if
-    /// any, is the last entity returned.
+    /// 2 s up to 40 s, and a `reactive` updater. The drawable the bindings
+    /// target, if any, is the last entity returned.
     fn settling_trace_world(
-        reactive: bool,
+        reactive: Reactive,
         checkpoints: bool,
         (min_distance, max_points, start_at, dissipating_time): TraceParams,
         bindings: TraceBindings,
@@ -6993,12 +7015,20 @@ mod tests {
                     .with_dissipating_time(dissipating_time),
             ))
             .id();
-        if reactive {
-            world.spawn((
-                MobjectId(ObjectId::from_raw(2)),
-                SpatialTransform::default(),
-                gaanim_animation::Updater::new(|_, _, _, _| true),
-            ));
+        match reactive {
+            Reactive::None => {}
+            Reactive::Elsewhere => {
+                world.spawn((
+                    MobjectId(ObjectId::from_raw(2)),
+                    SpatialTransform::default(),
+                    gaanim_animation::Updater::new(|_, _, _, _| true),
+                ));
+            }
+            Reactive::OnSource => {
+                world
+                    .entity_mut(source)
+                    .insert(gaanim_animation::Updater::new(|_, _, _, _| true));
+            }
         }
         let bound = match bindings {
             TraceBindings::OnSource => source,
@@ -7112,6 +7142,23 @@ mod tests {
                 }),
             );
         }
+        // A camera clip whose target id is the source's moves no drawable.
+        timeline.add_clip(
+            track,
+            20.0,
+            1.0,
+            ClipPayload::Animation(AnimationSpec {
+                target: source_id,
+                lens: PropertyLensSpec::CameraZoom {
+                    from: 1.0,
+                    to: 2.0,
+                    interpolation: gaanim_math::ZoomInterpolation::default(),
+                },
+                rate_func: RateFunc::Linear,
+                delay: 0.0,
+                label: None,
+            }),
+        );
         timeline.add_clip(track, 40.0, 0.0, ClipPayload::Wait);
         let segments = (0..20)
             .map(|index| SegmentMetadata {
@@ -7139,16 +7186,20 @@ mod tests {
         ];
         let cases = traces
             .into_iter()
-            .map(|trace| (trace, TraceBindings::None))
+            .map(|trace| (trace, TraceBindings::None, Reactive::None))
             .chain([
-                (traces[0], TraceBindings::Elsewhere),
-                (traces[0], TraceBindings::OnSource),
+                (traces[0], TraceBindings::Elsewhere, Reactive::None),
+                (traces[0], TraceBindings::OnSource, Reactive::None),
+                // An updater that moves something else leaves the trace as
+                // clips move it.
+                (traces[0], TraceBindings::None, Reactive::Elsewhere),
+                (traces[0], TraceBindings::Elsewhere, Reactive::Elsewhere),
             ]);
-        for (trace, bindings) in cases {
+        for (trace, bindings, reactive) in cases {
             let (mut world, mut timeline, entity, bound) =
-                settling_trace_world(false, false, trace, bindings);
+                settling_trace_world(reactive, false, trace, bindings);
             let (mut reference_world, mut reference, reference_entity, reference_bound) =
-                settling_trace_world(true, false, trace, bindings);
+                settling_trace_world(Reactive::OnSource, false, trace, bindings);
             // Far apart, so every seek rebuilds the trace.
             for time in [
                 30.0, 2.0, 1.5, 0.5, 12.345, 39.99, 2.6, 11.0, 14.99, 0.3, 15.01,
@@ -7194,9 +7245,9 @@ mod tests {
     fn traces_keep_segment_checkpoints() {
         let trace = (0.01, None, 0.0, Some(0.3));
         let (mut world, mut timeline, entity, _) =
-            settling_trace_world(false, true, trace, TraceBindings::Elsewhere);
+            settling_trace_world(Reactive::None, true, trace, TraceBindings::Elsewhere);
         let (mut reference_world, mut reference, reference_entity, _) =
-            settling_trace_world(false, false, trace, TraceBindings::Elsewhere);
+            settling_trace_world(Reactive::None, false, trace, TraceBindings::Elsewhere);
         let times = (0..=40)
             .map(|step| f64::from(step) * 0.75)
             .chain([31.0, 13.0, 35.5, 1.5, 0.9, 23.9, 23.95, 24.0, 6.1]);

@@ -1,5 +1,5 @@
 use crate::tween::DeltaTime;
-use bevy::prelude::{Children, Component, DetectChangesMut};
+use bevy::prelude::{Children, Component, DetectChangesMut, With};
 use gaanim_core::ObjectId;
 use gaanim_core::glam::{DMat4, DQuat, DVec2, DVec3};
 use gaanim_core::kurbo::{BezPath, Shape};
@@ -709,20 +709,36 @@ pub fn evaluate_reactive_positions(world: &mut World, time: f64) {
 /// the time and signals alone, so without these a drawable that no binding
 /// targets holds still once its clips have ended.
 pub fn has_reactive_positions(world: &mut World) -> bool {
-    fn any<C: Component>(world: &mut World) -> bool {
-        world.query::<&C>().iter(world).next().is_some()
+    reactive_positions_on(world, |_| true)
+}
+
+/// Whether a reactive position sits on one of `entities`: each moves the
+/// entity it is on, so the others are left where clips put them.
+pub fn reactive_positions_move(
+    world: &mut World,
+    entities: &std::collections::HashSet<Entity>,
+) -> bool {
+    reactive_positions_on(world, |entity| entities.contains(&entity))
+}
+
+fn reactive_positions_on(world: &mut World, moves: impl Fn(Entity) -> bool) -> bool {
+    fn any<C: Component>(world: &mut World, moves: &impl Fn(Entity) -> bool) -> bool {
+        world
+            .query_filtered::<Entity, With<C>>()
+            .iter(world)
+            .any(moves)
     }
-    any::<Updater>(world)
-        || any::<SampledSeriesDrivers>(world)
-        || any::<crate::signals::PointOnCurve>(world)
-        || any::<crate::signals::TangentOnCurve>(world)
-        || any::<crate::signals::NormalOnCurve>(world)
-        || any::<crate::signals::CurvatureOnCurve>(world)
-        || any::<crate::signals::PositionBinding>(world)
-        || any::<RotationBinding>(world)
-        || any::<RotationTranslationBinding>(world)
-        || any::<EndpointFollow>(world)
-        || any::<TrackingAngle>(world)
+    any::<Updater>(world, &moves)
+        || any::<SampledSeriesDrivers>(world, &moves)
+        || any::<crate::signals::PointOnCurve>(world, &moves)
+        || any::<crate::signals::TangentOnCurve>(world, &moves)
+        || any::<crate::signals::NormalOnCurve>(world, &moves)
+        || any::<crate::signals::CurvatureOnCurve>(world, &moves)
+        || any::<crate::signals::PositionBinding>(world, &moves)
+        || any::<RotationBinding>(world, &moves)
+        || any::<RotationTranslationBinding>(world, &moves)
+        || any::<EndpointFollow>(world, &moves)
+        || any::<TrackingAngle>(world, &moves)
 }
 
 /// Sistema exclusivo que lee la posición del source de cada TracedPath y regenera su Path2D.

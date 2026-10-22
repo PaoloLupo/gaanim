@@ -181,11 +181,12 @@ fn index_table(script: &Path, index: &TimelineIndex) -> String {
         .iter()
         .map(|segment| segment.stops.len())
         .sum();
-    let mut rows: Vec<(f64, usize, String, String)> = Vec::new();
+    // Rows in the order they are listed here: a stop at the instant the
+    // next segment starts stays under the segment that made it.
+    let mut rows: Vec<(f64, String, String)> = Vec::new();
     for segment in &index.segments {
         rows.push((
             segment.start,
-            0,
             format!(
                 "{:>7.2}–{:<7.2} {}",
                 segment.start, segment.end, segment.name
@@ -195,7 +196,6 @@ fn index_table(script: &Path, index: &TimelineIndex) -> String {
         for stop in &segment.stops {
             rows.push((
                 stop.time,
-                1,
                 format!(
                     "{:>7.2}           stop {}",
                     stop.time,
@@ -208,7 +208,6 @@ fn index_table(script: &Path, index: &TimelineIndex) -> String {
     for marker in &index.markers {
         rows.push((
             marker.time,
-            2,
             format!("{:>7.2}           marker {}", marker.time, marker.name),
             place(script, marker.location.as_ref()),
         ));
@@ -221,7 +220,6 @@ fn index_table(script: &Path, index: &TimelineIndex) -> String {
     {
         rows.push((
             take.start,
-            3,
             format!(
                 "{:>7.2}–{:<7.2}   {label} {}",
                 take.start,
@@ -231,10 +229,10 @@ fn index_table(script: &Path, index: &TimelineIndex) -> String {
             place(script, take.location.as_ref()),
         ));
     }
-    rows.sort_by(|left, right| left.0.total_cmp(&right.0).then(left.1.cmp(&right.1)));
+    rows.sort_by(|left, right| left.0.total_cmp(&right.0));
     let width = rows
         .iter()
-        .map(|(_, _, label, _)| label.chars().count())
+        .map(|(_, label, _)| label.chars().count())
         .max()
         .unwrap_or(0);
     let mut out = format!(
@@ -245,7 +243,7 @@ fn index_table(script: &Path, index: &TimelineIndex) -> String {
         index.markers.len(),
         index.duration
     );
-    for (_, _, label, place) in rows {
+    for (_, label, place) in rows {
         let padding = width - label.chars().count();
         out.push_str(format!("{label}{}  {place}", " ".repeat(padding)).trim_end());
         out.push('\n');
@@ -361,5 +359,17 @@ mod tests {
         assert!(lines[3].contains("stop titulo") && lines[3].ends_with("main.py:6"));
         assert!(lines[4].contains("results · 1 · 1 · Datos"));
         assert!(lines[5].contains("marker climax"));
+    }
+
+    /// A stop at the end of a segment stays under it, though the next
+    /// segment starts at the same instant.
+    #[test]
+    fn a_stop_ending_a_segment_is_listed_under_it() {
+        let mut index = index();
+        index.segments[0].stops[0].time = 2.0;
+        let table = index_table(Path::new("/talk/main.py"), &index);
+        let lines: Vec<&str> = table.lines().collect();
+        assert!(lines[3].contains("stop titulo"), "{table}");
+        assert!(lines[4].contains("results · 1 · 1 · Datos"), "{table}");
     }
 }

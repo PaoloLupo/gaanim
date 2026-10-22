@@ -522,6 +522,35 @@ pub enum PropertyLensSpec {
 }
 
 impl PropertyLensSpec {
+    /// Whether this lens moves the camera, whatever its clip's target.
+    pub fn moves_the_camera(&self) -> bool {
+        matches!(
+            self,
+            Self::CameraState { .. }
+                | Self::CameraPosition { .. }
+                | Self::CameraPositionSource { .. }
+                | Self::CameraRotation { .. }
+                | Self::CameraZoom { .. }
+                | Self::CameraZoomSource { .. }
+                | Self::CameraPanZoom { .. }
+                | Self::CameraRotationSource { .. }
+                | Self::CameraOrthographic { .. }
+                | Self::CameraReset { .. }
+                | Self::CameraFollow { .. }
+                | Self::CameraFollowEndpoint { .. }
+                | Self::CameraFrameDynamic { .. }
+                | Self::CameraShake { .. }
+                | Self::CameraTarget { .. }
+                | Self::CameraLookAt { .. }
+                | Self::CameraOrbit { .. }
+                | Self::CameraLookAtSource { .. }
+                | Self::CameraPerspective { .. }
+                | Self::CameraPathFollow { .. }
+                | Self::CameraDepthOfField { .. }
+                | Self::CameraDollyZoom { .. }
+        )
+    }
+
     /// Converts this serializable specification into a runtime Bevy `PropertyLens`.
     pub fn to_lens(&self) -> PropertyLens {
         match self {

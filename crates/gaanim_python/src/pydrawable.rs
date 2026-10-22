@@ -614,12 +614,10 @@ impl PyCanvasAnim {
                 return Ok(Self {
                     inner: if text_default {
                         self.inner.clone().move_to_text(x, y)
+                    } else if let Some(anchor) = anchor {
+                        self.inner.clone().move_to_anchor(x, y, anchor.0)
                     } else {
-                        self.inner.clone().move_to_anchor(
-                            x,
-                            y,
-                            anchor.map(|anchor| anchor.0).unwrap_or_default(),
-                        )
+                        self.inner.clone().move_to(x, y)
                     },
                 });
             }
@@ -633,15 +631,20 @@ impl PyCanvasAnim {
                     },
                 );
             }
-            let anchor = anchor
-                .map(|anchor| anchor.0)
-                .unwrap_or_default()
-                .to_offset();
+            // A group about an origin follows the point by its origin.
+            let anchor =
+                (anchor.is_some() || !self.inner.property_target_has_group_origin()).then(|| {
+                    let anchor = anchor
+                        .map(|anchor| anchor.0)
+                        .unwrap_or_default()
+                        .to_offset();
+                    gaanim_core::glam::DVec3::new(anchor.x, anchor.y, 0.0)
+                });
             return source_anim(
                 self,
                 PropertySources::Translation {
                     values: [sx, sy, 0.0.into()],
-                    anchor: Some(gaanim_core::glam::DVec3::new(anchor.x, anchor.y, 0.0)),
+                    anchor,
                 },
             );
         }
@@ -2651,15 +2654,19 @@ impl PyDrawable {
                     self.0.clone().move_to_default(x, y)
                 }));
             }
-            let anchor = anchor
-                .map(|anchor| anchor.0)
-                .unwrap_or_default()
-                .to_offset();
+            // A group about an origin follows the point by its origin.
+            let anchor = (anchor.is_some() || !self.0.has_group_origin()).then(|| {
+                let anchor = anchor
+                    .map(|anchor| anchor.0)
+                    .unwrap_or_default()
+                    .to_offset();
+                gaanim_core::glam::DVec3::new(anchor.x, anchor.y, 0.0)
+            });
             return binding_result(
                 self,
                 PropertySources::Translation {
                     values: [sx, sy, 0.0.into()],
-                    anchor: Some(gaanim_core::glam::DVec3::new(anchor.x, anchor.y, 0.0)),
+                    anchor,
                 },
             );
         }

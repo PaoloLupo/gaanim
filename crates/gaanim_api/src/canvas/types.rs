@@ -2323,8 +2323,25 @@ impl Anim {
         })
     }
 
+    /// Animate the visual center to `(x, y)`, or the origin of a group
+    /// given one, as `DrawableHandle::move_to_default` places them.
     pub fn move_to(self, x: impl Into<ScalarSource>, y: impl Into<ScalarSource>) -> Self {
-        self.move_to_anchor(x, y, Anchor::Center)
+        if self.property_target_has_group_origin() {
+            self.move_to_3d(x, y, 0.0)
+        } else {
+            self.move_to_anchor(x, y, Anchor::Center)
+        }
+    }
+
+    /// Whether the target is a group about an origin, which `move_to`
+    /// places in place of its box's center.
+    #[doc(hidden)]
+    pub fn property_target_has_group_origin(&self) -> bool {
+        self.property_spec.as_ref().is_some_and(|spec| {
+            spec.lock().is_ok_and(|spec| {
+                matches!(spec.kind, SpawnKind::Group(_)) && spec.group_origin.is_some()
+            })
+        })
     }
 
     /// Capture a drawable's bounds center when the animation is scheduled.

@@ -1543,6 +1543,18 @@ impl DrawableHandle {
                     ),
                 ))
             }
+            // A group's pivot goes to the point, as when it is declared.
+            LayoutOp::SetTranslation(to)
+                if matches!(
+                    self.spec.lock().expect("object spec poisoned").kind,
+                    SpawnKind::Group(_)
+                ) =>
+            {
+                Some(AnimationType::Properties(crate::anim::PropertyAnimation {
+                    translation: Some(crate::anim::PropertyTranslation::To(*to)),
+                    ..Default::default()
+                }))
+            }
             LayoutOp::SetTranslation(to) => Some(AnimationType::TranslateTo { to: *to }),
             LayoutOp::ShiftBy(delta) => Some(AnimationType::TranslateBy { delta: *delta }),
             LayoutOp::SetScale(factor) => Some(AnimationType::ScaleTo {
@@ -2437,16 +2449,25 @@ impl DrawableHandle {
     /// groups preserve an authored local coordinate frame, so their local
     /// origin is placed at the target instead. Coordinate systems use identity
     /// groups specifically so labels cannot displace their mathematical origin.
+    /// A group about an origin places that origin.
     pub fn move_to_default(self, x: f64, y: f64) -> Self {
         let preserves_authored_origin = matches!(
             self.spec.lock().expect("object spec poisoned").kind,
             SpawnKind::GroupNoCenter(_)
-        );
+        ) || self.has_group_origin();
         if preserves_authored_origin {
             self.move_to(x, y)
         } else {
             self.at_anchor(x, y, Anchor::Center)
         }
+    }
+
+    /// Whether this is a group about an origin, which `move_to_default`
+    /// places in place of its box's center.
+    #[doc(hidden)]
+    pub fn has_group_origin(&self) -> bool {
+        let spec = self.spec.lock().expect("object spec poisoned");
+        matches!(spec.kind, SpawnKind::Group(_)) && spec.group_origin.is_some()
     }
 
     /// 3D position in world space (perspective-aware).

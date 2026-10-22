@@ -102,6 +102,36 @@ morph targets y sus mapas de normales.
 - Nuevos ejemplos, `3d/morph_targets_3d` y `3d/normal_maps_3d`, con sus
   modelos generados por `tools/generate_gltf_samples.py`.
 
+== Correcciones
+
+- `animate.move_to_3d(p)` de un grupo llevaba su traslación a `p`, así que
+  el grupo terminaba corrido por su origen (o por el centro de su caja): pedir
+  el lugar donde ya estaba lo movía. Ahora deja el origen del grupo, o el
+  centro de su caja si no tiene, donde lo deja `move_to_3d(p)`; también un
+  `move_to_3d` después de declararlo y uno con coordenadas reactivas. Y
+  `move_to` y `animate.move_to` colocan el origen de un grupo con `origin=`,
+  como dice la referencia.
+- Un objeto que entraba con `create`, `write`, `reveal` o
+  `grow_from_center` y más adelante tenía un `fade_in()` quedaba invisible
+  hasta su siguiente fundido. Un `fade_in` solo deja transparente desde el
+  principio al objeto que aún no entró.
+- La última pausa de un segmento ya mostraba los cambios instantáneos del
+  inicio del siguiente (`camera.reset()`, un `move_to`). Una pausa muestra
+  ahora lo escrito antes de ella; lo que cambia de golpe después, en el
+  mismo instante, llega un microsegundo más tarde, en todos los
+  reproductores y en los paquetes. `gaanim inspect` lista esa pausa dentro
+  del segmento que la escribe.
+- `gaanim check` avisaba de textos tapados por un `billboard()` comparando
+  sus coordenadas 3D sin proyectar. El pase 3D dibuja los billboards y los
+  objetos `in_3d()` debajo del lienzo 2D, así que ya no cuentan como tapas.
+- Con un `traced_path` en la escena y alguna posición reactiva (`follow`,
+  `screen_point`…), cada salto en la línea de tiempo volvía a muestrear el
+  mundo entero a 60 Hz desde t=0, aunque el rastro se hubiera disipado
+  minutos antes: `gaanim check` tardaba del orden de *pausas × instante de la
+  pausa*. El rastro solo se reconstruye con todo el mundo cuando algo
+  reactivo mueve su fuente, y los clips de la cámara ya no cuentan como
+  movimientos de la fuente.
+
 == Al actualizar
 
 - Los paquetes `.gaanim` pasan al formato 11, que guarda los morphs 3D, las
@@ -119,6 +149,10 @@ morph targets y sus mapas de normales.
 - `transform_to` y `replacement_transform_to` entre una malla 3D y un objeto
   que no lo es, o entre una malla con material y otra sin él, lanzan
   `ValueError`. Antes la malla no cambiaba.
+- `move_to(x, y)` de un grupo con `origin=` coloca su origen, no el centro de
+  su caja.
+- Lo que cambia de golpe justo después de un `scene.stop()` empieza un
+  microsegundo más tarde, y lo que le sigue también.
 
 = 0.16.1
 
