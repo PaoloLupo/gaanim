@@ -2499,6 +2499,19 @@ impl DrawableHandle {
         self.update_spec(|spec| spec.billboard = true)
     }
 
+    /// A billboard whose box's `anchor` lies on its point, moved by `offset`
+    /// scene units of the frame on screen, however far the point is. Its
+    /// members, inside a group, are placed in those units too.
+    pub fn billboard_shifted(self, offset: DVec2, anchor: Option<Anchor>) -> Self {
+        self.update_spec(|spec| {
+            spec.billboard = true;
+            spec.billboard_shift = Some(gaanim_scene::BillboardShift {
+                offset,
+                anchor: anchor.map(|anchor| anchor.to_offset()),
+            });
+        })
+    }
+
     /// Places this drawable in the 3D world: `move_to_3d` and `rotate_to_3d`
     /// tilt it under perspective, meshes in front hide it pixel by pixel, and
     /// with a `material` it is lit as a surface. It keeps its animations.

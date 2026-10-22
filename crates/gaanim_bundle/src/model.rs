@@ -2243,11 +2243,18 @@ pub(crate) fn write_camera(w: &mut Writer, camera: &gaanim_math::Camera) {
             w.u8(0);
             w.f64(zoom);
         }
+        // A shifted lens adds its shift: a centered one is written as
+        // before version 12.
         gaanim_math::Projection::Perspective { fov_y, near, far } => {
-            w.u8(1);
+            let shifted = camera.lens_shift != gaanim_core::glam::DVec2::ZERO;
+            w.u8(if shifted { 2 } else { 1 });
             w.f64(fov_y);
             w.f64(near);
             w.f64(far);
+            if shifted {
+                w.f64(camera.lens_shift.x);
+                w.f64(camera.lens_shift.y);
+            }
         }
     }
     w.f64(camera.frame_width);
@@ -2262,14 +2269,20 @@ pub(crate) fn read_camera(r: &mut Reader<'_>) -> Result<gaanim_math::Camera> {
     let rotation = DQuat::from_xyzw(r.f64()?, r.f64()?, r.f64()?, r.f64()?);
     let target = DVec3::new(r.f64()?, r.f64()?, r.f64()?);
     let up = DVec3::new(r.f64()?, r.f64()?, r.f64()?);
-    let projection = match r.u8()? {
+    let tag = r.u8()?;
+    let projection = match tag {
         0 => gaanim_math::Projection::Orthographic { zoom: r.f64()? },
-        1 => gaanim_math::Projection::Perspective {
+        1 | 2 => gaanim_math::Projection::Perspective {
             fov_y: r.f64()?,
             near: r.f64()?,
             far: r.f64()?,
         },
         _ => return Err(corrupt("invalid projection")),
+    };
+    let lens_shift = if tag == 2 {
+        gaanim_core::glam::DVec2::new(r.f64()?, r.f64()?)
+    } else {
+        gaanim_core::glam::DVec2::ZERO
     };
     Ok(gaanim_math::Camera {
         position,
@@ -2281,6 +2294,7 @@ pub(crate) fn read_camera(r: &mut Reader<'_>) -> Result<gaanim_math::Camera> {
         frame_height: r.f64()?,
         viewport_width: r.u32()?,
         viewport_height: r.u32()?,
+        lens_shift,
     })
 }
 
@@ -3374,6 +3388,27 @@ impl DeltaDecoder {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A shifted perspective camera keeps its lens shift; a centered one is
+    /// written byte for byte as before the shift existed.
+    #[test]
+    fn cameras_round_trip_with_their_lens_shift() {
+        let mut camera = gaanim_math::Camera::perspective_3d(1280, 720, 0.8);
+        let bytes = |camera: &gaanim_math::Camera| {
+            let mut w = Writer::new();
+            write_camera(&mut w, camera);
+            w.into_bytes()
+        };
+        let centered = bytes(&camera);
+        assert_eq!(centered[13 * 8], 1, "a centered lens keeps its tag");
+        camera.lens_shift = gaanim_core::glam::DVec2::new(-3.5, 0.75);
+        let shifted = bytes(&camera);
+        assert_eq!(shifted.len(), centered.len() + 16);
+        let read = read_camera(&mut Reader::new(&shifted)).unwrap();
+        assert_eq!(read, camera);
+        camera.lens_shift = gaanim_core::glam::DVec2::ZERO;
+        assert_eq!(read_camera(&mut Reader::new(&centered)).unwrap(), camera);
+    }
 
     fn triangle(indices: Vec<u32>) -> gaanim_scene::TriangleMeshData {
         gaanim_scene::TriangleMeshData {

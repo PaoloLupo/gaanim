@@ -33,7 +33,10 @@ pub enum CameraBindingKind {
         eye: Option<TrackingEndpoint>,
         target: Option<TrackingEndpoint>,
         fov_y: Option<TrackingScalar>,
-        up: DVec3,
+        /// The up direction, as the point its coordinates make.
+        up: TrackingEndpoint,
+        /// The lens shift (`gaanim_math::Camera::lens_shift`), if bound.
+        lens_shift: Option<[TrackingScalar; 2]>,
     },
 }
 
@@ -124,6 +127,7 @@ pub fn apply_camera_bindings(world: &mut World, time: f64) {
                 target,
                 fov_y,
                 up,
+                lens_shift,
             } => {
                 let eye = eye
                     .as_ref()
@@ -132,6 +136,16 @@ pub fn apply_camera_bindings(world: &mut World, time: f64) {
                     .as_ref()
                     .and_then(|endpoint| resolve_tracking_endpoint(endpoint, world));
                 let fov_y = fov_y.as_ref().and_then(|value| value.evaluate(world));
+                let Some(up) = resolve_tracking_endpoint(&up, world) else {
+                    continue;
+                };
+                let lens_shift = lens_shift.as_ref().and_then(|[x, y]| {
+                    Some(gaanim_core::glam::DVec2::new(
+                        x.evaluate(world)?,
+                        y.evaluate(world)?,
+                    ))
+                    .filter(|shift| shift.is_finite())
+                });
                 let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>() else {
                     continue;
                 };
@@ -148,6 +162,9 @@ pub fn apply_camera_bindings(world: &mut World, time: f64) {
                     camera.target = camera.target.lerp(resolved_target, influence);
                     camera.rotation = camera.rotation.slerp(rotation, influence);
                     camera.up = camera.up.lerp(up, influence).normalize_or_zero();
+                }
+                if let Some(shift) = lens_shift {
+                    camera.lens_shift = camera.lens_shift.lerp(shift, influence);
                 }
                 let (current_fov, near, far) = match camera.projection {
                     gaanim_math::Projection::Perspective { fov_y, near, far } => (fov_y, near, far),
@@ -252,7 +269,8 @@ mod tests {
                 eye: None,
                 target: None,
                 fov_y: Some(scalar(1.0)),
-                up: DVec3::Y,
+                up: TrackingEndpoint::Static(DVec3::Y),
+                lens_shift: None,
             },
             influence: scalar(1.0),
             windows: active(),

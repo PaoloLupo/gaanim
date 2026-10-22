@@ -94,6 +94,9 @@ pub struct CameraPose {
     pub target: DVec3,
     pub up: DVec3,
     pub projection: Projection,
+    /// See [`Camera::lens_shift`].
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub lens_shift: DVec2,
 }
 
 impl CameraPose {
@@ -115,6 +118,7 @@ impl CameraPose {
             target: DVec3::ZERO,
             up: DVec3::Y,
             projection: Projection::Orthographic { zoom },
+            lens_shift: DVec2::ZERO,
         })
     }
 
@@ -137,6 +141,7 @@ impl CameraPose {
             target,
             up: up.normalize(),
             projection: Projection::Perspective { fov_y, near, far },
+            lens_shift: DVec2::ZERO,
         })
     }
 
@@ -146,6 +151,7 @@ impl CameraPose {
             || !self.rotation.is_finite()
             || !self.target.is_finite()
             || !self.up.is_finite()
+            || !self.lens_shift.is_finite()
         {
             return Err(CameraValidationError::NonFinite);
         }
@@ -186,6 +192,7 @@ impl CameraPose {
             target: self.position,
             up: self.rotation * DVec3::Y,
             projection: Projection::Perspective { fov_y, near, far },
+            lens_shift: self.lens_shift,
         }
     }
 
@@ -250,6 +257,7 @@ impl CameraPose {
                 near,
                 far: far + distance - depth,
             },
+            lens_shift: self.lens_shift,
         }
     }
 
@@ -298,6 +306,7 @@ impl CameraPose {
             target: self.target.lerp(to.target, t),
             up,
             projection,
+            lens_shift: self.lens_shift.lerp(to.lens_shift, t),
         }
     }
 }
@@ -328,6 +337,13 @@ pub struct Camera {
     pub viewport_width: u32,
     /// Pixel height of the active rendering area.
     pub viewport_height: u32,
+    /// Where a perspective camera draws the center of its view, in scene
+    /// units of the frame from its middle: the projection shifts off its
+    /// axis (a lens shift), so the target shows there without turning the
+    /// camera and verticals keep their slant. Zero centers it; an
+    /// orthographic camera ignores it.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub lens_shift: DVec2,
 }
 
 /// Camera consumed by rendering, billboards, overlays and picking.
@@ -392,6 +408,7 @@ impl Camera {
             target: self.target,
             up: self.up,
             projection: self.projection,
+            lens_shift: self.lens_shift,
         }
     }
 
@@ -403,6 +420,7 @@ impl Camera {
         self.target = pose.target;
         self.up = pose.up;
         self.projection = pose.projection;
+        self.lens_shift = pose.lens_shift;
         Ok(())
     }
 
@@ -412,6 +430,7 @@ impl Camera {
             || !self.rotation.is_finite()
             || !self.target.is_finite()
             || !self.up.is_finite()
+            || !self.lens_shift.is_finite()
         {
             return Err(CameraValidationError::NonFinite);
         }
@@ -520,6 +539,7 @@ impl Camera {
             frame_height,
             viewport_width,
             viewport_height,
+            lens_shift: DVec2::ZERO,
         }
     }
 
@@ -539,6 +559,7 @@ impl Camera {
             frame_height: height as f64,
             viewport_width: width,
             viewport_height: height,
+            lens_shift: DVec2::ZERO,
         }
     }
 
@@ -757,7 +778,20 @@ impl Camera {
             }
             Projection::Perspective { fov_y, near, far } => {
                 let aspect = self.frame_width / self.frame_height;
-                gaanim_core::glam::dcamera::rh::proj::directx::perspective(fov_y, aspect, near, far)
+                let centered = gaanim_core::glam::dcamera::rh::proj::directx::perspective(
+                    fov_y, aspect, near, far,
+                );
+                if self.lens_shift == DVec2::ZERO {
+                    return centered;
+                }
+                // Off axis: the view's center lands at the shift, in units of
+                // half the frame on each side of the image.
+                let shift = DVec3::new(
+                    2.0 * self.lens_shift.x / self.frame_width,
+                    2.0 * self.lens_shift.y / self.frame_height,
+                    0.0,
+                );
+                DMat4::from_translation(shift) * centered
             }
         }
     }
@@ -939,6 +973,40 @@ mod tests {
             DVec2::ZERO
         ));
         assert!(camera.hud_point(DVec3::new(1.0, 1.0, 0.0)).y > 0.1);
+    }
+
+    /// A lens shift draws the target at the shift, whatever the camera's
+    /// angle around it, moves everything else by as much, and leaves a
+    /// vertical edge as slanted as it was: the camera does not turn.
+    #[test]
+    fn a_lens_shift_draws_the_target_at_the_shift_without_turning() {
+        let near = |a: DVec2, b: DVec2| (a - b).length() < 1e-9;
+        let shift = DVec2::new(-3.5, 1.0);
+        let target = DVec3::new(1.0, 0.0, 0.0);
+        for eye in [DVec3::new(6.0, 4.0, 8.0), DVec3::new(-7.0, 2.0, -5.0)] {
+            let mut camera = Camera::ortho_2d_frame(16.0, 9.0, 1920, 1080);
+            camera.set_perspective(0.8, 0.1, 100.0).unwrap();
+            camera.look_at(eye, target, DVec3::Y).unwrap();
+            let (foot, head) = (DVec3::new(2.0, -1.0, 0.5), DVec3::new(2.0, 1.0, 0.5));
+            let centered = [foot, head].map(|point| camera.hud_point(point));
+            camera.lens_shift = shift;
+            assert!(near(camera.hud_point(target), shift));
+            let shifted = [foot, head].map(|point| camera.hud_point(point));
+            assert!(near(shifted[0], centered[0] + shift));
+            assert!(near(shifted[1] - shifted[0], centered[1] - centered[0]));
+        }
+        // An orthographic camera ignores it.
+        let mut camera = Camera::ortho_2d_frame(16.0, 9.0, 1920, 1080);
+        camera.lens_shift = shift;
+        assert!(near(
+            camera.hud_point(DVec3::new(3.0, 2.0, 0.0)),
+            DVec2::new(3.0, 2.0)
+        ));
+        // Poses carry it, and blend it.
+        let mut pose = Camera::perspective_3d(1920, 1080, 0.8).pose();
+        pose.lens_shift = shift;
+        let blended = pose.interpolate(Camera::perspective_3d(1920, 1080, 0.8).pose(), 0.5);
+        assert!(near(blended.lens_shift, shift * 0.5));
     }
 
     #[test]

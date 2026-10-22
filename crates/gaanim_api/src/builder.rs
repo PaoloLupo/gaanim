@@ -1220,6 +1220,9 @@ pub struct SceneBuilder<'w, 's, 'a> {
     pub(crate) motion_blur_windows: Vec<(f64, f64, gaanim_renderer::effects::MotionBlur)>,
     /// Depth of field of parallax layers at the authoring cursor.
     pub(crate) depth_of_field: gaanim_scene::DepthOfField,
+    /// The camera's lens shift where the cursor is, which a shift animation
+    /// starts from.
+    pub(crate) lens_shift: gaanim_core::glam::DVec2,
     /// Glyph layout and current offset of Texts laid on a path.
     pub(crate) text_paths: HashMap<
         ObjectId,
@@ -1372,6 +1375,7 @@ pub(crate) struct SceneBuilderState {
     text_tracking: HashMap<ObjectId, f64>,
     motion_blur_windows: Vec<(f64, f64, gaanim_renderer::effects::MotionBlur)>,
     depth_of_field: gaanim_scene::DepthOfField,
+    lens_shift: gaanim_core::glam::DVec2,
     text_paths: HashMap<
         ObjectId,
         (
@@ -1436,6 +1440,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             text_paths: self.text_paths.clone(),
             motion_blur_windows: self.motion_blur_windows.clone(),
             depth_of_field: self.depth_of_field,
+            lens_shift: self.lens_shift,
             camera_view_rests: self.camera_view_rests.clone(),
             text_motion: self.text_motion.clone(),
             persistent_objects: self.persistent_objects.clone(),
@@ -1500,6 +1505,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             text_paths,
             motion_blur_windows,
             depth_of_field,
+            lens_shift,
             camera_view_rests,
             text_motion,
             persistent_objects,
@@ -1568,6 +1574,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             text_paths,
             motion_blur_windows,
             depth_of_field,
+            lens_shift,
             camera_view_rests,
             text_motion,
             persistent_objects,
@@ -2080,6 +2087,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             text_paths: HashMap::new(),
             motion_blur_windows: Vec::new(),
             depth_of_field: gaanim_scene::DepthOfField::default(),
+            lens_shift: gaanim_core::glam::DVec2::ZERO,
             camera_view_rests: HashMap::new(),
             text_motion: Default::default(),
             property_bindings: HashMap::new(),
@@ -2292,7 +2300,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             | AnimationType::CameraFollowPath { .. }
             | AnimationType::CameraWhipPan { .. }
             | AnimationType::CameraDollyZoom { .. }
-            | AnimationType::CameraDepthOfField { .. } => "Camera",
+            | AnimationType::CameraDepthOfField { .. }
+            | AnimationType::CameraLensShift { .. } => "Camera",
             AnimationType::TextMotion(_) => "TextMotion",
             AnimationType::Properties { .. } => "Properties",
             AnimationType::Write { .. } => "Write",
@@ -4517,6 +4526,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             | AnimationType::CameraWhipPan { .. }
             | AnimationType::CameraDollyZoom { .. }
             | AnimationType::CameraDepthOfField { .. }
+            | AnimationType::CameraLensShift { .. }
             | AnimationType::TextMotion(_)
             | AnimationType::Write { .. }
             | AnimationType::Create { .. }

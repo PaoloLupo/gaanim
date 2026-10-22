@@ -501,7 +501,9 @@ pub(crate) enum CanvasCameraBindingKind {
         eye: Option<CanvasEndpoint>,
         target: Option<CanvasEndpoint>,
         fov_y: Option<ScalarSource>,
-        up: DVec3,
+        /// The up direction, as the point its coordinates make.
+        up: CanvasEndpoint,
+        lens_shift: Option<[ScalarSource; 2]>,
     },
 }
 
@@ -1185,8 +1187,12 @@ pub enum CanvasEndpoint {
     Entity(ObjectId),
     /// A normalized anchor inside an entity's local bounds plus a local offset.
     Anchor(AnchorPoint),
-    /// Point evaluated from two deterministic scalar sources.
-    Expression { x: ScalarSource, y: ScalarSource },
+    /// Point evaluated from deterministic scalar sources.
+    Expression {
+        x: ScalarSource,
+        y: ScalarSource,
+        z: ScalarSource,
+    },
     /// Scalar sources evaluated in an object's local coordinate frame.
     LocalExpression {
         space: ObjectId,

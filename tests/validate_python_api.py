@@ -1750,6 +1750,63 @@ def validate_in_3d_contract(module: object) -> list[str]:
     group = scene.geometry.group([scene.geometry.square(1.0), scene.geometry.circle(0.5)]).in_3d()
     if not isinstance(group, module.Drawable):
         failures.append("a group cannot be placed in 3D")
+    tag = scene.text("load").move_to_3d(1.0, 2.0, -3.0)
+    if tag.billboard(offset=(0.0, 0.3), anchor="bottom") is not tag:
+        failures.append("Drawable.billboard(offset=, anchor=) did not return the same drawable")
+    if scene.text("node").billboard(anchor=module.Anchor.LEFT) is None:
+        failures.append("Drawable.billboard(anchor=Anchor.LEFT) failed")
+    for call, error in (
+        (lambda: scene.text("x").billboard(offset=(math.inf, 0.0)), ValueError),
+        (lambda: scene.text("x").billboard((0.0, 0.3)), TypeError),
+        (lambda: scene.text("x").billboard(anchor="middle-ish"), ValueError),
+    ):
+        try:
+            call()
+            failures.append(f"Drawable.billboard did not raise {error.__name__}")
+        except error:
+            pass
+    return failures
+
+
+def validate_camera_framing_contract(module: object) -> list[str]:
+    """Exercise screen_offset and reactive coordinates of the 3D camera."""
+    failures: list[str] = []
+    scene = module.Scene(frame=(16, 9))
+    camera = scene.camera
+    camera.perspective(0.8)
+    if camera.screen_offset(-3.0, 0.5) is None:
+        failures.append("Camera.screen_offset did not return the camera")
+    if not isinstance(camera.animate.screen_offset(2.0, 0.0), module.Anim):
+        failures.append("CameraAnimation.screen_offset did not return an Anim")
+    state = camera.state_3d((0, 2, 10), (0, 0, 0), screen_offset=(-3.0, 0.0))
+    if not isinstance(camera.animate.to(state), module.Anim):
+        failures.append("a state_3d with screen_offset cannot be animated to")
+    yaw = scene.viz.parameter(0.0)
+    eye = (
+        module.computed(lambda a: 12 * math.sin(a), inputs=[yaw]),
+        4.0,
+        module.computed(lambda a: 12 * math.cos(a), inputs=[yaw]),
+    )
+    tilt = (module.computed(lambda a: 0.2 * a, inputs=[yaw]), 1.0, 0.0)
+    shift = (module.computed(lambda a: -2.0 * a, inputs=[yaw]), 0.0)
+    if camera.bind_3d(eye=eye, target=(0, 0, 0), up=tilt, screen_offset=shift) is None:
+        failures.append("Camera.bind_3d did not take reactive coordinates")
+    if not isinstance(camera.animate.look_at(eye, (0, yaw, 0)), module.Anim):
+        failures.append("CameraAnimation.look_at did not take reactive coordinates")
+    other = module.Scene(frame=(16, 9))
+    foreign = other.viz.parameter(1.0)
+    for call, error in (
+        (lambda: camera.screen_offset(math.nan, 0.0), ValueError),
+        (lambda: camera.state_3d((0, 2, 10), (0, 0, 0), screen_offset=(math.inf, 0)), ValueError),
+        (lambda: camera.bind_3d(eye=(foreign, 1.0, 2.0)), ValueError),
+        (lambda: camera.bind_3d(target=(0, 0, 0), up=(0, 0, 0)), ValueError),
+        (lambda: camera.bind_3d(eye=("a", 1.0, 2.0)), TypeError),
+    ):
+        try:
+            call()
+            failures.append(f"camera framing did not raise {error.__name__}")
+        except error:
+            pass
     return failures
 
 
@@ -3797,6 +3854,7 @@ def main() -> int:
     missing.extend(validate_mesh_copies_contract(module))
     missing.extend(validate_gltf_contract(module))
     missing.extend(validate_in_3d_contract(module))
+    missing.extend(validate_camera_framing_contract(module))
     missing.extend(validate_deg_contract(module))
     missing.extend(validate_matrix_contract(module))
     missing.extend(validate_matrix_logical_units(module))

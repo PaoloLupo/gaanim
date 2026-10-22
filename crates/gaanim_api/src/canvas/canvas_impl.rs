@@ -1663,6 +1663,7 @@ fn animation_channels(anim: &Anim) -> Vec<String> {
         CameraRotation { .. } | CameraRotationSource { .. } => "camera_rotation",
         CameraShake { .. } => "camera_shake",
         CameraDepthOfField { .. } => "camera_depth_of_field",
+        CameraLensShift { .. } => "camera_lens_shift",
         TextPathOffset { .. } => "text_path",
         GltfAnimation { .. } => GLTF_POSE,
         _ => "effect",
@@ -5685,7 +5686,27 @@ impl SceneModel {
         near: f64,
         far: f64,
     ) -> Result<CameraStateHandle, gaanim_math::CameraValidationError> {
-        let pose = gaanim_math::CameraPose::perspective_3d(eye, target, up, fov_y, near, far)?;
+        self.camera_state_3d_shifted(eye, target, up, fov_y, near, far, DVec2::ZERO)
+    }
+
+    /// [`Self::camera_state_3d`] that draws `target` at `lens_shift`, in
+    /// scene units of the frame from its middle.
+    #[allow(clippy::too_many_arguments)]
+    pub fn camera_state_3d_shifted(
+        &self,
+        eye: DVec3,
+        target: DVec3,
+        up: DVec3,
+        fov_y: f64,
+        near: f64,
+        far: f64,
+        lens_shift: DVec2,
+    ) -> Result<CameraStateHandle, gaanim_math::CameraValidationError> {
+        let pose = gaanim_math::CameraPose {
+            lens_shift,
+            ..gaanim_math::CameraPose::perspective_3d(eye, target, up, fov_y, near, far)?
+        };
+        pose.validate()?;
         Ok(self.camera_state_handle(gaanim_animation::CameraStateSource::Concrete(pose)))
     }
 
@@ -6105,6 +6126,16 @@ impl SceneModel {
         ))
     }
 
+    /// Move where a perspective camera draws the center of its view to
+    /// `offset`, in scene units of the frame from its middle: a lens shift,
+    /// so its target shows there while it orbits or dollies, without turning.
+    pub fn camera_screen_offset(&mut self, offset: DVec2, duration: f64) -> Result<Anim, String> {
+        if !offset.is_finite() {
+            return Err("screen_offset must be finite".to_string());
+        }
+        Ok(self.camera_anim(AnimationType::CameraLensShift { to: offset }, duration))
+    }
+
     /// A dolly zoom (vertigo shot) to `factor` times the distance from the
     /// look-at target; needs a perspective camera aimed with `look_at`.
     pub fn camera_dolly_zoom(&mut self, factor: f64, duration: f64) -> Result<Anim, String> {
@@ -6187,19 +6218,25 @@ impl SceneModel {
     }
 
     /// Bind perspective camera channels to native reactive sources.
+    #[allow(clippy::too_many_arguments)]
     pub fn camera_bind_3d(
         &mut self,
         eye: Option<CanvasEndpoint>,
         target: Option<CanvasEndpoint>,
         fov_y: Option<ScalarSource>,
-        up: DVec3,
+        up: CanvasEndpoint,
+        lens_shift: Option<[ScalarSource; 2]>,
         influence: ScalarSource,
         enabled: bool,
     ) -> Result<CameraConstraintHandle, CameraBindingError> {
-        if eye.is_none() && target.is_none() && fov_y.is_none() {
+        if eye.is_none() && target.is_none() && fov_y.is_none() && lens_shift.is_none() {
             return Err(CameraBindingError::Empty);
         }
-        if !up.is_finite() || up.length_squared() <= f64::EPSILON {
+        // A reactive up is checked as the frame reads it: a zero one leaves
+        // the camera as it was.
+        if let CanvasEndpoint::Static(up) = up
+            && (!up.is_finite() || up.length_squared() <= f64::EPSILON)
+        {
             return Err(CameraBindingError::InvalidUp);
         }
         if fov_y
@@ -6223,6 +6260,7 @@ impl SceneModel {
                 target,
                 fov_y,
                 up,
+                lens_shift,
             },
             influence,
             enabled,
@@ -7643,7 +7681,11 @@ impl SceneModel {
 
     /// Create a non-rendered point from two native scalar expressions.
     pub fn point_ref(&self, x: ScalarSource, y: ScalarSource) -> PointRef {
-        PointRef(CanvasEndpoint::Expression { x, y })
+        PointRef(CanvasEndpoint::Expression {
+            x,
+            y,
+            z: 0.0.into(),
+        })
     }
 
     /// Create a non-rendered point displaced from an endpoint by reactive scene-space components.
@@ -9005,7 +9047,7 @@ fn endpoint_is_valid(point: &CanvasEndpoint, state: &CanvasState) -> bool {
                 && p.normalized.is_finite()
                 && p.offset.is_finite()
         }
-        CanvasEndpoint::Expression { x, y } => scalar(x) && scalar(y),
+        CanvasEndpoint::Expression { x, y, z } => scalar(x) && scalar(y) && scalar(z),
         CanvasEndpoint::MediaPixel { object, x, y } => {
             state.object_specs.contains_key(object) && x.is_finite() && y.is_finite()
         }

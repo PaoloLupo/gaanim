@@ -102,9 +102,10 @@ pub const FORMAT: &str = "gaanim-bundle";
 /// meshes a morph blends once and each frame as how far between them it
 /// lies; version 9 adds the copies of meshes drawn at many points, version
 /// 10 the images that fill outlines in the 3D world and the shadows and
-/// blurs of 3D content, and version 11 normal maps and morph targets on
-/// imported models' meshes and the weights of those targets each frame.
-pub const VERSION: u32 = 11;
+/// blurs of 3D content, version 11 normal maps and morph targets on
+/// imported models' meshes and the weights of those targets each frame,
+/// and version 12 the lens shift of a perspective camera.
+pub const VERSION: u32 = 12;
 /// Oldest version this build still reads: bundles published in other pages
 /// keep playing when the hosted players move to a newer version.
 pub const OLDEST_READABLE: u32 = 5;

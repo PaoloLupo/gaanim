@@ -1810,8 +1810,13 @@ impl PyBox {
         Ok(slf)
     }
 
-    fn billboard<'py>(slf: PyRef<'py, Self>) -> PyResult<PyRef<'py, Self>> {
-        crate::pydrawable::PyDrawable(slf.handle()).billboard_impl()?;
+    #[pyo3(signature = (*, offset=(0.0, 0.0), anchor=None))]
+    fn billboard<'py>(
+        slf: PyRef<'py, Self>,
+        offset: (f64, f64),
+        anchor: Option<PyAnchor>,
+    ) -> PyResult<PyRef<'py, Self>> {
+        crate::pydrawable::PyDrawable(slf.handle()).billboard_impl(offset, anchor)?;
         Ok(slf)
     }
 

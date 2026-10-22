@@ -243,6 +243,7 @@ Primitives, arrows and tubes, extrusion, axonometric drawings and 3D axes.
 | [Plots 3d](3d/plots_3d.py) | Surfaces, parametric curves and vector fields in a 3D space, static and driven by parameters. |
 | [Axonometric](3d/axonometric.py) | A 3D model drawn as flat shapes from isometric, dimetric, plan, front and side views, turned and morphed between views. |
 | [Camera 3d](3d/camera_3d.py) | The 3D camera: look_at, orbit, dolly and dolly zoom, perspective and orthographic lenses, saved poses, state_3d, bind_3d, a camera and an inset that follow a moving sphere, a camera that turns to follow it, a snapshot of the inset, and a view with a 3D camera of its own. |
+| [Framing 3d](3d/framing_3d.py) | A portal frame kept beside a panel of steps by screen_offset while the camera orbits and dollies, labels pinned above its points with billboard(offset=, anchor=), and a camera bound to coordinates computed from a parameter. |
 
 ## Visualization
 

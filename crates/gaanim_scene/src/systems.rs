@@ -1045,6 +1045,7 @@ pub fn billboard_system(
             )>,
             Option<&mut crate::components::BillboardPlane>,
             Option<&LocalBounds>,
+            Option<&crate::components::BillboardShift>,
         ),
         With<crate::components::Billboard>,
     >,
@@ -1079,7 +1080,7 @@ pub fn billboard_system(
             point.truncate()
         }
     };
-    for (entity, mut global, transform_opt, axis_label, plane, bounds) in &mut query {
+    for (entity, mut global, transform_opt, axis_label, plane, bounds, shift) in &mut query {
         // Preserve world position and scale, replace rotation with camera rotation.
         // The result is built aside and written only when it differs, so a
         // static billboard does not report a changed transform every frame.
@@ -1192,11 +1193,17 @@ pub fn billboard_system(
             let sights: Vec<DVec2> = corners.iter().copied().chain([middle]).collect();
             front = box_exit_depth(&cam, parent, gap.bounds, trans, &sights);
         }
-        let billboard_mat = DMat4::from_scale_rotation_translation(scale, cam_rot, trans);
+        // Its anchor on the point and its offset, in its own units.
+        let shift = shift.map_or(DVec3::ZERO, |shift| {
+            shift.local(bounds.map(|bounds| bounds.0), scale)
+        });
+        let billboard_mat = DMat4::from_scale_rotation_translation(scale, cam_rot, trans)
+            * DMat4::from_translation(shift);
         billboard.mat4 = billboard_mat;
         billboard.affine_2d = Affine::translate((at.x, at.y))
             * Affine::rotate(z_angle)
-            * Affine::scale_non_uniform(scale.x, scale.y);
+            * Affine::scale_non_uniform(scale.x, scale.y)
+            * Affine::translate((shift.x, shift.y));
         if *global != billboard {
             *global = billboard;
         }
@@ -1220,7 +1227,8 @@ pub fn billboard_system(
             };
             let mut drawn = billboard;
             if let Some((point, units)) = billboard_plane(&cam, trans, pull, front) {
-                drawn.mat4 = DMat4::from_scale_rotation_translation(scale * units, cam_rot, point);
+                drawn.mat4 = DMat4::from_scale_rotation_translation(scale * units, cam_rot, point)
+                    * DMat4::from_translation(shift);
             }
             if plane.0 != drawn {
                 plane.0 = drawn;
@@ -2088,6 +2096,65 @@ mod tests {
             (at - gaanim_core::kurbo::Point::new(2.0, 1.0)).hypot() < 1e-6,
             "drawn at {at:?}"
         );
+    }
+
+    /// A shifted billboard puts its box's anchor on its point and moves it by
+    /// its offset on the canvas, whatever the point's depth, in the 2D
+    /// drawing and in the plane the 3D pass draws.
+    #[test]
+    fn shifted_billboards_keep_their_offset_on_screen_at_every_depth() {
+        use gaanim_core::glam::{DVec2, DVec3};
+        let camera = axis_camera(DVec3::new(0.0, 0.0, 12.0));
+        for depth in [0.0, -20.0] {
+            let mut world = World::new();
+            world.insert_resource(gaanim_math::ResolvedCamera::new(
+                camera,
+                gaanim_math::CameraViewport::default(),
+            ));
+            let mut local = SpatialTransform::default();
+            local.translation = DVec3::new(1.0, 0.5, depth);
+            let label = world
+                .spawn((
+                    local,
+                    GlobalSpatialTransform::from_local(&local),
+                    LocalBounds(gaanim_math::Bounds3D {
+                        min: DVec3::new(-0.5, -0.1, 0.0),
+                        max: DVec3::new(0.5, 0.3, 0.0),
+                    }),
+                    crate::components::Billboard,
+                    crate::components::BillboardPlane::default(),
+                    crate::components::BillboardShift {
+                        offset: DVec2::new(0.0, 0.4),
+                        anchor: Some(DVec2::new(0.0, -1.0)),
+                    },
+                ))
+                .id();
+            let mut schedule = Schedule::default();
+            schedule.add_systems(billboard_system);
+            schedule.run(&mut world);
+
+            let point = canvas_point(&camera, local.translation);
+            let global = *world.get::<GlobalSpatialTransform>(label).unwrap();
+            let bottom = global.affine_2d * gaanim_core::kurbo::Point::new(0.0, -0.1);
+            let expected = point + DVec2::new(0.0, 0.4);
+            assert!(
+                (DVec2::new(bottom.x, bottom.y) - expected).length() < 1e-6,
+                "depth {depth}: bottom drawn at {bottom:?}, expected {expected:?}"
+            );
+            // The 3D pass draws the same point there.
+            let plane = world
+                .get::<crate::components::BillboardPlane>(label)
+                .unwrap()
+                .0;
+            let drawn = canvas_point(
+                &camera,
+                plane.mat4.transform_point3(DVec3::new(0.0, -0.1, 0.0)),
+            );
+            assert!(
+                (drawn - expected).length() < 1e-6,
+                "depth {depth}: plane draws it at {drawn:?}, expected {expected:?}"
+            );
+        }
     }
 
     #[test]

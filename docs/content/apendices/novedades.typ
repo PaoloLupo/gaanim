@@ -17,7 +17,9 @@ Sin publicar. Una malla 3D se transforma en otra con `animate.transform_to`,
 `points_3d` e `instances` dibujan miles de puntos o copias de una malla
 como un solo objeto, las imágenes, las escenas Lottie, las sombras y los
 desenfoques también viven en el mundo 3D, y los modelos glTF traen sus
-morph targets y sus mapas de normales.
+morph targets y sus mapas de normales. La cámara 3D puede dejar su objetivo
+a un lado del encuadre y moverse con parámetros, y los rótulos 3D se
+colocan en pantalla sobre su punto.
 
 == Morph entre mallas 3D
 
@@ -102,6 +104,23 @@ morph targets y sus mapas de normales.
 - Nuevos ejemplos, `3d/morph_targets_3d` y `3d/normal_maps_3d`, con sus
   modelos generados por `tools/generate_gltf_samples.py`.
 
+== Encuadrar el 3D junto a un panel
+
+- `scene.camera.screen_offset(x, y)` y `animate.screen_offset(x, y)`
+  desplazan la lente de la cámara en perspectiva: el objetivo se dibuja en
+  `(x, y)` sin que la cámara gire, y un `orbit` o un `dolly` lo dejan ahí,
+  así que un modelo se queda a un lado de un panel de texto. `state_3d(...,
+  screen_offset=)` lo guarda en un estado y `reset()` lo devuelve al centro.
+- `billboard(offset=(dx, dy), anchor=)` coloca un rótulo sobre su punto 3D
+  por el punto de su caja que diga `anchor` y lo desplaza en pantalla, a la
+  misma distancia esté el punto cerca o lejos. Antes hacía falta meterlo en
+  un grupo con `origin=(0, 0)`.
+- `bind_3d` y `look_at` aceptan `eye` y `target` como tuplas cuyas
+  coordenadas son `Parameter`, `Variable`, `Computed` o `scene.time`, sin
+  puntos invisibles que los arrastren; `bind_3d` también un `up` y un
+  `screen_offset` así.
+- Nuevo ejemplo, `3d/framing_3d`.
+
 == Correcciones
 
 - `animate.move_to_3d(p)` de un grupo llevaba su traslación a `p`, así que
@@ -134,12 +153,12 @@ morph targets y sus mapas de normales.
 
 == Al actualizar
 
-- Los paquetes `.gaanim` pasan al formato 11, que guarda los morphs 3D, las
+- Los paquetes `.gaanim` pasan al formato 12, que guarda los morphs 3D, las
   copias de mallas, las imágenes de los objetos en el mundo 3D, la sombra y
-  el desenfoque de los objetos 3D y los morph targets y mapas de normales de
-  los modelos glTF. Gaanim sigue abriendo los de formato 5 a 10; un Gaanim
-  anterior no abre los nuevos, así que actualiza los reproductores que los
-  publican.
+  el desenfoque de los objetos 3D, los morph targets y mapas de normales de
+  los modelos glTF y el desplazamiento de la lente de la cámara. Gaanim
+  sigue abriendo los de formato 5 a 11; un Gaanim anterior no abre los
+  nuevos, así que actualiza los reproductores que los publican.
 - Un modelo glTF con morph targets o mapas de normales se ve ahora como en
   Blender: antes se dibujaba con la malla de reposo y las normales de sus
   vértices.

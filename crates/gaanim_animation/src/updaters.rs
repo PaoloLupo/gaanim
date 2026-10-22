@@ -995,6 +995,7 @@ pub enum TrackingEndpoint {
     Expression {
         x: TrackingScalar,
         y: TrackingScalar,
+        z: TrackingScalar,
     },
     /// Point evaluated in the local frame of an entity, including hierarchy transforms.
     LocalExpression {
@@ -2507,9 +2508,11 @@ pub fn resolve_tracking_endpoint(ep: &TrackingEndpoint, world: &World) -> Option
             let local = center + half * *normalized + *offset;
             entity_world_matrix(*entity, world).map(|matrix| matrix.transform_point3(local))
         }
-        TrackingEndpoint::Expression { x, y } => {
-            Some(DVec3::new(x.evaluate(world)?, y.evaluate(world)?, 0.0))
-        }
+        TrackingEndpoint::Expression { x, y, z } => Some(DVec3::new(
+            x.evaluate(world)?,
+            y.evaluate(world)?,
+            z.evaluate(world)?,
+        )),
         TrackingEndpoint::LocalExpression { space, x, y, z } => {
             let local = DVec3::new(x.evaluate(world)?, y.evaluate(world)?, z.evaluate(world)?);
             entity_world_matrix(*space, world).map(|matrix| matrix.transform_point3(local))

@@ -38,9 +38,13 @@ This file guides repository work; model selection belongs to the calling client.
     Vello composes beneath the 2D content through `override_image`; every
     host that renders frames (canvas, exporter, embed player, offscreen
     previews) prepares those images with `GpuThreeD` before Vello renders.
-    There is no Bevy 3D pipeline. glTF models (`gaanim_objects::gltf`) become
-    plain nodes and meshes whose `MeshSurface` adds a texture, a normal map,
-    alpha mode, skin weights and morph targets; `ModelPipelines` draws those,
+    There is no Bevy 3D pipeline. A perspective camera's `lens_shift`
+    (`screen_offset`) shifts `Camera::projection_matrix` off its axis, so
+    everything that projects through it (the 3D pass, billboards, HUD
+    points, picking) draws the target there. glTF models
+    (`gaanim_objects::gltf`) become plain nodes and meshes whose
+    `MeshSurface` adds a texture, a normal map, alpha mode, skin weights and
+    morph targets; `ModelPipelines` draws those,
     built only when a frame first draws one, and each frame only a skin's
     palette (`SkinPalette`) and morph weights (`MorphWeights`) change.
     Animations are timeline clips (`gaanim_api::gltf::GltfClipLens`). Glow

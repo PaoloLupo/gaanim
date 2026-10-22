@@ -88,6 +88,7 @@ AnchorName: TypeAlias = Literal["center", "top", "bottom", "left", "right", "top
 Shadow: TypeAlias = bool | dict[str, Any]
 StaggerOrigin: TypeAlias = Literal["start", "end", "center", "edges", "random"] | tuple[float, float]
 Endpoint: TypeAlias = Drawable | AnchorPoint | PointRef | tuple[float, float] | tuple[float, float, float]
+Endpoint3D: TypeAlias = Endpoint | tuple[ScalarSource, ScalarSource, ScalarSource]
 AngleRay: TypeAlias = Direction | Endpoint
 TextRole: TypeAlias = Literal["title", "subtitle", "kicker", "heading", "body", "caption", "label", "code", "math"]
 TextWrap: TypeAlias = Literal["auto", False] | float
@@ -122,6 +123,7 @@ __all__ = [
     "Shadow",
     "StaggerOrigin",
     "Endpoint",
+    "Endpoint3D",
     "AngleRay",
     "TextRole",
     "TextWrap",

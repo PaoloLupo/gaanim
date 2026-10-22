@@ -1631,6 +1631,24 @@ scene.render()
 ]
 
 #api-entry(
+  name: "Camera.screen_offset / CameraAnimation.screen_offset",
+  kind: "method",
+  params: (
+    (name: "x, y", type: "float", default: none, desc: [Dónde dibuja la cámara su objetivo, en unidades de escena desde el centro del encuadre.]),
+  ),
+  returns: (type: "Camera | Anim", desc: [La cámara, o el cambio animado.]),
+  desc: [Desplaza la lente de una cámara en perspectiva fuera de su eje, como un objetivo descentrable: la imagen se corre sin que la cámara gire, así que las verticales conservan su inclinación y el objetivo queda donde se ve mientras `orbit` gira alrededor de él o `dolly` lo acerca. Sirve para dejar un modelo a un lado de un panel de texto. `look_at` y `to` conservan el desplazamiento: anímalo en el mismo `play` para mover ambos, o fíjalo en `state_3d`. `reset` lo devuelve al centro, y una cámara ortográfica lo ignora. Valores no finitos lanzan `ValueError`. Easing predeterminado: suave.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+scene.camera.look_at(eye=(6, 4, 10), target=(0, 1, 0)).perspective(0.7)
+scene.play([scene.camera.animate.screen_offset(-3.5, 0.0)], duration=1)
+scene.play([scene.camera.animate.orbit(0.8, 0.1)], duration=2)
+```
+]
+
+#api-entry(
   name: "CameraAnimation.depth_of_field / focus_to",
   kind: "method",
   params: (
@@ -1884,8 +1902,9 @@ introducción, consulta la guía #link("/guias/camara-y-3d/")[Cámara y 3D].
     (name: "up", type: "tuple[float, float, float]", default: "(0.0, 1.0, 0.0)", desc: [Dirección vertical del mundo.]),
     (name: "fov_y", type: "float", default: "0.785…", desc: [Campo de visión vertical en radianes (π/4).]),
     (name: "near, far", type: "float", default: "0.1, 1000.0", desc: [Planos de recorte, con `0 < near < far`.]),
+    (name: "screen_offset", type: "tuple[float, float]", default: "(0.0, 0.0)", desc: [Dónde dibuja `target`, en unidades de escena desde el centro del encuadre (ver `CameraAnimation.screen_offset`).]),
   ),
-  returns: (type: "CameraState", desc: [Una pose en perspectiva reutilizable.]),
+  returns: (type: "CameraState", desc: [Una pose en perspectiva reutilizable; `to` mueve también su desplazamiento.]),
   none,
 )
 
@@ -1911,12 +1930,12 @@ scene.camera.perspective(fov_y=0.785, near=0.1, far=1000.0)
   name: "Camera.look_at",
   kind: "method",
   params: (
-    (name: "eye", type: "Endpoint | None", default: none, desc: [Posición de la cámara en el mundo; `None` la deja donde está.]),
-    (name: "target", type: "Endpoint", default: none, desc: [Punto al que mira.]),
+    (name: "eye", type: "Endpoint3D | None", default: none, desc: [Posición de la cámara en el mundo; `None` la deja donde está.]),
+    (name: "target", type: "Endpoint3D", default: none, desc: [Punto al que mira.]),
     (name: "up", type: "tuple[float, float, float] | None", default: "None", desc: [Dirección vertical; `(0, 1, 0)` si se omite.]),
   ),
   returns: (type: "Camera", desc: [La misma cámara.]),
-  desc: [Coloca la cámara en `eye` mirando a `target`. Los extremos se resuelven después del layout reactivo; `eye` y `target` deben ser distintos y `up` no puede ser nulo ni paralelo a la dirección de la mirada.],
+  desc: [Coloca la cámara en `eye` mirando a `target`. Los extremos se resuelven después del layout reactivo; `eye` y `target` deben ser distintos y `up` no puede ser nulo ni paralelo a la dirección de la mirada. Cada coordenada de una tupla `(x, y, z)` puede ser un número, un `Parameter`, una `Variable`, un `Computed` o `scene.time`.],
 )[
 ```python
 >>>from gaanim import *
@@ -1966,22 +1985,28 @@ scene.play([tag.animate.fade_in(), scene.camera.animate.orbit(0.6, 0)], duration
   name: "Camera.bind_3d",
   kind: "method",
   params: (
-    (name: "eye", type: "Endpoint | None", default: "None", desc: [Posición reactiva de la cámara.]),
-    (name: "target", type: "Endpoint | None", default: "None", desc: [Punto reactivo al que mira.]),
+    (name: "eye", type: "Endpoint3D | None", default: "None", desc: [Posición reactiva de la cámara.]),
+    (name: "target", type: "Endpoint3D | None", default: "None", desc: [Punto reactivo al que mira.]),
     (name: "fov_y", type: "ScalarSource | None", default: "None", desc: [Campo de visión reactivo en radianes.]),
-    (name: "up", type: "tuple[float, float, float]", default: "(0.0, 1.0, 0.0)", desc: [Dirección vertical.]),
+    (name: "up", type: "tuple[ScalarSource, ScalarSource, ScalarSource] | None", default: "None", desc: [Dirección vertical; `(0, 1, 0)` si se omite.]),
+    (name: "screen_offset", type: "tuple[ScalarSource, ScalarSource] | None", default: "None", desc: [Dónde dibuja la cámara su objetivo (ver `CameraAnimation.screen_offset`).]),
     (name: "influence", type: "ScalarSource | None", default: "None", desc: [Peso en `[0, 1]`.]),
     (name: "enabled", type: "bool", default: "True", desc: [Activo desde el cursor actual.]),
   ),
   returns: (type: "CameraConstraint", desc: [El binding.]),
-  desc: [Necesita `eye`, `target` o `fov_y`, y selecciona la proyección en perspectiva.],
+  desc: [Necesita `eye`, `target`, `fov_y` o `screen_offset`, y selecciona la proyección en perspectiva. `eye` y `target` aceptan un objeto, un punto de anclaje, un punto o una tupla `(x, y, z)` cuyas coordenadas pueden ser números, `Parameter`, `Variable`, `Computed` o `scene.time`: animar los parámetros mueve la cámara sin puntos auxiliares. `up` acepta coordenadas así también. Un `up` nulo lanza `ValueError`; uno que un valor reactivo vuelve nulo deja la cámara como estaba en ese fotograma.],
 )[
 ```python
 >>>from gaanim import *
+>>>import math
 >>>scene = Scene(frame=(16, 9))
 rig = scene.camera.bind_3d(eye=(6, 4, 8), target=(0, 0, 0), fov_y=0.8, influence=0.75)
 scene.wait(1)
 rig.disable()
+giro = scene.viz.parameter(0.0)
+ojo = (computed(lambda a: 10 * math.sin(a), inputs=[giro]), 4, computed(lambda a: 10 * math.cos(a), inputs=[giro]))
+scene.camera.bind_3d(eye=ojo, target=(0, 0, 0), screen_offset=(-3, 0))
+scene.play([giro.animate.set(1.2)], duration=2)
 ```
 ]
 
@@ -1989,12 +2014,12 @@ rig.disable()
   name: "CameraAnimation.look_at",
   kind: "method",
   params: (
-    (name: "eye", type: "Endpoint | None", default: none, desc: [Posición final de la cámara; `None` la deja donde está y solo gira.]),
-    (name: "target", type: "Endpoint", default: none, desc: [Punto al que mira al final.]),
+    (name: "eye", type: "Endpoint3D | None", default: none, desc: [Posición final de la cámara; `None` la deja donde está y solo gira.]),
+    (name: "target", type: "Endpoint3D", default: none, desc: [Punto al que mira al final.]),
     (name: "up", type: "tuple[float, float, float] | None", default: "None", desc: [Dirección vertical al final; `(0, 1, 0)` si se omite. Si cambia, la imagen gira hacia ella a lo largo de la animación, como se mueven el ojo y el objetivo.]),
   ),
   returns: (type: "Anim", desc: [Movimiento animado de la cámara.]),
-  desc: [Un objeto o un punto de anclaje como `eye` o `target` se lee donde se dibuja en cada fotograma: la cámara gira hacia un objetivo que se mueve mientras dura la animación y termina apuntando a donde acaba, según lo escrito en el script, así que un `orbit` posterior parte de ahí. Para mantener en el centro todo el tiempo un objetivo que se mueve, usa `follow(objetivo, turn=True)`.],
+  desc: [Un objeto o un punto de anclaje como `eye` o `target` se lee donde se dibuja en cada fotograma: la cámara gira hacia un objetivo que se mueve mientras dura la animación y termina apuntando a donde acaba, según lo escrito en el script, así que un `orbit` posterior parte de ahí. Una tupla `(x, y, z)` con coordenadas `Parameter`, `Computed` o `scene.time` se lee igual. Para mantener en el centro todo el tiempo un objetivo que se mueve, usa `follow(objetivo, turn=True)` o `bind_3d`.],
   none,
 )
 

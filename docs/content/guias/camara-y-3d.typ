@@ -699,6 +699,46 @@ Las cámaras secundarias siguen al objeto donde la cámara principal lo
 dibuja: con `scene.camera.inset(bola, follow=True)` o `vista.follow(bola)`,
 el marco se queda sobre la esfera y la pantalla la muestra ampliada.
 
+=== Encuadrar el 3D junto a un panel
+
+En una diapositiva el modelo suele ir a un lado, junto a un panel de pasos,
+y debe quedarse ahí mientras la cámara gira o se acerca.
+`camera.screen_offset(x, y)`, o `animate.screen_offset(x, y)`, desplaza la
+lente de la cámara en perspectiva: el objetivo se dibuja en `(x, y)`, en
+unidades de escena desde el centro del encuadre, sin que la cámara gire, así
+que las verticales no se inclinan según el lado. Un `orbit` o un `dolly`
+posterior giran alrededor del objetivo y lo dejan en ese punto de la
+pantalla. `look_at` y `to` conservan el desplazamiento; `state_3d(...,
+screen_offset=)` lo guarda en un estado y `reset()` lo devuelve al centro.
+
+Para un rótulo sobre un punto 3D, `billboard(offset=(dx, dy), anchor=)`
+coloca el punto `anchor` de su caja sobre el punto y lo desplaza `(dx, dy)`
+en pantalla, a la misma distancia aunque el punto esté lejos. Y
+`bind_3d(eye=, target=, up=, screen_offset=)` acepta tuplas cuyas
+coordenadas son `Parameter`, `Computed` o `scene.time`: animar los
+parámetros mueve la cámara sin puntos invisibles que la arrastren.
+
+```python
+# output: preview.webp
+import math
+from gaanim import Material3D, Scene, computed
+
+scene = Scene(frame=(16, 9), background="#0f172a")
+scene.camera.look_at(eye=(6, 4, 10), target=(0, 1.5, 0))
+scene.camera.perspective(0.7)
+for x in (-2, 2):
+    scene.geometry.cube(1, material=Material3D.matte("#e8a33d")).scale_to_3d(0.3, 3, 0.3).move_to_3d(x, 1.5, 0)
+scene.geometry.cube(1, material=Material3D.matte("#3aa76d")).scale_to_3d(4.3, 0.35, 0.35).move_to_3d(0, 3, 0)
+scene.text("P").move_to_3d(0, 3.2, 0).billboard(offset=(0, 0.2), anchor="bottom")
+scene.text("1  Geometría\n2  Cargas").hud().move_to(4.5, 0)
+scene.play([scene.camera.animate.screen_offset(-3.5, 0)], duration=1)
+giro = scene.viz.parameter(0.55)
+ojo = (computed(lambda a: 11 * math.sin(a), inputs=[giro]), 4, computed(lambda a: 11 * math.cos(a), inputs=[giro]))
+scene.camera.bind_3d(eye=ojo, target=(0, 1.5, 0), screen_offset=(-3.5, 0))
+scene.play([giro.animate.set(-0.9)], duration=2)
+scene.render()
+```
+
 === Vistas con cámara 3D propia
 
 Una vista de cámara amplía lo que dibuja la cámara principal, desde su mismo

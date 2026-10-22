@@ -1516,9 +1516,20 @@ chart = scene.geometry.rect(4, 2).in_3d().orient_3d(x_axis=(0, 0, -1), y_axis=(-
 #api-entry(
   name: "Drawable.billboard",
   kind: "method",
-  desc: [Mantiene un objeto 3D orientado hacia la cámara, en su punto 3D y del tamaño de su texto. Útil para etiquetas y marcadores. Lo dibuja el pase 3D, como `in_3d`: las mallas y las líneas 3D que tiene delante lo tapan píxel a píxel. Se acerca a la cámara la mitad de su lado mayor, así que una superficie en la que se apoya no lo corta. Sus imágenes, escenas Lottie, sombras, brillos y desenfoques también los dibuja el pase 3D, como en `in_3d`. Solo uno que contiene tiza se dibuja encima del 3D y se desvanece entero mientras una malla opaca queda entre su punto y la cámara.],
-  none,
-)
+  params: (
+    (name: "offset", type: "tuple[float, float]", default: "(0.0, 0.0)", desc: [Desplazamiento en pantalla, en unidades de escena del encuadre, el mismo a cualquier distancia del punto.]),
+    (name: "anchor", type: "AnchorName | Anchor | None", default: "None", desc: [Punto de su caja que cae sobre su punto 3D; sin él, su propio origen.]),
+  ),
+  desc: [Mantiene un objeto 3D orientado hacia la cámara, en su punto 3D y del tamaño de su texto. Útil para etiquetas y marcadores. Lo dibuja el pase 3D, como `in_3d`: las mallas y las líneas 3D que tiene delante lo tapan píxel a píxel. Se acerca a la cámara la mitad de su lado mayor, así que una superficie en la que se apoya no lo corta. Sus imágenes, escenas Lottie, sombras, brillos y desenfoques también los dibuja el pase 3D, como en `in_3d`. Solo uno que contiene tiza se dibuja encima del 3D y se desvanece entero mientras una malla opaca queda entre su punto y la cámara.
+
+  `move_to_3d` coloca su punto 3D, y el objeto se dibuja en pantalla alrededor de donde la cámara muestra ese punto: `anchor` elige qué punto de su caja cae ahí y `offset` lo desplaza desde ahí, así que `billboard(offset=(0, 0.3), anchor="bottom")` deja un rótulo justo encima de un nudo esté cerca o lejos. `shift_by`, en cambio, mueve el punto 3D. Dentro de un grupo con billboard, los miembros se colocan en esas mismas unidades de pantalla alrededor del origen del grupo. Un `offset` no finito lanza `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+carga = scene.text("P").move_to_3d(0, 3, 0).billboard(offset=(0, 0.3), anchor="bottom")
+```
+]
 
 #api-entry(
   name: "Drawable.in_3d",

@@ -820,9 +820,10 @@ fn compile_tracking_endpoint(
                 offset: anchor.offset,
             })
             .unwrap_or(TrackingEndpoint::Static(DVec3::ZERO)),
-        CanvasEndpoint::Expression { x, y } => TrackingEndpoint::Expression {
+        CanvasEndpoint::Expression { x, y, z } => TrackingEndpoint::Expression {
             x: compile_tracking_scalar(x, id_map, states),
             y: compile_tracking_scalar(y, id_map, states),
+            z: compile_tracking_scalar(z, id_map, states),
         },
         CanvasEndpoint::MediaPixel { object, x, y } => id_map
             .get(object)
@@ -3917,6 +3918,9 @@ impl SceneModel {
                             .commands
                             .entity(state.entity)
                             .insert((gaanim_scene::Billboard, bevy::prelude::Transform::default()));
+                        if let Some(shift) = spec.billboard_shift {
+                            builder.commands.entity(state.entity).insert(shift);
+                        }
                     }
                     if let Some(depth) = spec.parallax_depth
                         && let Some(state) = builder.states.get(actual.id)
@@ -4004,6 +4008,7 @@ impl SceneModel {
                             target,
                             fov_y,
                             up,
+                            lens_shift,
                         } => gaanim_animation::CameraBindingKind::ThreeD {
                             eye: eye.as_ref().map(|endpoint| {
                                 compile_tracking_endpoint(endpoint, id_map, &builder.states)
@@ -4014,7 +4019,12 @@ impl SceneModel {
                             fov_y: fov_y.as_ref().map(|expression| {
                                 compile_tracking_scalar(expression, id_map, &builder.states)
                             }),
-                            up: *up,
+                            up: compile_tracking_endpoint(up, id_map, &builder.states),
+                            lens_shift: lens_shift.as_ref().map(|shift| {
+                                shift.each_ref().map(|value| {
+                                    compile_tracking_scalar(value, id_map, &builder.states)
+                                })
+                            }),
                         },
                     };
                     builder.commands.spawn(gaanim_animation::CameraBinding {
@@ -9311,9 +9321,10 @@ impl SceneModel {
                 let matrix = world(runtime);
                 Some((matrix.transform_point3(DVec3::ZERO), matrix))
             }
-            CanvasEndpoint::Expression { x, y } => {
-                Some((DVec3::new(scalar(x)?, scalar(y)?, 0.0), DMat4::IDENTITY))
-            }
+            CanvasEndpoint::Expression { x, y, z } => Some((
+                DVec3::new(scalar(x)?, scalar(y)?, scalar(z)?),
+                DMat4::IDENTITY,
+            )),
             CanvasEndpoint::LocalExpression { space, x, y, z } => {
                 let runtime = *id_map.get(space)?;
                 builder.states.get(runtime)?;
@@ -9401,6 +9412,7 @@ impl SceneModel {
                     },
                 );
                 if let gaanim_animation::CameraStateSource::Concrete(pose) = to {
+                    builder.lens_shift = pose.lens_shift;
                     *camera_position = pose.position;
                     *camera_rotation = pose.rotation;
                     *camera_target = pose.target;
@@ -9848,6 +9860,7 @@ impl SceneModel {
                     target: *camera_target,
                     up: *camera_up,
                     projection: gaanim_math::Projection::Perspective { fov_y, near, far },
+                    lens_shift: builder.lens_shift,
                 });
                 Self::add_camera_lens(
                     builder,
@@ -9875,8 +9888,10 @@ impl SceneModel {
                         from_zoom: *camera_zoom,
                         to_zoom: 1.0,
                         from_lens: *camera_fov,
+                        from_lens_shift: builder.lens_shift,
                     },
                 );
+                builder.lens_shift = DVec2::ZERO;
                 *camera_position = DVec3::ZERO;
                 *camera_rotation = gaanim_core::glam::DQuat::IDENTITY;
                 *camera_target = DVec3::ZERO;
@@ -9970,6 +9985,16 @@ impl SceneModel {
                     },
                 );
                 builder.depth_of_field = to;
+            }
+            AnimationType::CameraLensShift { to } => {
+                let from = builder.lens_shift;
+                Self::add_camera_lens(
+                    builder,
+                    start,
+                    anim,
+                    PropertyLensSpec::CameraLensShift { from, to: *to },
+                );
+                builder.lens_shift = *to;
             }
             AnimationType::CameraDollyZoom { factor } => {
                 let Some((fov, near, far)) = *camera_fov else {
@@ -14900,6 +14925,7 @@ mod tests {
             CanvasEndpoint::Expression {
                 x: x.source(),
                 y: ScalarSource::Constant(40.0),
+                z: ScalarSource::Constant(0.0),
             },
             DVec3::ZERO,
             gaanim_animation::FollowOffsetSpace::World,
@@ -16321,6 +16347,52 @@ mod tests {
         }
     }
 
+    /// `screen_offset` shifts the lens over its animation, an orbit keeps
+    /// the shift, so the target stays where it shows, and a reset brings it
+    /// back to the center.
+    #[test]
+    fn a_screen_offset_holds_through_an_orbit_until_a_reset() {
+        let target = DVec3::new(0.0, 0.5, 0.0);
+        let mut canvas = SceneModel::new(1280, 720);
+        let _marker = canvas.circle(1.0);
+        let perspective = canvas.camera_perspective(0.8, 0.1, 1000.0, 0.0);
+        canvas.play(vec![perspective]);
+        let look_at = canvas.camera_look_at_endpoints(
+            Some(CanvasEndpoint::Static(DVec3::new(0.0, 2.0, 12.0))),
+            CanvasEndpoint::Static(target),
+            DVec3::Y,
+            0.0,
+        );
+        canvas.play(vec![look_at]);
+        let shift = DVec2::new(-300.0, 40.0);
+        let offset = canvas.camera_screen_offset(shift, 1.0).unwrap();
+        canvas.play(vec![offset.rate_func(gaanim_math::RateFunc::Linear)]);
+        let orbit = canvas.camera_orbit(0.8, 0.2, 1.0);
+        canvas.play(vec![orbit]);
+        let reset = canvas.camera_reset(1.0);
+        canvas.play(vec![reset.rate_func(gaanim_math::RateFunc::Linear)]);
+        let (mut world, mut timeline) = compile_camera_timeline(canvas);
+
+        for (time, expected) in [
+            (0.5, shift * 0.5),
+            (1.5, shift),
+            (1.0, shift),
+            (2.5, shift * 0.5),
+            (3.0, DVec2::ZERO),
+        ] {
+            timeline.seek(&mut world, time);
+            let camera = *world.resource::<gaanim_math::Camera>();
+            assert!(
+                (camera.lens_shift - expected).length() < 1e-9,
+                "shift {:?} at {time}, expected {expected:?}",
+                camera.lens_shift
+            );
+            if (1.0..=2.0).contains(&time) {
+                assert!((camera.hud_point(target) - shift).length() < 1e-6);
+            }
+        }
+    }
+
     #[test]
     fn camera_orbit_dollies_along_the_orbit() {
         let eye = DVec3::new(0.0, 2.0, 12.0);
@@ -17591,6 +17663,7 @@ mod tests {
         let reactive = CanvasEndpoint::Expression {
             x: 1.0.into(),
             y: 2.0.into(),
+            z: 0.0.into(),
         };
         assert_eq!(
             canvas
@@ -18824,6 +18897,63 @@ mod tests {
         let camera = world.resource::<gaanim_math::Camera>();
         assert_eq!(camera.position.x, -130.0);
         assert_eq!(camera.position.y, 25.0);
+    }
+
+    /// `bind_3d` reads an eye and an up made of reactive coordinates every
+    /// frame, with no point to carry them.
+    #[test]
+    fn compiled_3d_camera_binding_reads_reactive_coordinates() {
+        let mut canvas = SceneModel::new(960, 540);
+        let parameter = canvas.parameter(0.0).unwrap();
+        let parameter_id = parameter.drawable().id;
+        let x = ScalarSource::function(ReactiveFunction::new(
+            0,
+            1,
+            vec![gaanim_animation::ReactiveInput::Signal(parameter_id)],
+            |values| Ok(vec![values[0] * 10.0]),
+        ))
+        .unwrap();
+        let eye = CanvasEndpoint::Expression {
+            x: x.clone(),
+            y: 4.0.into(),
+            z: 12.0.into(),
+        };
+        let up = CanvasEndpoint::Expression {
+            x,
+            y: 1.0.into(),
+            z: 0.0.into(),
+        };
+        let _constraint = canvas
+            .camera_bind_3d(
+                Some(eye),
+                Some(CanvasEndpoint::Static(DVec3::ZERO)),
+                None,
+                up,
+                None,
+                ScalarSource::constant(1.0),
+                true,
+            )
+            .unwrap();
+        canvas.play(vec![parameter.animate().set(0.5).duration(1.0)]);
+
+        let mut world = World::new();
+        world.insert_resource(Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+        let mut timeline = world.remove_resource::<Timeline>().unwrap();
+        timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
+        world.insert_resource(gaanim_math::Camera::ortho_2d(960, 540));
+        timeline.seek(&mut world, 1.0);
+        gaanim_animation::apply_camera_bindings(&mut world, 1.0);
+        let camera = world.resource::<gaanim_math::Camera>();
+        assert!(
+            (camera.position - DVec3::new(5.0, 4.0, 12.0)).length() < 1e-9,
+            "{:?}",
+            camera.position
+        );
+        assert!((camera.up - DVec3::new(5.0, 1.0, 0.0).normalize()).length() < 1e-9);
     }
 
     #[test]

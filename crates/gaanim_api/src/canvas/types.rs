@@ -1002,6 +1002,8 @@ pub struct ObjectSpec {
     pub exclude_from_parent_draw: bool,
     /// If true, this object should billboard (face camera) in 3D.
     pub billboard: bool,
+    /// Where a billboard sits around its point on screen.
+    pub billboard_shift: Option<gaanim_scene::BillboardShift>,
     pub(crate) coordinate_view_role: Option<gaanim_scene::CoordinateViewRole>,
     /// Unzoomed offset of a coordinate-view label from its data anchor.
     pub(crate) coordinate_label_offset: Option<gaanim_core::glam::DVec2>,
@@ -1203,6 +1205,7 @@ impl ObjectSpec {
             z_layer: None,
             covers_on_purpose: false,
             billboard: false,
+            billboard_shift: None,
             coordinate_view_role: None,
             coordinate_label_offset: None,
             axis_label_gap: None,

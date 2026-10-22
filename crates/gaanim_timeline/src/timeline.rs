@@ -4891,6 +4891,7 @@ fn apply_lens_spec(
                     camera.target = pose.target;
                     camera.up = pose.up;
                     camera.projection = pose.projection;
+                    camera.lens_shift = pose.lens_shift;
                 }
             }
         }
@@ -4913,6 +4914,11 @@ fn apply_lens_spec(
                     // tangent crosses ±π.
                     camera.rotation = gaanim_core::glam::DQuat::from_rotation_z(angle + offset);
                 }
+            }
+        }
+        PropertyLensSpec::CameraLensShift { from, to } => {
+            if let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>() {
+                camera.lens_shift = from.lerp(*to, t);
             }
         }
         PropertyLensSpec::CameraDepthOfField { from, to } => {
@@ -5050,6 +5056,7 @@ fn apply_lens_spec(
             from_zoom,
             to_zoom,
             from_lens,
+            from_lens_shift,
         } => {
             // From a perspective camera the move stays in perspective, toward
             // the view that matches the 2D pose, until its end.
@@ -5063,6 +5070,7 @@ fn apply_lens_spec(
                     target: *from_target,
                     up: *from_up,
                     projection: gaanim_math::Projection::Perspective { fov_y, near, far },
+                    lens_shift: *from_lens_shift,
                 };
                 let home = gaanim_math::CameraPose {
                     position: gaanim_core::glam::DVec3::ZERO,
@@ -5070,6 +5078,7 @@ fn apply_lens_spec(
                     target: gaanim_core::glam::DVec3::ZERO,
                     up: gaanim_core::glam::DVec3::Y,
                     projection: gaanim_math::Projection::Orthographic { zoom: *to_zoom },
+                    lens_shift: gaanim_core::glam::DVec2::ZERO,
                 };
                 let pose = from.interpolate_in_frame(home, t, camera.frame_height);
                 camera.position = pose.position;
@@ -5077,6 +5086,7 @@ fn apply_lens_spec(
                 camera.target = pose.target;
                 camera.up = pose.up;
                 camera.projection = pose.projection;
+                camera.lens_shift = pose.lens_shift;
             } else if let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>() {
                 camera.position = from_position.lerp(gaanim_core::glam::DVec3::ZERO, t);
                 camera.rotation = from_rotation.slerp(gaanim_core::glam::DQuat::IDENTITY, t);
@@ -5090,6 +5100,7 @@ fn apply_lens_spec(
                 camera.projection = gaanim_math::Projection::Orthographic {
                     zoom: *from_zoom + (*to_zoom - *from_zoom) * t,
                 };
+                camera.lens_shift = from_lens_shift.lerp(gaanim_core::glam::DVec2::ZERO, t);
             }
         }
         PropertyLensSpec::CameraFollow { target: followed } => {

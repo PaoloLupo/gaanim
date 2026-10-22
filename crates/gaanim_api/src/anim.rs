@@ -337,6 +337,11 @@ pub enum AnimationType {
         target: CanvasEndpoint,
         blur: bool,
     },
+    /// Move where a perspective camera draws the center of its view, in
+    /// scene units of the frame (`gaanim_math::Camera::lens_shift`).
+    CameraLensShift {
+        to: DVec2,
+    },
     /// Change the depth of field of parallax layers; `None` keeps a value.
     CameraDepthOfField {
         focus: Option<f64>,
@@ -935,6 +940,7 @@ impl AnimationType {
                 | Self::CameraWhipPan { .. }
                 | Self::CameraDollyZoom { .. }
                 | Self::CameraDepthOfField { .. }
+                | Self::CameraLensShift { .. }
         )
     }
 
