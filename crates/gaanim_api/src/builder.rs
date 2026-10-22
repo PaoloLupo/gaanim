@@ -1138,6 +1138,10 @@ pub struct SceneBuilder<'w, 's, 'a> {
     pub text_metrics: HashMap<ObjectId, gaanim_text::prelude::TextMetrics>,
     /// Continuous rolling displays and the parameter signals whose tweens settle them.
     pub rolling_tween_sources: Vec<(Entity, Vec<ObjectId>)>,
+    /// The scene's camera constraints, with the windows their switches
+    /// have opened and closed so far on the compiled clock; spawned once
+    /// every segment is compiled.
+    pub(crate) camera_bindings: Vec<gaanim_animation::CameraBinding>,
     /// Procedural layers driven by a parameter: `(target, signal, layer
     /// start, signal value at the start)`, given their signal track once
     /// every tween is scheduled.
@@ -1350,6 +1354,7 @@ pub(crate) struct SceneBuilderState {
     states: MobjectStateMap,
     text_metrics: HashMap<ObjectId, gaanim_text::prelude::TextMetrics>,
     rolling_tween_sources: Vec<(Entity, Vec<ObjectId>)>,
+    camera_bindings: Vec<gaanim_animation::CameraBinding>,
     procedural_signal_tracks: Vec<(Entity, ObjectId, f64, f64)>,
     readout_baselines: HashMap<ObjectId, (f64, Option<gaanim_scene::TextAdvance>)>,
     default_track: TrackId,
@@ -1414,6 +1419,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             states: self.states.clone(),
             text_metrics: self.text_metrics.clone(),
             rolling_tween_sources: self.rolling_tween_sources.clone(),
+            camera_bindings: self.camera_bindings.clone(),
             procedural_signal_tracks: self.procedural_signal_tracks.clone(),
             readout_baselines: self.readout_baselines.clone(),
             default_track: self.default_track,
@@ -1479,6 +1485,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             states,
             text_metrics,
             rolling_tween_sources,
+            camera_bindings,
             procedural_signal_tracks,
             readout_baselines,
             default_track,
@@ -1537,6 +1544,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             states,
             text_metrics,
             rolling_tween_sources,
+            camera_bindings,
             procedural_signal_tracks,
             readout_baselines,
             readout_reserves: HashMap::new(),
@@ -1790,9 +1798,46 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         );
     }
 
+    /// Make visible at `time` what [`Self::hide_visuals_now`] hid: the root
+    /// and the glyphs of its own text, not the drawables it holds, which
+    /// keep their own entry.
+    pub(crate) fn schedule_show_visuals_at(&mut self, root_id: ObjectId, time: f64) {
+        self.schedule_show_root_at(root_id, time);
+        let Some(state) = self.states.get(root_id) else {
+            return;
+        };
+        let glyphs: Vec<(ObjectId, f32)> = state
+            .child_spans
+            .iter()
+            .map(|child| {
+                let opacity = self.states.get(child.id).map_or(1.0, |glyph| glyph.opacity);
+                (child.id, opacity)
+            })
+            .collect();
+        let track = self.ensure_track(root_id);
+        for (target, opacity) in glyphs {
+            self.timeline.add_clip(
+                track,
+                time,
+                0.0,
+                ClipPayload::Animation(AnimationSpec {
+                    target,
+                    lens: PropertyLensSpec::Opacity {
+                        from: 0.0,
+                        to: opacity,
+                    },
+                    rate_func: gaanim_math::RateFunc::Linear,
+                    delay: 0.0,
+                    label: None,
+                }),
+            );
+        }
+    }
+
     /// Schedule visibility for every descendant except the root. The root is
     /// omitted when its entry animation owns the root opacity, for example
     /// `FadeIn` and `FadeInFrom`.
+
     pub(crate) fn schedule_show_descendants_at(&mut self, root_id: ObjectId, time: f64) {
         self.schedule_show_descendants_at_except(root_id, time, &HashSet::new());
     }
@@ -2050,6 +2095,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             states: MobjectStateMap::new(),
             text_metrics: HashMap::new(),
             rolling_tween_sources: Vec::new(),
+            camera_bindings: Vec::new(),
             procedural_signal_tracks: Vec::new(),
             readout_baselines: HashMap::new(),
             readout_reserves: HashMap::new(),

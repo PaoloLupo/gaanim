@@ -61,7 +61,27 @@ fn look_at_rotation(eye: DVec3, target: DVec3, up: DVec3) -> Option<DQuat> {
     Some(view.inverse().to_scale_rotation_translation().1)
 }
 
+impl CameraBinding {
+    /// Switch the binding on or off from `time`: enabling opens a window
+    /// unless one is open, disabling closes the open one.
+    pub fn switch(&mut self, time: f64, enabled: bool) {
+        let open = self
+            .windows
+            .last_mut()
+            .filter(|window| window.end.is_none());
+        match (open, enabled) {
+            (None, true) => self.windows.push(CameraBindingWindow {
+                start: time,
+                end: None,
+            }),
+            (Some(window), false) => window.end = Some(time.max(window.start)),
+            _ => {}
+        }
+    }
+}
+
 /// Apply active persistent bindings in stable creation order.
+
 ///
 /// Each binding only touches its declared channels. Invalid runtime values
 /// are rejected for that evaluation rather than silently clamped.

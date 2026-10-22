@@ -24,9 +24,8 @@ use crate::canvas::SceneMarker;
 use crate::canvas::authored::Authored;
 use crate::canvas::drawable::DrawableHandle;
 use crate::canvas::ops::{
-    CameraBindingSpec, CameraBindingWindowSpec, CanvasCameraBindingKind, CanvasEndpoint, CanvasRay,
-    CanvasState, LocalSegmentStop, Op, PointRef, Segment, SharedCameraBindingSpec,
-    SharedCanvasState,
+    CameraBindingSpec, CanvasCameraBindingKind, CanvasEndpoint, CanvasRay, CanvasState,
+    LocalSegmentStop, Op, PointRef, Segment, SharedCameraBindingSpec, SharedCanvasState,
 };
 use crate::canvas::types::{
     Anim, BooleanOperation, BooleanRule, FillLevelDirection, ImageFit, ImageOptions,
@@ -1872,42 +1871,27 @@ impl std::fmt::Debug for CameraConstraintHandle {
 }
 
 impl CameraConstraintHandle {
-    fn current_time(&self) -> f64 {
+    /// Switch this constraint on or off at the current timeline cursor. Like
+    /// a cut, a switch made after a stop at its instant comes after it, so
+    /// the stop still shows the camera as it was.
+    fn switch(&self, enabled: bool) {
+        let order = self.spec.lock().expect("camera binding poisoned").order;
         self.state
             .lock()
             .expect("canvas state poisoned")
-            .segments
-            .iter()
-            .map(|segment| segment.cursor)
-            .sum()
+            .active_mut()
+            .ops
+            .push(Op::SwitchCameraBinding { order, enabled });
     }
 
     /// Enable this constraint at the current timeline cursor.
     pub fn enable(&self) {
-        let time = self.current_time();
-        let mut spec = self.spec.lock().expect("camera binding poisoned");
-        if spec
-            .windows
-            .last()
-            .is_some_and(|window| window.end.is_none())
-        {
-            return;
-        }
-        spec.windows.push(CameraBindingWindowSpec {
-            start: time,
-            end: None,
-        });
+        self.switch(true);
     }
 
     /// Disable this constraint at the current timeline cursor.
     pub fn disable(&self) {
-        let time = self.current_time();
-        let mut spec = self.spec.lock().expect("camera binding poisoned");
-        if let Some(window) = spec.windows.last_mut()
-            && window.end.is_none()
-        {
-            window.end = Some(time.max(window.start));
-        }
+        self.switch(false);
     }
 }
 
@@ -6235,17 +6219,13 @@ impl SceneModel {
         enabled: bool,
     ) -> CameraConstraintHandle {
         let mut state = self.state.lock().expect("canvas state poisoned");
-        let start = state.segments.iter().map(|segment| segment.cursor).sum();
         let order = state.next_camera_binding_order();
         let spec = Arc::new(Authored::sharing(
             CameraBindingSpec {
                 order,
                 kind,
                 influence,
-                windows: enabled
-                    .then_some(CameraBindingWindowSpec { start, end: None })
-                    .into_iter()
-                    .collect(),
+                enabled,
             },
             &self.state,
         ));

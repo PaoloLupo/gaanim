@@ -169,7 +169,9 @@ impl Default for PreviewInteractive {
 }
 
 impl PreviewInteractive {
-    fn set_enabled(&mut self, enabled: bool, authored_camera: Option<Camera>) {
+    /// Turns the inspection on or off; on, the free 3D view starts from
+    /// `shown_camera`, the camera the preview shows (see [`shown_camera`]).
+    fn set_enabled(&mut self, enabled: bool, shown_camera: Option<Camera>) {
         self.enabled = enabled;
         if !enabled {
             self.view = PreviewView::CameraView;
@@ -179,7 +181,7 @@ impl PreviewInteractive {
         self.user_zoom = 1.0;
         self.pan = glam::DVec2::ZERO;
         if self.detected_3d {
-            self.free_camera = authored_camera;
+            self.free_camera = shown_camera;
             self.view = if self.free_camera.is_some() {
                 PreviewView::Free3D
             } else {
@@ -191,8 +193,8 @@ impl PreviewInteractive {
         }
     }
 
-    fn toggle(&mut self, authored_camera: Option<Camera>) {
-        self.set_enabled(!self.enabled, authored_camera);
+    fn toggle(&mut self, shown_camera: Option<Camera>) {
+        self.set_enabled(!self.enabled, shown_camera);
     }
 
     pub fn reset(&mut self) {
@@ -200,6 +202,15 @@ impl PreviewInteractive {
         self.pan = glam::DVec2::ZERO;
         self.needs_frame = true;
     }
+}
+
+/// The camera the preview shows: the rig's, with the scene's constraints
+/// (`bind_3d`, `bind_2d`) applied, or the authored one without a rig.
+pub(crate) fn shown_camera(
+    rig: Option<&gaanim_math::CameraRigCamera>,
+    authored: Option<&Camera>,
+) -> Option<Camera> {
+    rig.map(|rig| rig.0).or_else(|| authored.copied())
 }
 
 /// Output frame inside the editor window, in logical window pixels.
@@ -3517,6 +3528,7 @@ fn preview_mode_keys_system(
     keys: Res<ButtonInput<KeyCode>>,
     mut interactive: ResMut<PreviewInteractive>,
     authored_camera: Option<Res<Camera>>,
+    rig: Option<Res<gaanim_math::CameraRigCamera>>,
     presentation_mode: Res<PresentationMode>,
 ) {
     if egui_wants.wants_keyboard_input() {
@@ -3528,7 +3540,7 @@ fn preview_mode_keys_system(
     }
 
     if keys.just_pressed(KeyCode::KeyI) {
-        interactive.toggle(authored_camera.as_deref().copied());
+        interactive.toggle(shown_camera(rig.as_deref(), authored_camera.as_deref()));
     } else if interactive.enabled && keys.just_pressed(KeyCode::Escape) {
         interactive.set_enabled(false, None);
     } else if interactive.enabled && keys.just_pressed(KeyCode::KeyR) {
@@ -3666,11 +3678,7 @@ fn preview_interactive_input_system(
 
     let mut cam = match interactive.view {
         PreviewView::Free3D => interactive.free_camera,
-        // The rig camera, when present, is the one the preview shows.
-        PreviewView::CameraView => rig
-            .as_deref()
-            .map(|rig| rig.0)
-            .or_else(|| authored_camera.as_deref().copied()),
+        PreviewView::CameraView => shown_camera(rig.as_deref(), authored_camera.as_deref()),
     };
     let Some(ref mut cam) = cam else {
         drag.cursor = None;
@@ -4082,11 +4090,7 @@ fn viewport_adjust_system(
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     presentation: Res<PresentationMode>,
 ) {
-    let Some(base_camera) = rig
-        .as_deref()
-        .map(|rig| rig.0)
-        .or_else(|| authored.as_deref().copied())
-    else {
+    let Some(base_camera) = shown_camera(rig.as_deref(), authored.as_deref()) else {
         return;
     };
     let mut cam = if interactive.enabled && interactive.view == PreviewView::Free3D {
@@ -5054,6 +5058,34 @@ mod tests {
             drag.cursor_delta(Some(glam::DVec2::new(601.0, 400.0))),
             Some(glam::DVec2::new(1.0, 0.0))
         );
+    }
+
+    #[test]
+    fn inspection_starts_from_the_camera_the_constraints_aim() {
+        let authored = Camera::ortho_2d(1280, 720);
+        let mut aimed = Camera::perspective_3d(1280, 720, 0.6);
+        aimed.position = glam::DVec3::new(9.0, 5.0, 8.0);
+        aimed.target = glam::DVec3::new(3.0, 1.0, -2.0);
+        aimed.lens_shift = glam::DVec2::new(-3.0, 0.0);
+        let mut app = App::new();
+        app.insert_resource(PreviewInteractive {
+            detected_3d: true,
+            ..default()
+        })
+        .init_resource::<EguiWantsInput>()
+        .init_resource::<ButtonInput<KeyCode>>()
+        .init_resource::<PresentationMode>()
+        .insert_resource(authored)
+        .insert_resource(gaanim_math::CameraRigCamera(aimed))
+        .add_systems(Update, preview_mode_keys_system);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyI);
+        app.update();
+        let preview = app.world().resource::<PreviewInteractive>();
+        assert!(preview.enabled);
+        assert_eq!(preview.view, PreviewView::Free3D);
+        assert_eq!(preview.free_camera, Some(aimed));
     }
 
     #[test]

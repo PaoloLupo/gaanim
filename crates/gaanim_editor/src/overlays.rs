@@ -350,6 +350,7 @@ pub fn overlays_settings_ui_system(
     mut overlays: ResMut<EditorOverlays>,
     mut interactive: ResMut<PreviewInteractive>,
     authored_camera: Option<Res<Camera>>,
+    rig: Option<Res<gaanim_math::CameraRigCamera>>,
     presentation: Res<PresentationMode>,
     mut inspector: ResMut<crate::inspector::InspectorPanel>,
     mut console: ResMut<crate::console_panel::ConsolePanel>,
@@ -403,7 +404,10 @@ pub fn overlays_settings_ui_system(
                         })
                         .clicked()
                         {
-                            interactive.toggle(authored_camera.as_deref().copied());
+                            interactive.toggle(crate::shown_camera(
+                                rig.as_deref(),
+                                authored_camera.as_deref(),
+                            ));
                         }
                         divider(ui);
                         if pill_toggle(

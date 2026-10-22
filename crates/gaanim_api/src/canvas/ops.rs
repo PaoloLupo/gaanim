@@ -479,12 +479,6 @@ pub(crate) type SharedObjectSpec = Arc<Authored<ObjectSpec>>;
 
 pub(crate) type SharedCameraBindingSpec = Arc<Authored<CameraBindingSpec>>;
 
-/// Authoring-time activation window for a persistent camera constraint.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct CameraBindingWindowSpec {
-    pub start: f64,
-    pub end: Option<f64>,
-}
 
 /// Deferred, unresolved channels of a native camera binding.
 // Built once per scene or clip, not stored in bulk: boxing the large
@@ -512,7 +506,9 @@ pub(crate) struct CameraBindingSpec {
     pub order: u64,
     pub kind: CanvasCameraBindingKind,
     pub influence: ScalarSource,
-    pub windows: Vec<CameraBindingWindowSpec>,
+    /// Whether the constraint applies from its creation; later switches
+    /// are [`Op::SwitchCameraBinding`]s.
+    pub enabled: bool,
 }
 
 // -----------------------------------------------------------------------
@@ -563,6 +559,9 @@ pub(crate) enum Op {
     Spawn(SharedObjectSpec),
     /// Spawn a non-rendered persistent camera binding.
     SpawnCameraBinding(SharedCameraBindingSpec),
+    /// Enable or disable, at the cursor, the camera binding created
+    /// `order`-th (`CameraConstraint.enable` / `disable`).
+    SwitchCameraBinding { order: u64, enabled: bool },
     /// Capture the authored camera pose at the current timeline cursor.
     CaptureCameraState { id: u64 },
     /// Play a single animation sequentially (auto-queued). `active=false`
