@@ -2242,9 +2242,6 @@ impl PyBounds {
     }
 }
 
-/// The Python object a fluent setter returns: the receiver itself (keeping its
-/// class, e.g. a `Readout` with `.number`) when the setter changed this very
-/// drawable, or a new `Drawable` for a different one, such as a part.
 /// A morph target that is not there is a `KeyError`; a drawable without any,
 /// a `TypeError`; a weight that is not a number, a `ValueError`.
 fn morph_target_error(error: gaanim_api::canvas::MorphTargetError) -> PyErr {
@@ -2261,6 +2258,9 @@ fn morph_target_error(error: gaanim_api::canvas::MorphTargetError) -> PyErr {
     }
 }
 
+/// The Python object a fluent setter returns: the receiver itself (keeping its
+/// class, e.g. a `Readout` with `.number`) when the setter changed this very
+/// drawable, or a new `Drawable` for a different one, such as a part.
 fn same_drawable<'py>(
     slf: &Bound<'py, PyDrawable>,
     result: PyResult<PyDrawable>,
