@@ -2265,6 +2265,42 @@ mod tests {
     }
 
     #[test]
+    fn the_camera_an_outgoing_segment_keeps_round_trips() {
+        let mut kept = gaanim_math::Camera::perspective_3d(1280, 720, 0.6);
+        kept.position = gaanim_core::glam::DVec3::new(9.0, 5.0, 8.0);
+        kept.lens_shift = gaanim_core::glam::DVec2::new(-3.0, 0.5);
+        let view = gaanim_core::kurbo::Affine::new([1.5, 0.0, 0.0, 1.5, -2.0, 1.0]);
+        let transition = |outgoing_camera| gaanim_renderer::pipeline::CapturedTransition {
+            outgoing_camera,
+            outgoing_view: outgoing_camera.map_or(gaanim_core::kurbo::Affine::IDENTITY, |_| view),
+            ..Default::default()
+        };
+        let mut writer = BundleWriter::new(std::io::Cursor::new(Vec::new()), "test");
+        for (index, camera) in [Some(kept), None].into_iter().enumerate() {
+            let mut recorded = frame(index as f64 / 60.0);
+            recorded.capture.elements = vec![square(1, 0.0, false)];
+            recorded.capture.transition = Some(transition(camera));
+            writer.push_frame(&recorded, [index as u8; 32]).unwrap();
+        }
+        let scene = SceneData {
+            fps: 60,
+            duration: 2.0 / 60.0,
+            ..Default::default()
+        };
+        let mut bundle =
+            Bundle::from_bytes(writer.finish(&scene).unwrap().into_inner().into()).unwrap();
+        let read = |bundle: &mut Bundle, index| {
+            let transition = bundle.frame(index).unwrap().capture.transition.unwrap();
+            (transition.outgoing_camera, transition.outgoing_view)
+        };
+        assert_eq!(read(&mut bundle, 0), (Some(kept), view));
+        assert_eq!(
+            read(&mut bundle, 1),
+            (None, gaanim_core::kurbo::Affine::IDENTITY)
+        );
+    }
+
+    #[test]
     fn drawables_left_out_of_the_post_process_round_trip() {
         let element = |raw: u32, post_exempt: bool| square(raw, 0.0, post_exempt);
         let record = |elements: Vec<CapturedElement>| {
