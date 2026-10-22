@@ -705,6 +705,8 @@ pub enum SpawnKind {
     },
     /// Lit 3D primitive with complete geometry attributes.
     Primitive3D(gaanim_scene::TriangleMeshData),
+    /// A scalar field drawn as a cloud that glows and absorbs light.
+    Volume(gaanim_scene::VolumeData),
     /// A light for lit 3D content, which draws nothing itself.
     Light3D(gaanim_scene::Light3D),
     /// 3D polyline (e.g., curve) defined by world-space points.

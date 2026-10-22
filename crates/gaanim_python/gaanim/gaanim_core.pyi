@@ -9280,6 +9280,87 @@ class Geometry:
             )
         """
         ...
+    def isosurface(
+        self,
+        field: Callable[[float, float, float], float] | Any,
+        level: float = 0.0,
+        *,
+        x_range: tuple[float, float] = (-1.0, 1.0),
+        y_range: tuple[float, float] = (-1.0, 1.0),
+        z_range: tuple[float, float] = (-1.0, 1.0),
+        resolution: int | tuple[int, int, int] = 48,
+        vectorized: bool = False,
+        material: Optional[Material3D] = None,
+    ) -> Primitive3D:
+        """Create the lit surface where a scalar field equals ``level``.
+
+        ``field(x, y, z)`` is sampled on a grid of ``resolution`` points on
+        each side (one count, or one per axis) over the box of ``x_range``,
+        ``y_range`` and ``z_range``; ``vectorized=True`` calls it once with
+        numpy arrays of every point, and needs numpy. ``field`` may instead
+        be a 3D array of
+        values indexed ``[x][y][z]``, spread over the same box, whose shape
+        sets the resolution. The surface is smooth at any grid (surface
+        nets: one vertex per crossed cell, normals from the field's
+        gradient) and faces out, toward the side of the level most of the
+        box's walls lie on: ``x*x + y*y + z*z`` at ``1`` and a density's
+        blob both face out. Where the box cuts it open it is lit on both
+        sides. Its origin is the field's: ``move_to_3d`` moves the
+        field's origin. It is a ``Primitive3D``: its material animates, and
+        ``animate.transform_to`` morphs it into another isosurface. A NaN
+        value counts as below the level. Non-finite or empty ranges, fewer
+        than 2 or more than 128³ points, a 3D array of another rank or a
+        level the field never crosses in the box raise ``ValueError``.
+
+        Example:
+            shell = scene.geometry.isosurface(
+                lambda x, y, z: x * x + y * y + z * z, 1.0,
+                x_range=(-1.5, 1.5), y_range=(-1.5, 1.5), z_range=(-1.5, 1.5),
+                material=Material3D.matte(BLUE),
+            )
+        """
+        ...
+    def volume(
+        self,
+        field: Callable[[float, float, float], float] | Any,
+        *,
+        x_range: tuple[float, float] = (-1.0, 1.0),
+        y_range: tuple[float, float] = (-1.0, 1.0),
+        z_range: tuple[float, float] = (-1.0, 1.0),
+        resolution: int | tuple[int, int, int] = 48,
+        vectorized: bool = False,
+        color_map: Optional[ColorMapLike] = None,
+        value_range: Optional[tuple[float, float]] = None,
+        opacity: Sequence[float] = (0.0, 1.0),
+        density: float = 4.0,
+    ) -> Drawable:
+        """Draw a scalar field as a cloud that glows and absorbs light.
+
+        The field is sampled as in ``isosurface``. Each value, placed in
+        ``value_range`` (by default from the lowest to the highest value),
+        glows in ``color_map``'s color for it (``"viridis"`` by default) and
+        is as opaque as ``opacity`` says: its values spread evenly from the
+        low end of the range to the high one, with straight lines between
+        them, so ``(0, 1)`` hides the low values and ``(0, 0, 1)`` all but
+        the top half. A value of full opacity absorbs ``density`` of the
+        light behind it per scene unit. Each pixel marches its ray through
+        the box from the eye up to what is opaque, so a solid inside the
+        cloud shows through the part in front of it. A volume draws after
+        the opaque content and before the translucent content. It draws
+        nothing outside its box; its origin is the field's, and it moves,
+        turns, scales and fades as a drawable. A NaN value is empty. The
+        errors of ``isosurface``, ``opacity`` with fewer than two values or
+        one outside 0 to 1, a negative or non-finite ``density`` or a
+        ``value_range`` that is not two different finite values raise
+        ``ValueError``.
+
+        Example:
+            cloud = scene.geometry.volume(
+                lambda x, y, z: math.exp(-4 * (x * x + y * y + z * z)),
+                color_map="magma", opacity=(0.0, 0.2, 1.0), density=6.0,
+            )
+        """
+        ...
     def revolve(
         self,
         profile: Sequence[tuple[float, float]],

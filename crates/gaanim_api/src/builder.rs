@@ -9403,6 +9403,50 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         MobjectRef { id }
     }
 
+    /// Spawns a volume (see [`gaanim_scene::VolumeData`]), bounded by its box.
+    pub fn spawn_volume(&mut self, data: gaanim_scene::VolumeData) -> MobjectRef {
+        let id = self.next_id();
+        let bounds = Bounds3D::new(
+            gaanim_core::glam::DVec3::from(data.min.map(f64::from)),
+            gaanim_core::glam::DVec3::from(data.max.map(f64::from)),
+        );
+        let entity = self
+            .commands
+            .spawn((
+                MobjectId(id),
+                SpatialTransform::default(),
+                GlobalSpatialTransform::default(),
+                LocalBounds(bounds),
+                WorldBounds::default(),
+                data,
+                Mesh3DMarker,
+                Transform::default(),
+                GlobalTransform::default(),
+                Visibility::default(),
+                Visible,
+                Opacity(1.0),
+                gaanim_scene::GlobalOpacity(1.0),
+            ))
+            .id();
+        self.tag_entity(entity);
+        let state = MobjectState {
+            fill_level: 0.0,
+            path: std::sync::Arc::new(kurbo::BezPath::new()),
+            bounds,
+            transform: SpatialTransform::default(),
+            opacity: 1.0,
+            fill: None,
+            stroke: StrokeBrush::transparent(),
+            entity,
+            child_spans: Vec::new(),
+            children: Vec::new(),
+            parent: None,
+            exclude_from_parent_draw: false,
+        };
+        self.states.insert(id, state);
+        MobjectRef { id }
+    }
+
     /// Spawns a 3D line list (axes, grids) from world-space points.
     /// If `colors` is Some and length matches `points`, per-vertex colors are used.
     pub fn spawn_line_list(&mut self, points: Vec<[f32; 3]>, color: Color) -> MobjectRef {

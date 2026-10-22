@@ -638,6 +638,58 @@ impl DepthOfField {
     }
 }
 
+/// A scalar field drawn as a cloud that glows and absorbs light: each value
+/// along a ray through its box gives the color and opacity `transfer` holds
+/// for it, accumulated from the eye in. The field's values, x fastest, each
+/// mapped to 0..=255 over its value range, fill `values` four to a pixel;
+/// `transfer` is 256 by 1, the sRGB color and the opacity (not
+/// premultiplied) of each value, from the low end of the range to the high
+/// one. Both are images so that recordings store each field once.
+#[derive(Component, Debug, Clone, PartialEq)]
+pub struct VolumeData {
+    pub values: gaanim_core::peniko::ImageData,
+    /// Grid points on each side.
+    pub size: [u32; 3],
+    /// The box the grid spans, in the drawable's own coordinates.
+    pub min: [f32; 3],
+    pub max: [f32; 3],
+    pub transfer: gaanim_core::peniko::ImageData,
+    /// How much of the light behind it a value of full opacity absorbs per
+    /// scene unit.
+    pub density: f32,
+}
+
+impl VolumeData {
+    /// The most pixels a row of `values` holds.
+    pub const ROW: u32 = 2048;
+
+    /// `texels`, x fastest, packed into `values` four to a pixel.
+    pub fn pack(texels: &[u8]) -> gaanim_core::peniko::ImageData {
+        let pixels = texels.len().div_ceil(4).max(1) as u32;
+        let width = pixels.min(Self::ROW);
+        let height = pixels.div_ceil(width);
+        let mut bytes = texels.to_vec();
+        bytes.resize((width * height * 4) as usize, 0);
+        gaanim_core::peniko::ImageData {
+            data: gaanim_core::peniko::Blob::new(std::sync::Arc::new(bytes)),
+            format: gaanim_core::peniko::ImageFormat::Rgba8,
+            alpha_type: gaanim_core::peniko::ImageAlphaType::Alpha,
+            width,
+            height,
+        }
+    }
+
+    /// The field's values, x fastest: as many as its grid has points, or
+    /// `None` when `values` holds fewer.
+    pub fn texels(&self) -> Option<&[u8]> {
+        let count = self
+            .size
+            .iter()
+            .try_fold(1_usize, |all, &side| all.checked_mul(side as usize))?;
+        self.values.data.data().get(..count)
+    }
+}
+
 /// Marks 3D content (triangle meshes and line lists) that the renderer
 /// projects through the camera instead of drawing as a 2D path.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Default)]

@@ -4361,6 +4361,78 @@ impl SceneModel {
         Ok(self.spawn(SpawnKind::Primitive3D(mesh)))
     }
 
+    /// The surface where `field` equals `level`, a lit mesh in `material`
+    /// whose origin is the field's.
+    pub fn isosurface(
+        &mut self,
+        field: &gaanim_objects::isosurface::SampledField,
+        level: f32,
+        material: gaanim_scene::Material3D,
+    ) -> Result<DrawableHandle, gaanim_objects::isosurface::IsosurfaceError> {
+        let surface = gaanim_objects::isosurface::isosurface(field, level)?;
+        Ok(self.spawn(SpawnKind::Primitive3D(surface.mesh(material))))
+    }
+
+    /// `field` drawn as a cloud that glows and absorbs light (see
+    /// [`gaanim_scene::VolumeData`]): each value, placed in `value_range`
+    /// (by default the field's finite values' span), takes the sRGB color
+    /// and opacity `transfer` holds for it, and a value of full opacity
+    /// absorbs `density` of the light behind it per scene unit. A value that
+    /// is not finite is empty. The drawable's origin is the field's.
+    pub fn volume(
+        &mut self,
+        field: &gaanim_objects::isosurface::SampledField,
+        transfer: &[[u8; 4]; 256],
+        value_range: Option<(f32, f32)>,
+        density: f32,
+    ) -> DrawableHandle {
+        let finite = || {
+            field
+                .values
+                .iter()
+                .copied()
+                .filter(|value| value.is_finite())
+        };
+        let (low, high) = value_range.unwrap_or_else(|| {
+            (
+                finite().reduce(f32::min).unwrap_or(0.0),
+                finite().reduce(f32::max).unwrap_or(1.0),
+            )
+        });
+        // A range from high to low reverses the values.
+        let span = if (high - low).abs() < f32::EPSILON {
+            f32::EPSILON
+        } else {
+            high - low
+        };
+        let texels: Vec<u8> = field
+            .values
+            .iter()
+            .map(|value| {
+                if value.is_finite() {
+                    ((value - low) / span).clamp(0.0, 1.0).mul_add(255.0, 0.5) as u8
+                } else {
+                    0
+                }
+            })
+            .collect();
+        let transfer_bytes: Vec<u8> = transfer.iter().flatten().copied().collect();
+        self.spawn(SpawnKind::Volume(gaanim_scene::VolumeData {
+            values: gaanim_scene::VolumeData::pack(&texels),
+            size: field.size.map(|side| side as u32),
+            min: field.min.as_vec3().to_array(),
+            max: field.max.as_vec3().to_array(),
+            transfer: gaanim_core::peniko::ImageData {
+                data: gaanim_core::peniko::Blob::new(std::sync::Arc::new(transfer_bytes)),
+                format: gaanim_core::peniko::ImageFormat::Rgba8,
+                alpha_type: gaanim_core::peniko::ImageAlphaType::Alpha,
+                width: 256,
+                height: 1,
+            },
+            density: density.max(0.0),
+        }))
+    }
+
     /// One drawable that draws `prototype`'s mesh, with its material, at
     /// every one of `copies`: the mesh uploads once and every copy draws in
     /// one instanced draw. The prototype stays a template, hidden unless

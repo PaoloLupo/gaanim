@@ -53,7 +53,12 @@ This file guides repository work; model selection belongs to the calling client.
     before, built only when a frame first peels. The camera's
     `gaanim_scene::DepthOfField` also blurs the 3D image by depth
     (`three_d/focus.rs`), last, across then down, each pixel spread by the
-    blur of what colors it. A camera
+    blur of what colors it. Volumes (`gaanim_scene::VolumeData`,
+    `three_d/volume.rs`) draw their box's far faces after the opaque
+    content, each pixel marching its ray up to the opaque depth; their
+    values and transfer colors are images, which bundles store in their
+    images table. `gaanim_objects::isosurface` builds isosurfaces (surface
+    nets) as ordinary lit meshes. A camera
     view snapshot (`effects::CameraSnapshot`) shows what the view showed at
     one instant: `gaanim_api::runtime` builds the scene a second time, seeks
     it to each snapshot and freezes what the view drew into

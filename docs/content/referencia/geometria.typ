@@ -1475,6 +1475,40 @@ tetra = scene.geometry.mesh(
 ]
 
 #api-entry(
+  name: "Geometry.isosurface",
+  kind: "factory",
+  signature: "isosurface(field, level=0.0, *, x_range=(-1, 1), y_range=(-1, 1), z_range=(-1, 1), resolution=48, vectorized=False, material=None) -> Primitive3D",
+  desc: [La superficie iluminada donde un campo escalar vale `level`. `field(x, y, z)` se muestrea en una rejilla de `resolution` puntos por lado (un número, o uno por eje) sobre la caja de `x_range`, `y_range` y `z_range`; con `vectorized=True` se llama una vez con arrays de numpy de todos los puntos. `field` también puede ser un array 3D de valores indexado `[x][y][z]`, repartido sobre la misma caja, cuya forma fija la resolución. La superficie sale suave a cualquier resolución (_surface nets_: un vértice por celda que cruza y normales del gradiente del campo) y mira hacia fuera, hacia el lado del nivel donde quedan la mayoría de las paredes de la caja: `x*x + y*y + z*z` a nivel `1` y la mancha de una densidad miran las dos hacia fuera. Donde la caja la corta se ilumina por las dos caras. Su origen es el del campo. Es una `Primitive3D`: su material se anima y `animate.transform_to` la transforma en otra isosuperficie. Un valor NaN cuenta como bajo el nivel. Rangos no finitos o vacíos, menos de 2 o más de 128³ puntos, un array que no es 3D o un nivel que el campo no cruza en la caja lanzan `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+shell = scene.geometry.isosurface(
+    lambda x, y, z: x * x + y * y + z * z, 1.0,
+    x_range=(-1.5, 1.5), y_range=(-1.5, 1.5), z_range=(-1.5, 1.5),
+    material=Material3D.matte(BLUE),
+)
+```
+]
+
+#api-entry(
+  name: "Geometry.volume",
+  kind: "factory",
+  signature: "volume(field, *, x_range=(-1, 1), y_range=(-1, 1), z_range=(-1, 1), resolution=48, vectorized=False, color_map=None, value_range=None, opacity=(0, 1), density=4.0) -> Drawable",
+  desc: [Dibuja un campo escalar como una nube que brilla y absorbe la luz. El campo se muestrea como en `isosurface`. Cada valor, situado en `value_range` (por defecto del menor al mayor), brilla con el color que le da `color_map` (`"viridis"` por defecto) y es tan opaco como dice `opacity`: sus valores se reparten de forma pareja del extremo bajo del rango al alto, unidos por rectas, así que `(0, 1)` oculta los valores bajos y `(0, 0, 1)` todo menos la mitad alta. Un valor de opacidad total absorbe `density` de la luz que tiene detrás por unidad de escena. Cada píxel recorre el rayo dentro de la caja desde el ojo hasta lo opaco, así que un sólido dentro de la nube se ve a través de la parte que tiene delante. El volumen se dibuja después del contenido opaco y antes del translúcido. Fuera de su caja no dibuja nada; su origen es el del campo, y se mueve, gira, escala y desvanece como cualquier objeto. Un valor NaN está vacío. Los errores de `isosurface`, una `opacity` con menos de dos valores o alguno fuera de 0 a 1, una `density` negativa o no finita, o un `value_range` que no sean dos valores finitos distintos lanzan `ValueError`.],
+)[
+```python
+>>>import math
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+cloud = scene.geometry.volume(
+    lambda x, y, z: math.exp(-4 * (x * x + y * y + z * z)),
+    color_map="magma", opacity=(0.0, 0.2, 1.0), density=6.0,
+)
+```
+]
+
+#api-entry(
   name: "Geometry.revolve",
   kind: "factory",
   params: (

@@ -5658,6 +5658,115 @@ impl PyGeometry {
         Py::new(py, PyPrimitive3D::initializer(handle))
     }
 
+    /// The lit surface where a scalar field equals `level`.
+    #[pyo3(signature = (field, level=0.0, *, x_range=(-1.0, 1.0), y_range=(-1.0, 1.0), z_range=(-1.0, 1.0), resolution=crate::field::Resolution::Each(48), vectorized=false, material=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn isosurface<'py>(
+        &self,
+        py: Python<'py>,
+        field: Bound<'py, PyAny>,
+        level: f64,
+        x_range: (f64, f64),
+        y_range: (f64, f64),
+        z_range: (f64, f64),
+        resolution: crate::field::Resolution,
+        vectorized: bool,
+        material: Option<PyMaterial3D>,
+    ) -> PyResult<Py<PyPrimitive3D>> {
+        crate::custom::ensure_authoring_allowed()?;
+        let sampled = crate::field::sample(
+            py,
+            &field,
+            [x_range, y_range, z_range],
+            &resolution,
+            vectorized,
+        )?;
+        let handle = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .isosurface(
+                &sampled,
+                level as f32,
+                material.map(|value| value.0).unwrap_or_default(),
+            )
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        Py::new(py, PyPrimitive3D::initializer(handle))
+    }
+
+    /// A scalar field drawn as a cloud that glows and absorbs light.
+    #[pyo3(signature = (field, *, x_range=(-1.0, 1.0), y_range=(-1.0, 1.0), z_range=(-1.0, 1.0), resolution=crate::field::Resolution::Each(48), vectorized=false, color_map=None, value_range=None, opacity=vec![0.0, 1.0], density=4.0))]
+    #[allow(clippy::too_many_arguments)]
+    fn volume<'py>(
+        &self,
+        py: Python<'py>,
+        field: Bound<'py, PyAny>,
+        x_range: (f64, f64),
+        y_range: (f64, f64),
+        z_range: (f64, f64),
+        resolution: crate::field::Resolution,
+        vectorized: bool,
+        color_map: Option<crate::color::PyColorMapArg>,
+        value_range: Option<(f64, f64)>,
+        opacity: Vec<f64>,
+        density: f64,
+    ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        if opacity.len() < 2 || !opacity.iter().all(|value| (0.0..=1.0).contains(value)) {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "opacity needs at least two values, each between 0 and 1",
+            ));
+        }
+        if !density.is_finite() || density < 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "density must be finite and non-negative",
+            ));
+        }
+        if value_range
+            .is_some_and(|(low, high)| !low.is_finite() || !high.is_finite() || low == high)
+        {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "value_range must be two different finite values",
+            ));
+        }
+        let color_map = match color_map {
+            Some(color_map) => color_map.0,
+            None => gaanim_core::ColorMap::named("viridis")
+                .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?,
+        };
+        let colors = color_map
+            .colors(256)
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        // The opacity at each value: its stops spread evenly over the range,
+        // straight lines between them.
+        let stretch = (opacity.len() - 1) as f64;
+        let mut transfer = [[0_u8; 4]; 256];
+        for (index, (texel, color)) in transfer.iter_mut().zip(&colors).enumerate() {
+            let at = index as f64 / 255.0 * stretch;
+            let below = (at.floor() as usize).min(opacity.len() - 2);
+            let alpha =
+                opacity[below] + (opacity[below + 1] - opacity[below]) * (at - below as f64);
+            let rgba = color.to_rgba8();
+            let alpha = alpha * f64::from(rgba.a) / 255.0;
+            *texel = [rgba.r, rgba.g, rgba.b, (alpha * 255.0).round() as u8];
+        }
+        let sampled = crate::field::sample(
+            py,
+            &field,
+            [x_range, y_range, z_range],
+            &resolution,
+            vectorized,
+        )?;
+        Ok(PyDrawable(
+            self.inner.lock().expect("scene canvas poisoned").volume(
+                &sampled,
+                &transfer,
+                value_range.map(|(low, high)| (low as f32, high as f32)),
+                density as f32,
+            ),
+        ))
+    }
+
     /// A lit solid of revolution: a `(r, y)` profile swept around the y axis.
     #[pyo3(signature = (profile, *, segments=64, material=None))]
     fn revolve<'py>(

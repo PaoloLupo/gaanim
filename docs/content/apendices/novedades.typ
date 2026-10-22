@@ -18,8 +18,9 @@ Sin publicar. Una malla 3D se transforma en otra con `animate.transform_to`,
 como un solo objeto, las imágenes, las escenas Lottie, las sombras y los
 desenfoques también viven en el mundo 3D, los modelos glTF traen sus
 morph targets y sus mapas de normales, el contenido 3D translúcido puede
-mezclarse en el orden en que está en cada píxel, hay focos, y la
-profundidad de campo de la cámara desenfoca también el contenido 3D.
+mezclarse en el orden en que está en cada píxel, hay focos, la
+profundidad de campo de la cámara desenfoca también el contenido 3D, y los
+campos escalares se dibujan como isosuperficies y volúmenes.
 
 == Morph entre mallas 3D
 
@@ -135,13 +136,30 @@ profundidad de campo de la cámara desenfoca también el contenido 3D.
   #link("/referencia/scene/#profundidad-campo")[Escena].
 - Nuevos ejemplos, `3d/spot_lights_3d` y `3d/depth_of_field_3d`.
 
+== Isosuperficies y volúmenes
+
+- `scene.geometry.isosurface(campo, nivel, ...)` dibuja la superficie
+  iluminada donde un campo escalar vale `nivel`, suave a cualquier
+  resolución y con normales del gradiente del campo; se transforma en otra
+  isosuperficie con `transform_to`. Ver
+  #link("/referencia/geometria/#api-geometry-isosurface")[Geometría].
+- `scene.geometry.volume(campo, ...)` dibuja el campo entero como una nube
+  que brilla con los colores de un mapa de colores y absorbe la luz, hasta
+  lo opaco que haya dentro. Ver
+  #link("/referencia/geometria/#api-geometry-volume")[Geometría].
+- El campo puede ser una función de x, y, z (o una que reciba arrays de
+  numpy) o un array 3D de valores.
+- El paquete `.gaanim` guarda cada volumen una vez, en su tabla de imágenes.
+- Nuevo ejemplo, `3d/fields_3d`.
+
 == Al actualizar
 
 - Los paquetes `.gaanim` pasan al formato 12, que guarda los morphs 3D, las
   copias de mallas, las imágenes de los objetos en el mundo 3D, la sombra y
   el desenfoque de los objetos 3D, los morph targets y mapas de normales de
   los modelos glTF, cómo se mezcla el contenido 3D translúcido, los conos de
-  los focos y la profundidad de campo del contenido 3D. Gaanim sigue
+  los focos, la profundidad de campo del contenido 3D y los volúmenes.
+  Gaanim sigue
   abriendo los de formato 5 a 11; un Gaanim anterior no abre los nuevos, así
   que actualiza los reproductores que los publican.
 - Una escena que desenfoca sus capas de parallax con

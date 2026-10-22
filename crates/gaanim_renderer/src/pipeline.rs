@@ -4256,14 +4256,16 @@ type ThreeDData = (
         Option<&'static gaanim_scene::SkinPalette>,
         Option<&'static gaanim_scene::MeshInstances>,
         Option<&'static gaanim_scene::MorphWeights>,
+        Option<Ref<'static, gaanim_scene::VolumeData>>,
     ),
 );
-/// 3D primitives, and 2D drawables placed in the 3D world.
+/// 3D primitives, volumes, and 2D drawables placed in the 3D world.
 type ThreeDFilter = (
     With<Visible>,
     Or<(
         With<gaanim_scene::Mesh3DMarker>,
         With<gaanim_scene::PlaneFillData>,
+        With<gaanim_scene::VolumeData>,
     )>,
 );
 /// Query of the drawables with 3D content.
@@ -4328,6 +4330,7 @@ type ThreeDItem<'a> = (
         Option<&'a gaanim_scene::SkinPalette>,
         Option<&'a gaanim_scene::MeshInstances>,
         Option<&'a gaanim_scene::MorphWeights>,
+        Option<Ref<'a, gaanim_scene::VolumeData>>,
     ),
 );
 
@@ -4345,7 +4348,7 @@ fn three_d_source<'a>(
         stroke,
         source,
         fill,
-        (in_world, billboard, palette, instances, morph),
+        (in_world, billboard, palette, instances, morph, volume),
     ): ThreeDItem<'a>,
 ) -> ThreeDSource<'a> {
     // A line revealing part of its source draws the source over that part:
@@ -4360,7 +4363,12 @@ fn three_d_source<'a>(
     let revisions = [
         mesh.as_ref().map_or(0, |mesh| mesh.last_changed().get()),
         lines.as_ref().map_or(0, |lines| lines.last_changed().get()),
-        fill.as_ref().map_or(0, |fill| fill.last_changed().get()),
+        // A volume's field takes the slot of filled outlines, which a
+        // volume never has.
+        fill.as_ref()
+            .map(|fill| fill.last_changed().get())
+            .or(volume.as_ref().map(|volume| volume.last_changed().get()))
+            .unwrap_or(0),
     ];
     (
         entity,
@@ -4382,6 +4390,7 @@ fn three_d_source<'a>(
             blur: None,
             instances,
             morph: morph.map(|morph| &morph.0),
+            volume: volume.map(Ref::into_inner),
         },
         hud,
         exempt,
@@ -4440,6 +4449,7 @@ struct CapturedThreeDHeld {
     meshes: HashMap<Entity, (u32, Arc<gaanim_scene::TriangleMeshData>)>,
     lines: HashMap<Entity, (u32, Arc<gaanim_scene::LineListData>)>,
     fills: HashMap<Entity, (u32, Arc<gaanim_scene::PlaneFillData>)>,
+    volumes: HashMap<Entity, (u32, Arc<gaanim_scene::VolumeData>)>,
 }
 
 impl CapturedThreeDHeld {
@@ -4468,6 +4478,7 @@ impl CapturedThreeDHeld {
         self.meshes.retain(|entity, _| entities.contains(entity));
         self.lines.retain(|entity, _| entities.contains(entity));
         self.fills.retain(|entity, _| entities.contains(entity));
+        self.volumes.retain(|entity, _| entities.contains(entity));
     }
 }
 
@@ -4510,6 +4521,8 @@ pub struct CapturedThreeDSource {
     pub blur: Option<crate::effects::GaussianBlur>,
     /// Copies of the mesh drawn instead of it, one at each point.
     pub instances: Option<gaanim_scene::MeshInstances>,
+    /// A scalar field drawn as a cloud.
+    pub volume: Option<Arc<gaanim_scene::VolumeData>>,
     pub composition: ThreeDComposition,
 }
 
@@ -4586,6 +4599,7 @@ fn captured_gpu_three_d(
                     blur: source.blur,
                     instances: source.instances.as_ref(),
                     morph: source.morph.as_ref(),
+                    volume: source.volume.as_deref(),
                 },
                 source.composition.clone(),
             )
@@ -4600,7 +4614,17 @@ fn captured_gpu_three_d(
                 .lines
                 .clone()
                 .map(|lines| lines as crate::three_d::Keep);
-            let fill = source.fill.clone().map(|fill| fill as crate::three_d::Keep);
+            // A volume takes the slot of filled outlines.
+            let fill = source
+                .fill
+                .clone()
+                .map(|fill| fill as crate::three_d::Keep)
+                .or_else(|| {
+                    source
+                        .volume
+                        .clone()
+                        .map(|volume| volume as crate::three_d::Keep)
+                });
             let key = |held: &Option<crate::three_d::Keep>| {
                 held.as_ref()
                     .map_or(0, |held| Arc::as_ptr(held) as *const u8 as usize as u64)
@@ -4933,6 +4957,9 @@ fn three_d_elements<'a>(
                     blur: content.blur,
                     instances: content.instances.cloned(),
                     morph: content.morph.cloned(),
+                    volume: content.volume.map(|volume| {
+                        CapturedThreeDHeld::held(&mut held.volumes, *entity, revision[2], volume)
+                    }),
                     composition: composition.clone(),
                 },
             )
@@ -5011,7 +5038,11 @@ fn take_gpu_three_d(
         if lines {
             content.lines = None;
         }
-        if gpu.push_fill(index, fill_key, fill_keep, content) {
+        if content.volume.is_some() {
+            if gpu.push_volume(index, fill_key, fill_keep, content) {
+                content.volume = None;
+            }
+        } else if gpu.push_fill(index, fill_key, fill_keep, content) {
             content.fill = None;
         }
     }

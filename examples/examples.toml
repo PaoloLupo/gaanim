@@ -584,6 +584,11 @@ title = "Depth of field in 3D"
 description = "A row of solids going away from the camera, blurred by their distance from the focus as it racks from the nearest to the farthest, as the aperture opens and as the blur is capped."
 
 [[example]]
+path = "3d/fields_3d.py"
+title = "Isosurfaces and volumes"
+description = "The surface of three balls of charge, a gyroid the box cuts open, one level of a field morphing into another, and a field drawn whole as a glowing cloud, alone and with a solid ring passing through it."
+
+[[example]]
 path = "3d/media_in_3d.py"
 title = "Images and Lottie in 3D"
 description = "An image and a Lottie scene placed in the 3D world with in_3d(), and an image kept facing the camera with billboard(), each hidden pixel by pixel by a ball passing in front."

@@ -1510,8 +1510,17 @@ fn write_three_d(
     // Last, the depth of field that blurs the content (format 12): its
     // focus, aperture and largest blur, when it blurs.
     let depth_of_field = three_d.depth_of_field;
+    // Then the volumes (format 12): by source, its values and the colors of
+    // its values in the images table, its grid, its box and its density.
+    let volumes: Vec<(usize, &gaanim_scene::VolumeData)> = three_d
+        .sources
+        .iter()
+        .enumerate()
+        .filter_map(|(index, source)| source.volume.as_deref().map(|volume| (index, volume)))
+        .collect();
     // Each section is written when it or a later one holds something.
-    let after_spots = depth_of_field.aperture > 0.0;
+    let after_depth_of_field = !volumes.is_empty();
+    let after_spots = depth_of_field.aperture > 0.0 || after_depth_of_field;
     let after_transparency = !spots.is_empty() || after_spots;
     let after_morphs = peeled > 0 || after_transparency;
     let after_blurs = !blurs.is_empty() || !morphs.is_empty() || after_morphs;
@@ -1741,6 +1750,21 @@ fn write_three_d(
         w.f64(depth_of_field.aperture);
         w.f64(depth_of_field.max_blur);
     }
+    if after_depth_of_field {
+        w.len(volumes.len());
+        for (index, volume) in volumes {
+            w.len(index);
+            w.var(u64::from(tables.image(&volume.values)));
+            for side in volume.size {
+                w.var(u64::from(side));
+            }
+            for value in volume.min.into_iter().chain(volume.max) {
+                w.f32(value);
+            }
+            w.var(u64::from(tables.image(&volume.transfer)));
+            w.f32(volume.density);
+        }
+    }
 }
 
 /// The 3D content of camera views a frame's 3D block holds, by the key of
@@ -1808,6 +1832,7 @@ fn read_three_d(
             shadow: None,
             blur: None,
             instances: None,
+            volume: None,
             composition: ThreeDComposition {
                 in_views,
                 post_exempt,
@@ -2086,6 +2111,27 @@ fn read_three_d(
             aperture: r.f64()?,
             max_blur: r.f64()?,
         };
+    }
+    if !r.is_empty() {
+        for _ in 0..r.len()? {
+            let index = r.len()?;
+            let values = tables.image(r.u32()?)?;
+            let size = [r.u32()?, r.u32()?, r.u32()?];
+            let min = [r.f32()?, r.f32()?, r.f32()?];
+            let max = [r.f32()?, r.f32()?, r.f32()?];
+            let volume = gaanim_scene::VolumeData {
+                values,
+                size,
+                min,
+                max,
+                transfer: tables.image(r.u32()?)?,
+                density: r.f32()?,
+            };
+            sources
+                .get_mut(index)
+                .ok_or_else(|| corrupt("a volume of no 3D source"))?
+                .volume = Some(Arc::new(volume));
+        }
     }
     for (index, glyphs) in fills {
         sources[index].fill = Some(Arc::new(gaanim_scene::PlaneFillData { glyphs }));
