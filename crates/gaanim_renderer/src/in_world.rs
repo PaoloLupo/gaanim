@@ -8,7 +8,8 @@
 //! the progress of a write, and a stroke its alignment and profile; an
 //! image fills its outline as the 2D renderer clips it there, and a Lottie
 //! scene becomes the outlines it fills and strokes (see [`LottieOutlines`]).
-//! Shadows, glows, blurs and chalk are left out.
+//! A part's glow, drop shadow or blur becomes the drawable's
+//! ([`PartEffects`]), which the 3D pass draws; chalk is left out.
 //!
 //! Billboards are drawn this way too, facing the camera (see
 //! [`billboards_in_world_system`]), unless they hold what is left out.
@@ -92,15 +93,7 @@ impl Paint {
     /// The color, gradient and image of a glyph of an outline laid at
     /// `corner`, at `alpha`. An image's alpha goes into the color, which
     /// multiplies its texels'.
-    fn glyph(
-        &self,
-        alpha: f32,
-        corner: kurbo::Vec2,
-    ) -> (
-        peniko::Color,
-        Option<(Arc<peniko::Gradient>, Affine)>,
-        Option<PlaneImage>,
-    ) {
+    fn glyph(&self, alpha: f32, corner: kurbo::Vec2) -> GlyphPaint {
         match self.clone().multiply_alpha(alpha) {
             Self::Solid(color) => (color, None, None),
             Self::Gradient(gradient, to_gradient) => (
@@ -123,6 +116,13 @@ impl Paint {
         }
     }
 }
+
+/// A glyph's color, gradient and the map to it, and image.
+type GlyphPaint = (
+    peniko::Color,
+    Option<(Arc<peniko::Gradient>, Affine)>,
+    Option<PlaneImage>,
+);
 
 /// The outlines parts drew, by part, while their recipe stays the same, and
 /// outlines alike, shared: the same letter again packs and records once.
@@ -158,16 +158,25 @@ type PartData = (
         Has<StrokeScalesWithObject>,
         Option<&'static RasterImage>,
         Option<&'static LottiePlayer>,
+        Option<&'static Glow>,
+        Option<&'static DropShadow>,
+        Option<&'static GaussianBlur>,
     ),
 );
 
-/// What a part may hold that the 3D pass leaves out: a 2D effect.
-type LeftOut = Or<(
-    With<DropShadow>,
-    With<Glow>,
-    With<GaussianBlur>,
-    With<ChalkBrush>,
-)>;
+/// The glow, drop shadow and blur the parts of a drawable in the 3D world
+/// hold, as a text's letters hold the text's: the 3D pass draws them for the
+/// drawable when it has none of its own (see
+/// `crate::pipeline::three_d_elements`).
+#[derive(Component, Clone, Debug, Default, PartialEq)]
+pub struct PartEffects {
+    pub glow: Option<Glow>,
+    pub shadow: Option<DropShadow>,
+    pub blur: Option<GaussianBlur>,
+}
+
+/// What a part may hold that the 3D pass leaves out: chalk.
+type LeftOut = With<ChalkBrush>;
 
 /// A billboard that holds what the 3D pass leaves out, which stays 2D
 /// content drawn over the 3D image.
@@ -232,6 +241,7 @@ pub(crate) fn sync_in_world_system(
             &GlobalSpatialTransform,
             &GlobalOpacity,
             Option<&PlaneFillData>,
+            Option<&PartEffects>,
         ),
         With<InWorld3D>,
     >,
@@ -242,7 +252,8 @@ pub(crate) fn sync_in_world_system(
 ) {
     let held = &mut *held;
     let mut seen = HashSet::new();
-    for (root, root_transform, root_opacity, current) in &roots {
+    for (root, root_transform, root_opacity, current, current_effects) in &roots {
+        let mut effects = PartEffects::default();
         let to_root = root_transform.affine_2d;
         if to_root.determinant().abs() <= 1e-12 {
             continue;
@@ -270,11 +281,24 @@ pub(crate) fn sync_in_world_system(
                 tip_glow,
                 stroke_align,
                 stroke_profile,
-                (stroke_scales, raster, lottie),
+                (stroke_scales, raster, lottie, glow, shadow, blur),
             )) = parts.get(entity)
             else {
                 continue;
             };
+            // The first glow and shadow among the parts, the root's aside,
+            // which the 3D pass finds on the root itself.
+            if entity != root {
+                if effects.glow.is_none() {
+                    effects.glow = glow.cloned();
+                }
+                if effects.shadow.is_none() {
+                    effects.shadow = shadow.cloned();
+                }
+                if effects.blur.is_none() {
+                    effects.blur = blur.copied();
+                }
+            }
             if group || *layer != RenderLayer::Vello2D || path.is_none() {
                 continue;
             }
@@ -364,6 +388,15 @@ pub(crate) fn sync_in_world_system(
         }
         if current.is_none_or(|current| !same_glyphs(&current.glyphs, &glyphs)) {
             commands.entity(root).insert(PlaneFillData { glyphs });
+        }
+        if current_effects != Some(&effects) {
+            if effects == PartEffects::default() {
+                if current_effects.is_some() {
+                    commands.entity(root).remove::<PartEffects>();
+                }
+            } else {
+                commands.entity(root).insert(effects);
+            }
         }
     }
     held.parts.retain(|entity, _| seen.contains(entity));
@@ -1001,6 +1034,8 @@ mod tests {
         world.spawn((Visible, RasterImage::none(), ChildOf(text)));
         let glowing = world.spawn(Billboard).id();
         world.spawn((Glow::default(), ChildOf(glowing)));
+        let chalked = world.spawn(Billboard).id();
+        world.spawn((ChalkBrush::default(), ChildOf(chalked)));
         // An image is drawn by the 3D pass too.
         let pictured = world.spawn(Billboard).id();
         world.spawn((
@@ -1014,9 +1049,11 @@ mod tests {
         assert!(world.get::<InWorld3D>(text).is_some());
         assert!(world.get::<BillboardPlane>(text).is_some());
         assert!(world.get::<InWorld3D>(pictured).is_some());
-        // A glowing part keeps it 2D content over the 3D image.
-        assert!(world.get::<InWorld3D>(glowing).is_none());
-        assert!(world.get::<BillboardOver3D>(glowing).is_some());
+        // A glowing part glows in the 3D pass; one drawn in chalk keeps it
+        // 2D content over the 3D image.
+        assert!(world.get::<InWorld3D>(glowing).is_some());
+        assert!(world.get::<InWorld3D>(chalked).is_none());
+        assert!(world.get::<BillboardOver3D>(chalked).is_some());
         assert!(world.get::<InWorld3D>(hud).is_none());
     }
 

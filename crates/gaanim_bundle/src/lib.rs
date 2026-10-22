@@ -2350,6 +2350,8 @@ mod tests {
                 fill: Some(Arc::new(fill.clone())),
                 joints: None,
                 glow: None,
+                shadow: None,
+                blur: None,
                 instances: None,
                 composition: gaanim_renderer::pipeline::ThreeDComposition {
                     in_views: true,
@@ -2391,10 +2393,10 @@ mod tests {
         ));
     }
 
-    /// The glow of a 3D drawable comes back with its frame, also in a frame
-    /// whose 3D content has no palette before it.
+    /// The glow, drop shadow and blur of a 3D drawable come back with its
+    /// frame, also in a frame whose 3D content has no palette before them.
     #[test]
-    fn glows_of_3d_drawables_round_trip() {
+    fn glows_shadows_and_blurs_of_3d_drawables_round_trip() {
         let mesh = Arc::new(gaanim_scene::TriangleMeshData {
             vertices: vec![[0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
             indices: vec![0, 1, 2],
@@ -2411,8 +2413,19 @@ mod tests {
             intensity: 1.5,
             color: gaanim_core::peniko::Color::new([1.0, 0.5, 0.0, 0.8]),
         };
-        let source = |glow: Option<gaanim_renderer::effects::Glow>| {
-            gaanim_renderer::pipeline::CapturedThreeDSource {
+        let shadow = gaanim_renderer::effects::DropShadow {
+            offset: gaanim_core::glam::DVec2::new(0.1, -0.2),
+            blur_radius: 0.05,
+            color: gaanim_core::peniko::Color::new([0.0, 0.0, 0.0, 0.5]),
+        };
+        let blur = gaanim_renderer::effects::GaussianBlur { sigma: 0.125 };
+        type Effects = (
+            Option<gaanim_renderer::effects::Glow>,
+            Option<gaanim_renderer::effects::DropShadow>,
+            Option<gaanim_renderer::effects::GaussianBlur>,
+        );
+        let source =
+            |(glow, shadow, blur): Effects| gaanim_renderer::pipeline::CapturedThreeDSource {
                 entity: bevy::prelude::Entity::from_raw_u32(1).unwrap(),
                 transform: gaanim_core::glam::DMat4::IDENTITY,
                 opacity: 1.0,
@@ -2424,6 +2437,8 @@ mod tests {
                 fill: None,
                 joints: None,
                 glow,
+                shadow,
+                blur,
                 instances: None,
                 composition: gaanim_renderer::pipeline::ThreeDComposition {
                     in_views: true,
@@ -2432,28 +2447,37 @@ mod tests {
                     transition_side: Default::default(),
                     lineage: Vec::new(),
                 },
-            }
-        };
-        let glows = [Some(glow), None];
+            };
+        // A glow alone, a shadow and a blur alone (written after the
+        // sections before them), all three, and none.
+        let effects: [Effects; 4] = [
+            (Some(glow.clone()), None, None),
+            (None, Some(shadow.clone()), Some(blur)),
+            (Some(glow), Some(shadow), Some(blur)),
+            (None, None, None),
+        ];
         let mut writer = BundleWriter::new(std::io::Cursor::new(Vec::new()), "test");
-        for (index, glow) in glows.iter().enumerate() {
+        for (index, each) in effects.iter().enumerate() {
             let mut captured = frame(index as f64 / 60.0);
             captured.capture.three_d = Some(gaanim_renderer::pipeline::CapturedThreeD {
-                sources: vec![source(glow.clone())],
+                sources: vec![source(each.clone())],
                 ..Default::default()
             });
             writer.push_frame(&captured, [0; 32]).unwrap();
         }
         let scene = SceneData {
             fps: 60,
-            duration: 2.0 / 60.0,
+            duration: 4.0 / 60.0,
             ..Default::default()
         };
         let mut bundle =
             Bundle::from_bytes(writer.finish(&scene).unwrap().into_inner().into()).unwrap();
-        for (index, glow) in glows.iter().enumerate() {
+        for (index, (glow, shadow, blur)) in effects.iter().enumerate() {
             let three_d = bundle.frame(index).unwrap().capture.three_d.unwrap();
-            assert_eq!(&three_d.sources[0].glow, glow, "frame {index}");
+            let back = &three_d.sources[0];
+            assert_eq!(&back.glow, glow, "frame {index}");
+            assert_eq!(&back.shadow, shadow, "frame {index}");
+            assert_eq!(&back.blur, blur, "frame {index}");
         }
     }
 
@@ -2485,6 +2509,8 @@ mod tests {
                 fill: None,
                 joints: None,
                 glow: None,
+                shadow: None,
+                blur: None,
                 instances,
                 composition: gaanim_renderer::pipeline::ThreeDComposition {
                     in_views: true,
@@ -2594,6 +2620,8 @@ mod tests {
             fill: None,
             joints: Some(Arc::from(vec![palette, [1.0; 16]])),
             glow: None,
+            shadow: None,
+            blur: None,
             instances: None,
             composition: gaanim_renderer::pipeline::ThreeDComposition {
                 in_views: true,

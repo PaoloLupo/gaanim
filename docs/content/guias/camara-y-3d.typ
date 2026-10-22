@@ -775,11 +775,15 @@ puntos se reproducen a la frecuencia de la pantalla.
   En una línea con trazo, `animate.stroke_width(...)` anima el ancho.
 - Las superficies y las líneas que se cruzan se cortan donde corresponde, y
   la geometría que atraviesa el plano cercano de la cámara se recorta.
-- `glow(...)` y `animate.glow(...)` dan un halo a mallas, superficies, líneas
-  y modelos glTF. El pase 3D dibuja la silueta visible del objeto con el
-  color del halo, la difumina como el glow 2D y la pone a su alrededor,
-  debajo del objeto; las partes que otro objeto tapa no brillan. Solo los
-  fotogramas con un halo construyen sus pipelines.
+- `glow(...)` y `animate.glow(...)` dan un halo a mallas, superficies, líneas,
+  modelos glTF y objetos con `.in_3d()`. El pase 3D dibuja la silueta visible
+  del objeto con el color del halo, la difumina como el glow 2D y la pone a
+  su alrededor, debajo del objeto; las partes que otro objeto tapa no
+  brillan. `shadow(...)` hace lo mismo con la silueta desplazada, como una
+  sombra paralela 2D. `blur(...)` dibuja el objeto aparte, desenfoca su
+  color y lo pone sobre lo que tiene detrás; lo que tiene delante tapa la
+  sombra y el desenfoque. Solo los fotogramas con alguno de estos efectos
+  construyen sus pipelines.
 - Un objeto translúcido (con opacidad, o con colores con transparencia) se
   ve como una capa: su superficie más cercana se mezcla una vez sobre lo que
   tiene detrás. Los objetos translúcidos se dibujan de atrás hacia delante.
@@ -802,9 +806,12 @@ puntos se reproducen a la frecuencia de la pantalla.
   mitad de su lado mayor, así que una superficie en la que se apoya no la
   corta. Un número o un título que se ve a través de la caja de sus ejes
   queda justo delante de las caras del fondo: su rejilla no lo cruza, pero
-  el gráfico de la caja y lo que está delante de ella lo tapan. Si contiene una imagen, una escena Lottie o un
-  efecto 2D, se dibuja encima del 3D y se desvanece entera mientras una
-  malla opaca queda entre su punto y la cámara.
+  el gráfico de la caja y lo que está delante de ella lo tapan. Las imágenes
+  y las escenas Lottie de estos objetos también las dibuja el pase 3D: una
+  imagen con sus píxeles y una escena Lottie con los contornos que rellena y
+  traza. Solo un objeto con tiza se dibuja encima del 3D y, si es una
+  etiqueta, se desvanece entera mientras una malla opaca queda entre su
+  punto y la cámara.
 
 El 3D aparece en la vista previa, las exportaciones, las capturas, los
 paquetes `.gaanim` (también en el reproductor web) y las vistas previas de

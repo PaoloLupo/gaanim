@@ -554,6 +554,16 @@ title = "Glow on 3D content"
 description = "A halo around what the camera sees of a sphere, a 3D line and a walking glTF model, grown and faded with animate.glow, and hidden where a solid in front covers it."
 
 [[example]]
+path = "3d/soft_effects_3d.py"
+title = "Shadows and blurs on 3D content"
+description = "Drop shadows cast by a sphere and by a text placed in 3D, a blurred cube that the timeline sharpens, and a blurred ring that a sharp solid in front of it hides."
+
+[[example]]
+path = "3d/media_in_3d.py"
+title = "Images and Lottie in 3D"
+description = "An image and a Lottie scene placed in the 3D world with in_3d(), and an image kept facing the camera with billboard(), each hidden pixel by pixel by a ball passing in front."
+
+[[example]]
 path = "3d/lines_3d.py"
 description = "Polylines through 3D points with solid colors and color maps, and paths traced behind moving objects that fade, cap or thin."
 

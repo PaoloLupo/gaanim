@@ -1459,12 +1459,28 @@ fn write_three_d(
             (!glyphs.is_empty()).then_some((index, glyphs))
         })
         .collect();
+    // Last, the drop shadows of 3D drawables (format 10): by source, its
+    // color, offset and blur.
+    let shadows: Vec<(usize, &gaanim_renderer::effects::DropShadow)> = three_d
+        .sources
+        .iter()
+        .enumerate()
+        .filter_map(|(index, source)| source.shadow.as_ref().map(|shadow| (index, shadow)))
+        .collect();
+    // And their blurs: by source, its sigma.
+    let blurs: Vec<(usize, f64)> = three_d
+        .sources
+        .iter()
+        .enumerate()
+        .filter_map(|(index, source)| source.blur.map(|blur| (index, blur.sigma)))
+        .collect();
     // Each section is written when it or a later one holds something.
+    let after_images = !images.is_empty() || !shadows.is_empty() || !blurs.is_empty();
     let later = !palettes.is_empty()
         || !glows.is_empty()
         || !views.is_empty()
         || !copies.is_empty()
-        || !images.is_empty();
+        || after_images;
     if !widths.is_empty()
         || !ranges.is_empty()
         || !outlines.is_empty()
@@ -1591,7 +1607,7 @@ fn write_three_d(
             }
         }
     }
-    if !glows.is_empty() || !views.is_empty() || !copies.is_empty() || !images.is_empty() {
+    if !glows.is_empty() || !views.is_empty() || !copies.is_empty() || after_images {
         w.len(glows.len());
         for (index, glow) in glows {
             w.len(index);
@@ -1604,7 +1620,7 @@ fn write_three_d(
     // what snapshots froze and what views with a 3D camera of their own
     // draw this frame. By screen, the camera it was drawn through, the
     // region and detail of its image, and its content, encoded as a frame's.
-    if !views.is_empty() || !copies.is_empty() || !images.is_empty() {
+    if !views.is_empty() || !copies.is_empty() || after_images {
         w.len(views.len());
         for &(screen, frozen) in views {
             w.var(u64::from(screen));
@@ -1616,7 +1632,7 @@ fn write_three_d(
             w.bytes(&content.into_bytes());
         }
     }
-    if !copies.is_empty() || !images.is_empty() {
+    if !copies.is_empty() || after_images {
         w.len(copies.len());
         for (index, instances) in copies {
             let key = keys.key(three_d.sources[index].entity);
@@ -1625,7 +1641,7 @@ fn write_three_d(
             w.f32(instances.reveal);
         }
     }
-    if !images.is_empty() {
+    if after_images {
         w.len(images.len());
         for (index, glyphs) in images {
             w.len(index);
@@ -1637,6 +1653,23 @@ fn write_three_d(
                     w.f32(value as f32);
                 }
             }
+        }
+    }
+    if !shadows.is_empty() || !blurs.is_empty() {
+        w.len(shadows.len());
+        for (index, shadow) in shadows {
+            w.len(index);
+            codec::write_color(w, shadow.color);
+            w.f64(shadow.offset.x);
+            w.f64(shadow.offset.y);
+            w.f64(shadow.blur_radius);
+        }
+    }
+    if !blurs.is_empty() {
+        w.len(blurs.len());
+        for (index, sigma) in blurs {
+            w.len(index);
+            w.f64(sigma);
         }
     }
 }
@@ -1701,6 +1734,8 @@ fn read_three_d(
             fill: None,
             joints: None,
             glow: None,
+            shadow: None,
+            blur: None,
             instances: None,
             composition: ThreeDComposition {
                 in_views,
@@ -1911,6 +1946,32 @@ fn read_three_d(
                     to_pixels: kurbo::Affine::new(to_pixels),
                 });
             }
+        }
+    }
+    if !r.is_empty() {
+        for _ in 0..r.len()? {
+            let index = r.len()?;
+            let color = codec::read_color(r)?;
+            let offset = gaanim_core::glam::DVec2::new(r.f64()?, r.f64()?);
+            let blur_radius = r.f64()?;
+            sources
+                .get_mut(index)
+                .ok_or_else(|| corrupt("a shadow of no 3D source"))?
+                .shadow = Some(gaanim_renderer::effects::DropShadow {
+                offset,
+                blur_radius,
+                color,
+            });
+        }
+    }
+    if !r.is_empty() {
+        for _ in 0..r.len()? {
+            let index = r.len()?;
+            let sigma = r.f64()?;
+            sources
+                .get_mut(index)
+                .ok_or_else(|| corrupt("a blur of no 3D source"))?
+                .blur = Some(gaanim_renderer::effects::GaussianBlur { sigma });
         }
     }
     for (index, glyphs) in fills {

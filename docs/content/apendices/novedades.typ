@@ -14,8 +14,9 @@ instalar una versión nueva, sigue
 = 0.17.0
 
 Sin publicar. Una malla 3D se transforma en otra con `animate.transform_to`,
-y `points_3d` e `instances` dibujan miles de puntos o copias de una malla
-como un solo objeto.
+`points_3d` e `instances` dibujan miles de puntos o copias de una malla
+como un solo objeto, y las imágenes, las escenas Lottie, las sombras y los
+desenfoques también viven en el mundo 3D.
 
 == Morph entre mallas 3D
 
@@ -59,12 +60,38 @@ como un solo objeto.
   fotograma solo cuánto han crecido.
 - Nuevo ejemplo, `3d/points_3d`.
 
+== Imágenes, Lottie y efectos en el mundo 3D
+
+- Una imagen o una escena Lottie con `.in_3d()` o `.billboard()` la dibuja
+  el pase 3D, en su plano: las mallas que tiene delante la tapan píxel a
+  píxel, la luz la ilumina con `in_3d(material)` y proyecta sombra donde es
+  al menos medio opaca. Antes se omitían en `in_3d()`, y una etiqueta con
+  ellas se dibujaba encima de todo el 3D. Ver el ejemplo `3d/media_in_3d`.
+- Una escena Lottie se convierte en los contornos que rellena y traza, en
+  cada fotograma: los modos de mezcla se dibujan como el normal y una capa
+  translúcida atenúa cada una de sus formas.
+- `shadow(...)` y `blur(...)` funcionan en mallas, superficies, líneas,
+  modelos glTF y objetos con `.in_3d()`, como `glow(...)`: la sombra parte
+  de la silueta visible, desplazada, y el desenfoque dibuja el objeto aparte
+  y pone su color desenfocado sobre lo que tiene detrás. Lo que está delante
+  tapa los dos. `animate.shadow` y `animate.blur` los animan. Ver
+  #link("/guias/camara-y-3d/#como-se-dibuja-el-3d")[Cámara y 3D] y el
+  ejemplo `3d/soft_effects_3d`.
+- El brillo, la sombra y el desenfoque de las partes de un objeto con
+  `.in_3d()`, como las letras de un texto, valen para todo el objeto.
+- `.billboard()` funciona en imágenes, vídeos y escenas Lottie: antes no los
+  giraba hacia la cámara.
+
 == Al actualizar
 
-- Los paquetes `.gaanim` pasan al formato 9, que guarda los morphs 3D y las
-  copias de mallas. Gaanim sigue abriendo los de formato 5 a 8; un Gaanim
-  anterior no abre los nuevos, así que actualiza los reproductores que los
-  publican.
+- Los paquetes `.gaanim` pasan al formato 10, que guarda los morphs 3D, las
+  copias de mallas, las imágenes de los objetos en el mundo 3D y la sombra y
+  el desenfoque de los objetos 3D. Gaanim sigue abriendo los de formato 5 a
+  9; un Gaanim anterior no abre los nuevos, así que actualiza los
+  reproductores que los publican.
+- Una imagen, una escena Lottie, una sombra, un brillo o un desenfoque
+  dentro de `.in_3d()` ya no se omiten: revisa las escenas que contaban con
+  ello.
 - `transform_to` y `replacement_transform_to` entre una malla 3D y un objeto
   que no lo es, o entre una malla con material y otra sin él, lanzan
   `ValueError`. Antes la malla no cambiaba.

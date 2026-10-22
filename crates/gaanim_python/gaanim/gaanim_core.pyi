@@ -4180,8 +4180,10 @@ class Drawable:
 
         After the first ``play`` or ``wait`` the change is a cut at the
         cursor, like ``fill``. ``blur(0)`` also gives a sharp start for
-        ``animate.blur``. A negative or non-finite ``sigma`` raises
-        ``ValueError``.
+        ``animate.blur``. 3D content (or a drawable placed with ``in_3d``,
+        or a group holding either) is drawn apart and its blurred color laid
+        over what lies behind it; what lies in front of it hides the blur. A
+        negative or non-finite ``sigma`` raises ``ValueError``.
 
         Example:
             result = drawable.blur()
@@ -4206,6 +4208,9 @@ class Drawable:
         stroked cast their own. With a ``shader_effect`` the shadow is cast
         from what the effect draws, whichever is set first (on a text or
         group, when its members share one shadow, as its style gives them).
+        On 3D content (or a drawable placed with ``in_3d``, or a group holding
+        either), the shadow is cast from what the camera sees of it, moved by
+        its offset, and what lies in front of it hides the shadow.
 
         Example:
             result = drawable.shadow(BLUE)
@@ -4869,7 +4874,8 @@ class Drawable:
         3D pass draws it, as large as its text on screen, so meshes and 3D
         lines in front of it hide it pixel by pixel; it is drawn half its
         larger side nearer the camera, so a surface it rests on does not cut
-        it. One holding an image, a Lottie scene or a 2D effect is drawn
+        it. Its images, Lottie scenes, shadows, glows and blurs are drawn by
+        the 3D pass too, as for ``in_3d``; only one holding chalk is drawn
         over the 3D content instead, and fades out, with its children, while
         an opaque 3D mesh lies between its anchor and the camera. The method
         is chainable and returns the same ``Drawable``.
@@ -4891,8 +4897,12 @@ class Drawable:
         clips it while its x and y axes stay in the scene's plane. Without a ``material`` it keeps
         its colors unlit; with one it is lit, and receives shadows, as a
         surface. Either way it casts shadows on lit 3D content, as an opaque
-        mesh does, where it is at least half opaque. Its 2D drop shadows,
-        glows and blurs, chalk, images and Lottie scenes are left out. ``billboard`` instead keeps a
+        mesh does, where it is at least half opaque. An image is drawn in
+        its plane with its pixels, and a Lottie scene with the outlines it
+        fills and strokes, on the timeline (its blend modes draw as the normal
+        one, and a translucent layer fades each of its shapes). Its shadow,
+        glow and blur, or its parts' (a text's letters), are drawn by the 3D
+        pass as for a mesh; chalk is left out. ``billboard`` instead keeps a
         drawable facing the camera, and ``hud`` pins it to the frame. The
         method is chainable and returns the same ``Drawable``.
 

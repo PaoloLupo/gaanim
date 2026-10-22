@@ -182,9 +182,10 @@ fn draw_soft_image(
     })
 }
 
-/// Opacity of a shadow where its silhouette is fully covered, relative to
-/// its color's alpha, as the vector shadow's copies compose to.
-const SHADOW_CORE: f64 = 0.97;
+/// The gain of a shadow's alpha, `-ln(1 - 0.97)`: where its silhouette is
+/// fully covered, a shadow is 97 % as opaque as its color, as the vector
+/// shadow's copies compose to.
+pub(crate) const SHADOW_GAIN: f64 = 3.506_557_897_319_982;
 
 /// The blurred drop shadow of a fragment as an image: `silhouette` is what
 /// the caster paints, already shifted by the shadow's offset, within
@@ -214,7 +215,7 @@ pub(crate) fn draw_keyed_shadow_image(
         bounds,
         shadow.blur_radius,
         Paint::Tint(shadow.color),
-        -(1.0 - SHADOW_CORE).ln(),
+        SHADOW_GAIN,
         key,
     )
 }
@@ -340,7 +341,7 @@ pub(crate) fn draw_blur_image(
         bounds,
         sigma,
         Paint::Own(alpha.clamp(0.0, 1.0)),
-        -(1.0 - SHADOW_CORE).ln(),
+        SHADOW_GAIN,
         None,
     )
 }
@@ -429,6 +430,11 @@ fn erf(x: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_shadow_gain_leaves_a_covered_shadow_at_its_core_opacity() {
+        assert!((SHADOW_GAIN + (1.0_f64 - 0.97).ln()).abs() < 1e-12);
+    }
 
     #[test]
     fn soft_images_hold_three_texels_per_sigma_within_their_reach() {

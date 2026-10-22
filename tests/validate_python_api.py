@@ -1602,6 +1602,13 @@ def validate_primitives_3d_contract(module: object) -> list[str]:
             pass
         else:
             failures.append("a 3D mesh transformed into a drawable that is not one lit as it is")
+    # 2D effects draw on 3D content too, and keep it a Primitive3D.
+    soft = scene.geometry.sphere(0.5).shadow(module.BLACK, 0.1, -0.1, 0.05).blur(0.1).glow(module.RED)
+    if not isinstance(soft, module.Primitive3D):
+        failures.append("a 3D primitive with a shadow, blur and glow is no longer a Primitive3D")
+    for anim in (soft.animate.blur(0.0), soft.animate.shadow(None)):
+        if not isinstance(anim, module.Anim):
+            failures.append("a 3D primitive cannot animate its shadow or blur")
     return failures
 
 
