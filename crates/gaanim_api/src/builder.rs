@@ -1200,6 +1200,9 @@ pub struct SceneBuilder<'w, 's, 'a> {
     /// Authored ids of the drawables some transform morphs, whose meshes
     /// compiling them keeps in `morph_meshes`; set before each compile.
     pub(crate) morph_mesh_ids: HashSet<ObjectId>,
+    /// Drawables that draw copies of their mesh at many points, and the
+    /// copies they draw when the next animation starts.
+    pub(crate) instanced: HashMap<ObjectId, std::sync::Arc<gaanim_scene::MeshCopies>>,
     /// Objects a clip mask cuts: their content may leave their box.
     pub(crate) clipped: HashSet<ObjectId>,
     /// Extra glyph tracking of Text roots set by `tracking(...)`, in scene units.
@@ -1345,6 +1348,7 @@ pub(crate) struct SceneBuilderState {
     connectors: HashSet<ObjectId>,
     lines_3d: HashSet<ObjectId>,
     morph_meshes: HashMap<ObjectId, std::sync::Arc<TriangleMeshData>>,
+    instanced: HashMap<ObjectId, std::sync::Arc<gaanim_scene::MeshCopies>>,
     clipped: HashSet<ObjectId>,
     text_tracking: HashMap<ObjectId, f64>,
     motion_blur_windows: Vec<(f64, f64, gaanim_renderer::effects::MotionBlur)>,
@@ -1403,6 +1407,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             connectors: self.connectors.clone(),
             lines_3d: self.lines_3d.clone(),
             morph_meshes: self.morph_meshes.clone(),
+            instanced: self.instanced.clone(),
             clipped: self.clipped.clone(),
             text_tracking: self.text_tracking.clone(),
             text_paths: self.text_paths.clone(),
@@ -1462,6 +1467,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             connectors,
             lines_3d,
             morph_meshes,
+            instanced,
             clipped,
             text_tracking,
             text_paths,
@@ -1525,6 +1531,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             lines_3d,
             morph_meshes,
             morph_mesh_ids: HashSet::new(),
+            instanced,
             clipped,
             text_tracking,
             text_paths,
@@ -2032,6 +2039,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             lines_3d: HashSet::new(),
             morph_meshes: HashMap::new(),
             morph_mesh_ids: HashSet::new(),
+            instanced: HashMap::new(),
             clipped: HashSet::new(),
             text_tracking: HashMap::new(),
             text_paths: HashMap::new(),
@@ -4622,6 +4630,12 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             self.play_line_3d_growth(anim, parent_track, false);
             return;
         }
+        if matches!(anim.anim_type, AnimationType::Uncreate { .. })
+            && self.instanced.contains_key(&anim.target)
+        {
+            self.play_instance_reveal(anim, parent_track, false);
+            return;
+        }
         const DRAW_RATIO: f64 = 0.7;
         let start_time = self.current_time + anim.delay.max(0.0);
 
@@ -5227,6 +5241,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             self.play_line_3d_growth(anim, track, true);
             return;
         }
+        if self.instanced.contains_key(&anim.target) {
+            self.play_instance_reveal(anim, track, true);
+            return;
+        }
         self.play_internal(AnimationBuilder {
             target: anim.target,
             anim_type: AnimationType::FadeIn,
@@ -5241,6 +5259,27 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             rate_func: anim.rate_func,
             delay: anim.delay,
         });
+    }
+
+    /// Grow a drawable's copies in one after another (`grow`), or shrink
+    /// them away in the same order. Copies that grow in are hidden before
+    /// the clip starts.
+    fn play_instance_reveal(&mut self, anim: AnimationBuilder, track: TrackId, grow: bool) {
+        let (from, to) = if grow { (0.0, 1.0) } else { (1.0, 0.0) };
+        self.timeline.add_clip(
+            track,
+            self.current_time + anim.delay.max(0.0),
+            anim.duration,
+            ClipPayload::Animation(AnimationSpec {
+                target: anim.target,
+                lens: PropertyLensSpec::Dynamic(gaanim_animation::tween::DynamicLens(
+                    std::sync::Arc::new(crate::mesh_copies::InstanceRevealLens { from, to }),
+                )),
+                rate_func: anim.rate_func,
+                delay: 0.0,
+                label: self.current_label.clone(),
+            }),
+        );
     }
 
     /// Grow a 3D line from its start to its end (`grow`), or retract it to
@@ -6080,21 +6119,54 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             instant(target, target_state.opacity, 0.0),
         );
 
-        let lens = crate::mesh_morph::MeshMorphLens::new(from.clone(), to.clone());
-        self.timeline.add_clip(
-            track,
-            start,
-            anim.duration,
-            ClipPayload::Animation(AnimationSpec {
-                target: anim.target,
-                lens: PropertyLensSpec::Dynamic(gaanim_animation::tween::DynamicLens(
-                    std::sync::Arc::new(lens),
-                )),
-                rate_func: anim.rate_func.clone(),
-                delay: 0.0,
-                label: self.current_label.clone(),
-            }),
-        );
+        let dynamic = |lens: std::sync::Arc<dyn gaanim_animation::AnimatableLens>| {
+            PropertyLensSpec::Dynamic(gaanim_animation::tween::DynamicLens(lens))
+        };
+        // Copies of a mesh move to the target's copies, and their mesh
+        // morphs only when the target copies another one.
+        let copies = self
+            .instanced
+            .get(&anim.target)
+            .zip(self.instanced.get(&target))
+            .map(|(a, b)| (std::sync::Arc::clone(a), std::sync::Arc::clone(b)));
+        let same_mesh = from.vertices == to.vertices
+            && from.indices == to.indices
+            && from.normals == to.normals;
+        if let Some((from_copies, to_copies)) = &copies
+            && let Some(lens) = crate::mesh_copies::CopiesMorphLens::new(
+                std::sync::Arc::clone(from_copies),
+                std::sync::Arc::clone(to_copies),
+                std::sync::Arc::clone(if same_mesh { &from } else { &to }),
+            )
+        {
+            self.timeline.add_clip(
+                track,
+                start,
+                anim.duration,
+                ClipPayload::Animation(AnimationSpec {
+                    target: anim.target,
+                    lens: dynamic(std::sync::Arc::new(lens)),
+                    rate_func: anim.rate_func.clone(),
+                    delay: 0.0,
+                    label: self.current_label.clone(),
+                }),
+            );
+        }
+        if copies.is_none() || !same_mesh {
+            let lens = crate::mesh_morph::MeshMorphLens::new(from.clone(), to.clone());
+            self.timeline.add_clip(
+                track,
+                start,
+                anim.duration,
+                ClipPayload::Animation(AnimationSpec {
+                    target: anim.target,
+                    lens: dynamic(std::sync::Arc::new(lens)),
+                    rate_func: anim.rate_func.clone(),
+                    delay: 0.0,
+                    label: self.current_label.clone(),
+                }),
+            );
+        }
 
         let landing = self.landing_transform_3d(source_state, target, target_state);
         let place = [
@@ -6177,6 +6249,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             }
         }
         self.morph_meshes.insert(anim.target, to);
+        if let Some((_, to_copies)) = copies {
+            self.instanced.insert(anim.target, to_copies);
+        }
     }
 
     /// Schedule the fill and stroke paint clips that morph `target` from the

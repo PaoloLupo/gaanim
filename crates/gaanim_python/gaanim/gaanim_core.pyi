@@ -4180,8 +4180,10 @@ class Drawable:
 
         After the first ``play`` or ``wait`` the change is a cut at the
         cursor, like ``fill``. ``blur(0)`` also gives a sharp start for
-        ``animate.blur``. A negative or non-finite ``sigma`` raises
-        ``ValueError``.
+        ``animate.blur``. 3D content (or a drawable placed with ``in_3d``,
+        or a group holding either) is drawn apart and its blurred color laid
+        over what lies behind it; what lies in front of it hides the blur. A
+        negative or non-finite ``sigma`` raises ``ValueError``.
 
         Example:
             result = drawable.blur()
@@ -4206,6 +4208,9 @@ class Drawable:
         stroked cast their own. With a ``shader_effect`` the shadow is cast
         from what the effect draws, whichever is set first (on a text or
         group, when its members share one shadow, as its style gives them).
+        On 3D content (or a drawable placed with ``in_3d``, or a group holding
+        either), the shadow is cast from what the camera sees of it, moved by
+        its offset, and what lies in front of it hides the shadow.
 
         Example:
             result = drawable.shadow(BLUE)
@@ -4869,7 +4874,8 @@ class Drawable:
         3D pass draws it, as large as its text on screen, so meshes and 3D
         lines in front of it hide it pixel by pixel; it is drawn half its
         larger side nearer the camera, so a surface it rests on does not cut
-        it. One holding an image, a Lottie scene or a 2D effect is drawn
+        it. Its images, Lottie scenes, shadows, glows and blurs are drawn by
+        the 3D pass too, as for ``in_3d``; only one holding chalk is drawn
         over the 3D content instead, and fades out, with its children, while
         an opaque 3D mesh lies between its anchor and the camera. The method
         is chainable and returns the same ``Drawable``.
@@ -4891,8 +4897,12 @@ class Drawable:
         clips it while its x and y axes stay in the scene's plane. Without a ``material`` it keeps
         its colors unlit; with one it is lit, and receives shadows, as a
         surface. Either way it casts shadows on lit 3D content, as an opaque
-        mesh does, where it is at least half opaque. Its 2D drop shadows,
-        glows and blurs, chalk, images and Lottie scenes are left out. ``billboard`` instead keeps a
+        mesh does, where it is at least half opaque. An image is drawn in
+        its plane with its pixels, and a Lottie scene with the outlines it
+        fills and strokes, on the timeline (its blend modes draw as the normal
+        one, and a translucent layer fades each of its shapes). Its shadow,
+        glow and blur, or its parts' (a text's letters), are drawn by the 3D
+        pass as for a mesh; chalk is left out. ``billboard`` instead keeps a
         drawable facing the camera, and ``hud`` pins it to the frame. The
         method is chainable and returns the same ``Drawable``.
 
@@ -9127,6 +9137,68 @@ class Geometry:
             atom_b = scene.geometry.sphere(0.3).move_to_3d(1, 0, 0)
             bond = scene.geometry.line_3d(atom_a, atom_b, 0.08, material=Material3D.matte(GRAY))
             scene.play([atom_b.animate.move_to_3d(1, 1, 1)])
+        """
+        ...
+    def points_3d(
+        self,
+        positions: Sequence[tuple[float, float, float]],
+        radius: float = 0.05,
+        *,
+        colors: Optional[Sequence[ColorLike]] = None,
+        segments: int = 12,
+        rings: int = 8,
+        material: Optional[Material3D] = None,
+    ) -> Primitive3D:
+        """Create one drawable with a lit sphere of ``radius`` at each of ``positions``.
+
+        The sphere's mesh uploads once and every point draws in one
+        instanced draw, so a cloud of thousands of points stays a single
+        object that moves, turns and fades as one; ``colors`` gives each
+        point its color, in place of the material's (matte white by
+        default). ``create()`` grows the points in one after another, in the
+        order given, and ``uncreate()`` shrinks them away; ``animate.
+        transform_to`` another cloud of as many points moves each point to
+        the point at its place in the other list, and blends their colors.
+        Positions are in the drawable's own coordinates, so ``move_to_3d``
+        places the cloud's origin. Numpy arrays of shape ``(n, 3)`` work.
+        No positions, non-finite values, a ``colors`` of another length or a
+        non-positive ``radius`` raise ``ValueError``.
+
+        Example:
+            cloud = scene.geometry.points_3d(samples, radius=0.04, colors=[GOLD] * len(samples))
+            scene.play([cloud.animate.create().duration(2)])
+        """
+        ...
+    def instances(
+        self,
+        mesh: Primitive3D,
+        positions: Sequence[tuple[float, float, float]],
+        *,
+        scales: Optional[Sequence[float | tuple[float, float, float]]] = None,
+        rotations: Optional[Sequence[tuple[float, float, float]]] = None,
+        colors: Optional[Sequence[ColorLike]] = None,
+        keep_mesh: bool = False,
+    ) -> Primitive3D:
+        """Create one drawable that draws ``mesh``'s mesh, with its material, at each of ``positions``.
+
+        Each copy is scaled by its entry of ``scales`` (one number, or one
+        per axis), turned by its ``rotations`` entry (radians about x, y and
+        z, as ``rotate_to_3d``) and colored by its ``colors`` entry, in that
+        order, then placed at its position. As ``points_3d``, the mesh
+        uploads once and every copy draws in one instanced draw: voxels,
+        crystal lattices, forests of arrows. ``mesh`` is a template, hidden
+        unless ``keep_mesh``; later changes to it do not reach the copies.
+        ``create()``, ``uncreate()`` and ``animate.transform_to`` work as for
+        ``points_3d``. A ``mesh`` of another scene, or one that is not a
+        solid, ``torus``, ``arrow_3d``, ``tube``, ``mesh`` or ``revolve``
+        (an extrusion, ``flat_3d``, ``line_3d``, a surface or copies
+        themselves), no positions, non-finite values or lists of another
+        length raise ``ValueError``; a scale that is neither a number nor a
+        triple raises ``TypeError``.
+
+        Example:
+            cube = scene.geometry.cube(0.18, material=Material3D.matte(BLUE))
+            voxels = scene.geometry.instances(cube, cells, colors=shades)
         """
         ...
     def mesh(

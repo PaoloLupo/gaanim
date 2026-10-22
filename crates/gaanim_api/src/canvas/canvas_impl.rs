@@ -4358,6 +4358,111 @@ impl SceneModel {
         Ok(self.spawn(SpawnKind::Primitive3D(mesh)))
     }
 
+    /// One drawable that draws `prototype`'s mesh, with its material, at
+    /// every one of `copies`: the mesh uploads once and every copy draws in
+    /// one instanced draw. The prototype stays a template, hidden unless
+    /// `keep_prototype`.
+    pub fn instances(
+        &mut self,
+        prototype: &DrawableHandle,
+        copies: gaanim_scene::MeshCopies,
+        keep_prototype: bool,
+    ) -> Result<DrawableHandle, crate::mesh_copies::InstancesError> {
+        if !std::sync::Arc::ptr_eq(&prototype.state, &self.state) {
+            return Err(crate::mesh_copies::InstancesError::ForeignPrototype);
+        }
+        let mesh = {
+            let spec = prototype.spec.lock().expect("object spec poisoned");
+            match &spec.kind {
+                SpawnKind::Primitive3D(mesh)
+                    if spec.extrusion.is_none() && spec.copies.is_none() =>
+                {
+                    mesh.clone()
+                }
+                _ => return Err(crate::mesh_copies::InstancesError::NotAPrimitive),
+            }
+        };
+        // A 3D line's mesh is a cylinder its endpoints lay into place.
+        let tracks_endpoints = self
+            .state
+            .lock()
+            .expect("canvas state poisoned")
+            .segments
+            .iter()
+            .flat_map(|segment| &segment.ops)
+            .any(|op| matches!(op, Op::AttachTrackingLine3D { target, .. } if *target == prototype.id));
+        if tracks_endpoints {
+            return Err(crate::mesh_copies::InstancesError::NotAPrimitive);
+        }
+        let handle = self.copies_of(mesh, copies)?;
+        if !keep_prototype {
+            prototype.clone().opacity(0.0);
+        }
+        Ok(handle)
+    }
+
+    /// One drawable with a lit sphere of `radius` at each of `positions`,
+    /// colored by `colors` when given (see [`Self::instances`]).
+    pub fn points_3d(
+        &mut self,
+        positions: &[[f64; 3]],
+        radius: f64,
+        (segments, rings): (u32, u32),
+        colors: Option<Vec<Color>>,
+        material: gaanim_scene::Material3D,
+    ) -> Result<DrawableHandle, crate::mesh_copies::InstancesError> {
+        let mesh = primitives3d::sphere(radius, segments, rings, material)?;
+        let copies = gaanim_scene::MeshCopies {
+            positions: positions
+                .iter()
+                .map(|point| point.map(|value| value as f32))
+                .collect(),
+            scales: None,
+            rotations: None,
+            colors: colors
+                .map(|colors| colors.into_iter().map(crate::mesh_copies::linear).collect()),
+        };
+        self.copies_of(mesh, copies)
+    }
+
+    fn copies_of(
+        &mut self,
+        mesh: gaanim_scene::TriangleMeshData,
+        copies: gaanim_scene::MeshCopies,
+    ) -> Result<DrawableHandle, crate::mesh_copies::InstancesError> {
+        if copies.positions.is_empty() {
+            return Err(crate::mesh_copies::InstancesError::NoPositions);
+        }
+        if !copies.is_consistent() {
+            return Err(crate::mesh_copies::InstancesError::LengthMismatch);
+        }
+        let finite = copies.positions.iter().flatten().all(|v| v.is_finite())
+            && copies
+                .scales
+                .iter()
+                .flatten()
+                .flatten()
+                .all(|v| v.is_finite())
+            && copies
+                .rotations
+                .iter()
+                .flatten()
+                .all(|q| q.iter().all(|v| v.is_finite()) && q.iter().any(|v| *v != 0.0))
+            && copies
+                .colors
+                .iter()
+                .flatten()
+                .flatten()
+                .all(|v| v.is_finite());
+        if !finite {
+            return Err(crate::mesh_copies::InstancesError::NotFinite);
+        }
+        let handle = self.spawn(SpawnKind::Primitive3D(mesh));
+        handle.spec.lock().expect("object spec poisoned").copies =
+            Some(std::sync::Arc::new(copies));
+        Ok(handle)
+    }
+
     /// A lit solid swept by a `(r, y)` profile around the y axis, its
     /// origin the profile's.
     pub fn revolve(

@@ -37,13 +37,13 @@ use gaanim_core::{kurbo, peniko};
 use gaanim_math::{Camera, GlobalSpatialTransform, Projection};
 use gaanim_scene::{
     AlphaMode, GlobalOpacity, Light3D, LightKind3D, Lighting3D, LineListData, Material3D,
-    MeshTexture, PlaneFillData, TextureWrap, TriangleMeshData,
+    MeshCopies, MeshInstances, MeshTexture, PlaneFillData, TextureWrap, TriangleMeshData,
 };
 use peniko::{Blob, ImageAlphaType, ImageData, ImageFormat};
 use vello::wgpu;
 use wgpu::util::DeviceExt;
 
-use crate::effects::Glow;
+use crate::effects::{DropShadow, GaussianBlur, Glow};
 
 mod glow;
 
@@ -100,6 +100,13 @@ pub(crate) struct Content<'a> {
     /// The glow of the drawable or of the group that holds it (see
     /// [`glow`]).
     pub glow: Option<Glow>,
+    /// Its drop shadow, found as its glow is.
+    pub shadow: Option<DropShadow>,
+    /// Its blur, found as its glow is.
+    pub blur: Option<GaussianBlur>,
+    /// Copies of the mesh drawn instead of it, one at each point (see
+    /// [`gaanim_scene::MeshInstances`]).
+    pub instances: Option<&'a MeshInstances>,
 }
 
 /// Width of 3D lines without a stroke width, as a fraction of the frame's
@@ -263,6 +270,21 @@ struct FillBuffers {
     bands: Vec<u8>,
     paints: Vec<u8>,
     ramps: Vec<u8>,
+    /// Runs of instances and the image they are filled with, bound with
+    /// the buffers for their draw.
+    runs: Vec<(std::ops::Range<u32>, Option<peniko::ImageBrush>)>,
+}
+
+impl FillBuffers {
+    /// What tells the runs' images apart: their pixels and sampling.
+    fn run_keys(&self) -> impl Iterator<Item = (u32, u32, u64, u8)> + '_ {
+        self.runs.iter().map(|(range, brush)| {
+            let (id, quality) = brush.as_ref().map_or((0, 0), |brush| {
+                (brush.image.data.id(), brush.sampler.quality as u8)
+            });
+            (range.start, range.end, id, quality)
+        })
+    }
 }
 
 /// What a source holds, which keys a drawable's uploads apart.
@@ -299,6 +321,9 @@ impl MeshSource {
             fill.bands.hash(&mut hasher);
             fill.paints.hash(&mut hasher);
             fill.ramps.hash(&mut hasher);
+            for key in fill.run_keys() {
+                key.hash(&mut hasher);
+            }
         }
         hasher.finish()
     }
@@ -621,6 +646,7 @@ impl MeshSource {
                 bands: built.bands,
                 paints: built.paints,
                 ramps: built.ramps,
+                runs: built.runs,
             }),
         })
     }
@@ -893,12 +919,20 @@ struct GpuDraw {
     /// Lines only: the segments drawn, those a reveal shows at least part of;
     /// filled outlines: all of them.
     instances: std::ops::Range<u32>,
+    /// Meshes only: the records of the frame's instances it draws, one, or
+    /// one per copy shown of a mesh drawn at many points.
+    copies: std::ops::Range<u32>,
     /// An opaque mesh whose material draws an outline.
     outlined: bool,
     /// A skinned mesh: where its palette starts in the frame's joints.
     joints: Option<u32>,
     /// A glowing mesh or line: its glow's blur and gain.
     glow: Option<glow::GlowDraw>,
+    /// One that casts a drop shadow: its blur, gain and offset.
+    shadow: Option<glow::GlowDraw>,
+    /// A blurred one: its blur's sigma in pixels, as bits. It draws apart
+    /// from the others, blurred, over them (see [`glow::draw_blurs`]).
+    blur: Option<u32>,
 }
 
 /// The meshes and lines one image of a frame draws, with what the shader
@@ -947,9 +981,9 @@ impl GpuMeshFrame {
                 u8::from(draw.casts),
                 u8::from(draw.outlined),
             ]);
-            if let Some(glow) = &draw.glow {
+            if draw.glow.is_some() || draw.shadow.is_some() || draw.blur.is_some() {
                 let mut hasher = std::collections::hash_map::DefaultHasher::new();
-                glow.hash(&mut hasher);
+                (draw.glow, draw.shadow, draw.blur).hash(&mut hasher);
                 update(&hasher.finish().to_le_bytes());
             }
             update(&draw.source.vertices);
@@ -965,6 +999,12 @@ impl GpuMeshFrame {
                 update(&fill.bands);
                 update(&fill.paints);
                 update(&fill.ramps);
+                for (start, end, id, quality) in fill.run_keys() {
+                    update(&start.to_le_bytes());
+                    update(&end.to_le_bytes());
+                    update(&id.to_le_bytes());
+                    update(&[quality]);
+                }
             }
         }
         update(&self.joints);
@@ -989,8 +1029,13 @@ struct Pending {
     /// The bounding sphere of what it draws, in model space: a skinned
     /// mesh's spans where its joints take it.
     sphere: (DVec3, f64),
-    /// A mesh's or lines' glow.
+    /// Its glow, drop shadow and blur.
     glow: Option<Glow>,
+    shadow: Option<DropShadow>,
+    blur: Option<GaussianBlur>,
+    /// A mesh drawn at many points: its copies and how far they have grown
+    /// in.
+    copies: Option<(Arc<MeshCopies>, f32)>,
 }
 
 impl Pending {
@@ -1187,11 +1232,26 @@ impl<'a> GpuMeshes<'a> {
             .joints
             .filter(|joints| source.skinned() && !joints.is_empty())
             .cloned();
-        let sphere = match &joints {
+        let mut sphere = match &joints {
             Some(joints) => skinned_sphere(&source, joints),
             None => (source.center, source.radius),
         };
+        // Copies of a mesh reach as far as the sphere about every copy.
+        let copies = content
+            .instances
+            .filter(|_| source.is_mesh() && joints.is_none())
+            .filter(|instances| instances.copies.is_consistent());
+        if let Some(instances) = copies {
+            let (center, radius) = (sphere.0.as_vec3(), sphere.1 as f32);
+            let mesh = (center - radius, center + radius);
+            let Some((min, max)) = instances.copies.bounds(mesh) else {
+                return;
+            };
+            let (min, max) = (min.as_dvec3(), max.as_dvec3());
+            sphere = ((min + max) * 0.5, (max - min).length() * 0.5);
+        }
         self.pending.push(Pending {
+            copies: copies.map(|instances| (Arc::clone(&instances.copies), instances.reveal)),
             class,
             translucent: !fill && (opacity < 0.999 || !opaque_colors),
             joints,
@@ -1207,9 +1267,9 @@ impl<'a> GpuMeshes<'a> {
             } else {
                 None
             },
-            // Filled outlines keep the glow of 2D drawables placed in 3D, which
-            // leave it out.
-            glow: if fill { None } else { content.glow.clone() },
+            glow: content.glow.clone(),
+            shadow: content.shadow.clone(),
+            blur: content.blur,
         });
     }
 
@@ -1310,8 +1370,10 @@ impl<'a> GpuMeshes<'a> {
             let mut draw_uniforms = Vec::with_capacity(members.len() * DRAW_STRIDE);
             let mut instances = Vec::with_capacity(members.len() * INSTANCE_BYTES);
             let mut joints: Vec<u8> = Vec::new();
+            let mut shown = 0_u32;
             for (_, pending) in members {
-                push_instance(&mut instances, pending);
+                let first_copy = shown;
+                shown += push_instance(&mut instances, pending);
                 let line_px = pending.line_width.unwrap_or(line_width) * pixels_per_unit;
                 // The segments shown: all of them, or a reveal's part.
                 let segments = pending.source.count as f32;
@@ -1325,6 +1387,16 @@ impl<'a> GpuMeshes<'a> {
                     .glow
                     .as_ref()
                     .and_then(|glow| glow::GlowDraw::new(glow, pixels_per_unit));
+                let shadow = pending
+                    .shadow
+                    .as_ref()
+                    .and_then(|shadow| glow::GlowDraw::shadow(shadow, pixels_per_unit));
+                // A blur of less than a tenth of a pixel leaves it sharp.
+                let blur = pending
+                    .blur
+                    .map(|blur| blur.sigma * pixels_per_unit)
+                    .filter(|sigma| sigma.is_finite() && *sigma >= 0.1)
+                    .map(|sigma| (sigma as f32).to_bits());
                 push_draw_uniforms(
                     &mut draw_uniforms,
                     pending,
@@ -1358,11 +1430,14 @@ impl<'a> GpuMeshes<'a> {
                     translucent: pending.translucent,
                     casts: pending.casts(),
                     instances,
+                    copies: first_copy..shown,
                     outlined: !pending.translucent
                         && !pending.source.outline.is_empty()
                         && pending.material.is_some_and(|material| material.outlined()),
                     joints: palette,
                     glow,
+                    shadow,
+                    blur,
                     source: Arc::clone(&pending.source),
                 });
             }
@@ -1385,6 +1460,8 @@ impl<'a> GpuMeshes<'a> {
                 draw.outlined.hash(&mut hasher);
                 draw.joints.hash(&mut hasher);
                 draw.glow.hash(&mut hasher);
+                draw.shadow.hash(&mut hasher);
+                draw.blur.hash(&mut hasher);
             }
             frames.push((
                 class,
@@ -1759,19 +1836,52 @@ fn frame_uniforms(
     uniforms
 }
 
-/// Append one draw's instance data (see [`INSTANCE_BYTES`]).
-fn push_instance(bytes: &mut Vec<u8>, pending: &Pending) {
-    let start = bytes.len();
-    push_mat4(bytes, pending.model);
-    let normal = pending.model.inverse().transpose();
-    for column in [normal.x_axis, normal.y_axis, normal.z_axis] {
-        push_f32s(
-            bytes,
-            &[column.x as f32, column.y as f32, column.z as f32, 0.0],
-        );
+/// Append one draw's instance data (see [`INSTANCE_BYTES`]): one record,
+/// or one per copy shown of a mesh drawn at many points; returns how many.
+fn push_instance(bytes: &mut Vec<u8>, pending: &Pending) -> u32 {
+    let push = |bytes: &mut Vec<u8>, model: DMat4, base: &[f32; 4]| {
+        let start = bytes.len();
+        push_mat4(bytes, model);
+        let normal = model.inverse().transpose();
+        for column in [normal.x_axis, normal.y_axis, normal.z_axis] {
+            push_f32s(
+                bytes,
+                &[column.x as f32, column.y as f32, column.z as f32, 0.0],
+            );
+        }
+        push_f32s(bytes, base);
+        debug_assert_eq!(bytes.len() - start, INSTANCE_BYTES);
+    };
+    let Some((copies, reveal)) = &pending.copies else {
+        push(bytes, pending.model, &pending.base);
+        return 1;
+    };
+    let count = copies.positions.len();
+    let instances = MeshInstances {
+        copies: Arc::clone(copies),
+        reveal: *reveal,
+    };
+    let mut pushed = 0;
+    for index in 0..count {
+        let size = MeshInstances::shown(*reveal, index, count);
+        if size <= 0.0 {
+            continue;
+        }
+        let model = pending.model * instances.matrix(index, size).as_dmat4();
+        let base = copies
+            .colors
+            .as_ref()
+            .map_or(pending.base, |colors| colors[index]);
+        push(bytes, model, &base);
+        pushed += 1;
     }
-    push_f32s(bytes, &pending.base);
-    debug_assert_eq!(bytes.len() - start, INSTANCE_BYTES);
+    pushed
+}
+
+/// The instance records draws `first..end` of `frame` draw: alike draws
+/// draw as one, and their records follow each other.
+fn copies_of(frame: &GpuMeshFrame, first: usize, end: usize) -> std::ops::Range<u32> {
+    frame.draws[first].copies.start..frame.draws[end - 1].copies.end
 }
 
 /// Whether draws `a` and `b` of a frame draw as one: opaque meshes alike,
@@ -1790,6 +1900,7 @@ fn draw_alike(frame: &GpuMeshFrame, a: usize, b: usize) -> bool {
         && Arc::ptr_eq(&first.source, &second.source)
         && first.culled == second.culled
         && first.casts == second.casts
+        && first.blur == second.blur
         && uniforms(a) == uniforms(b)
 }
 
@@ -2089,7 +2200,28 @@ impl Pipelines {
         };
         let fill_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("gaanim-3d-fill"),
-            entries: &[storage(0), storage(1), storage(2), storage(3)],
+            entries: &[
+                storage(0),
+                storage(1),
+                storage(2),
+                storage(3),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
         });
         let shadow_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("gaanim-3d-shadows"),
@@ -2346,19 +2478,7 @@ impl Pipelines {
                 cache: None,
             })
         };
-        // An outline's instance: its box, placement, bands, band header,
-        // color, and its clip's bands and band header (`FillIn` in the
-        // shader).
-        let fill_attributes: [wgpu::VertexAttribute; 8] =
-            std::array::from_fn(|index| wgpu::VertexAttribute {
-                format: if index == 4 || index == 7 {
-                    wgpu::VertexFormat::Uint32x4
-                } else {
-                    wgpu::VertexFormat::Float32x4
-                },
-                offset: index as u64 * 16,
-                shader_location: index as u32,
-            });
+        let fill_attributes = fill_attributes();
         let fill = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("gaanim-3d-fill"),
             layout: Some(&filling),
@@ -2775,6 +2895,82 @@ impl ModelPipelines {
     }
 }
 
+/// An outline's instance: its box, placement, bands, band header, color,
+/// and its clip's bands and band header (`FillIn` in the shader).
+fn fill_attributes() -> [wgpu::VertexAttribute; 8] {
+    std::array::from_fn(|index| wgpu::VertexAttribute {
+        format: if index == 4 || index == 7 {
+            wgpu::VertexFormat::Uint32x4
+        } else {
+            wgpu::VertexFormat::Float32x4
+        },
+        offset: index as u64 * 16,
+        shader_location: index as u32,
+    })
+}
+
+/// Draw the quads of `instances` of filled outlines, each run of them with
+/// its image bound.
+fn draw_runs(
+    pass: &mut wgpu::RenderPass<'_>,
+    runs: &[(std::ops::Range<u32>, wgpu::BindGroup)],
+    instances: &std::ops::Range<u32>,
+) {
+    for (range, group) in runs {
+        let (start, end) = (
+            range.start.max(instances.start),
+            range.end.min(instances.end),
+        );
+        if start < end {
+            pass.set_bind_group(2, group, &[]);
+            pass.draw(0..6, start..end);
+        }
+    }
+}
+
+/// One opaque white texel.
+fn white_texel() -> ImageData {
+    ImageData {
+        data: Blob::from(vec![255_u8; 4]),
+        format: ImageFormat::Rgba8,
+        alpha_type: ImageAlphaType::Alpha,
+        width: 1,
+        height: 1,
+    }
+}
+
+/// `image` as RGBA texels with straight alpha, as [`upload_texture`] takes
+/// them: itself when it already is.
+fn straight_rgba(image: &ImageData) -> std::borrow::Cow<'_, ImageData> {
+    if image.format == ImageFormat::Rgba8 && image.alpha_type == ImageAlphaType::Alpha {
+        return std::borrow::Cow::Borrowed(image);
+    }
+    let texels = image.width as usize * image.height as usize;
+    let bytes = image.data.data();
+    let mut converted = Vec::with_capacity(texels * 4);
+    for texel in bytes.chunks_exact(4).take(texels) {
+        let [mut r, g, mut b, a] = [texel[0], texel[1], texel[2], texel[3]];
+        if image.format == ImageFormat::Bgra8 {
+            std::mem::swap(&mut r, &mut b);
+        }
+        let straight = |value: u8| {
+            if image.alpha_type == ImageAlphaType::AlphaPremultiplied && a > 0 {
+                ((u32::from(value) * 255 + u32::from(a) / 2) / u32::from(a)).min(255) as u8
+            } else {
+                value
+            }
+        };
+        converted.extend([straight(r), straight(g), straight(b), a]);
+    }
+    std::borrow::Cow::Owned(ImageData {
+        data: Blob::from(converted),
+        format: ImageFormat::Rgba8,
+        alpha_type: ImageAlphaType::Alpha,
+        width: image.width,
+        height: image.height,
+    })
+}
+
 /// A view of `image`, uploaded with its mipmaps: sRGB texels that the
 /// shader reads in linear light.
 fn upload_texture(
@@ -3023,8 +3219,9 @@ struct Uploaded {
     vertices: wgpu::Buffer,
     indices: Option<wgpu::Buffer>,
     outline: Option<wgpu::Buffer>,
-    /// Binds the curves and bands of filled outlines.
-    fill: Option<wgpu::BindGroup>,
+    /// Binds the curves and bands of filled outlines, with the image of
+    /// each run of them.
+    fill: Option<Vec<(std::ops::Range<u32>, wgpu::BindGroup)>>,
     /// An imported model's UVs, joints and weights, and its texture.
     model: Option<(wgpu::Buffer, wgpu::BindGroup)>,
 }
@@ -3040,8 +3237,11 @@ pub struct GpuThreeD {
     glow: Option<glow::GlowPipelines>,
     glow_targets: Option<glow::GlowTargets>,
     uploads: HashMap<usize, Uploaded>,
-    /// Models' textures by the id of their pixels, and their samplers.
+    /// Models' and filled outlines' textures by the id of their pixels, and
+    /// their samplers.
     textures: HashMap<u64, wgpu::TextureView>,
+    /// The texel outlines filled otherwise bind in place of an image.
+    white: Option<wgpu::TextureView>,
     samplers: HashMap<([TextureWrap; 2], bool), wgpu::Sampler>,
     /// The frame's palettes, with room for that many bytes, and their bind
     /// group.
@@ -3114,8 +3314,20 @@ impl GpuThreeD {
             let shown: HashSet<u64> = frames
                 .iter()
                 .flat_map(|frame| frame.draws.iter())
-                .filter_map(|draw| draw.source.model.as_ref()?.texture.as_ref())
-                .map(|texture| texture.image.data.id())
+                .flat_map(|draw| {
+                    let model = draw
+                        .source
+                        .model
+                        .as_ref()
+                        .and_then(|model| model.texture.as_ref())
+                        .map(|texture| texture.image.data.id());
+                    let images = draw.source.fill.iter().flat_map(|fill| {
+                        fill.runs
+                            .iter()
+                            .filter_map(|(_, brush)| Some(brush.as_ref()?.image.data.id()))
+                    });
+                    model.into_iter().chain(images)
+                })
                 .collect();
             self.textures.retain(|id, _| shown.contains(id));
         }
@@ -3164,18 +3376,33 @@ impl GpuThreeD {
             self.models = Some(ModelPipelines::new(device, queue, pipelines));
         }
         let models = self.models.as_ref().filter(|_| draws_models);
-        let glows = frame.draws.iter().any(|draw| draw.glow.is_some());
+        let glows = frame
+            .draws
+            .iter()
+            .any(|draw| draw.glow.is_some() || draw.shadow.is_some() || draw.blur.is_some());
         if glows {
             let glow = self
                 .glow
                 .get_or_insert_with(|| glow::GlowPipelines::new(device, pipelines));
+            let soft = |draw: &&GpuDraw| {
+                draw.glow.is_some() || draw.shadow.is_some() || draw.blur.is_some()
+            };
             if let Some(models) = models
                 && frame
                     .draws
                     .iter()
-                    .any(|draw| draw.glow.is_some() && draw.source.model.is_some())
+                    .filter(soft)
+                    .any(|draw| draw.source.model.is_some())
             {
                 glow.add_models(device, pipelines, models);
+            }
+            if frame
+                .draws
+                .iter()
+                .filter(soft)
+                .any(|draw| draw.source.fill.is_some())
+            {
+                glow.add_fills(device, pipelines);
             }
             if self
                 .glow_targets
@@ -3187,6 +3414,9 @@ impl GpuThreeD {
         }
         let textures = &mut self.textures;
         let samplers = &mut self.samplers;
+        let white = self
+            .white
+            .get_or_insert_with(|| upload_texture(device, queue, &white_texel()));
         for draw in frame.draws.iter() {
             self.uploads
                 .entry(Arc::as_ptr(&draw.source) as usize)
@@ -3259,19 +3489,58 @@ impl GpuThreeD {
                             buffer("gaanim-3d-fill-paints", &fill.paints),
                             buffer("gaanim-3d-fill-ramps", &fill.ramps),
                         ];
-                        let entries: Vec<wgpu::BindGroupEntry> = buffers
+                        // A group per image, which its runs share.
+                        let mut groups: HashMap<(u64, bool), wgpu::BindGroup> = HashMap::new();
+                        let mut group = |brush: Option<&peniko::ImageBrush>| {
+                            let nearest = brush.is_some_and(|brush| {
+                                brush.sampler.quality == peniko::ImageQuality::Low
+                            });
+                            let id = brush.map_or(0, |brush| brush.image.data.id());
+                            groups
+                                .entry((id, nearest))
+                                .or_insert_with(|| {
+                                    let view = match brush {
+                                        Some(brush) => &*textures.entry(id).or_insert_with(|| {
+                                            upload_texture(
+                                                device,
+                                                queue,
+                                                &straight_rgba(&brush.image),
+                                            )
+                                        }),
+                                        None => &*white,
+                                    };
+                                    let wrap = [TextureWrap::ClampToEdge; 2];
+                                    let sampler = samplers
+                                        .entry((wrap, nearest))
+                                        .or_insert_with(|| texture_sampler(device, wrap, nearest));
+                                    let mut entries: Vec<wgpu::BindGroupEntry> = buffers
+                                        .iter()
+                                        .enumerate()
+                                        .map(|(binding, buffer)| wgpu::BindGroupEntry {
+                                            binding: binding as u32,
+                                            resource: buffer.as_entire_binding(),
+                                        })
+                                        .collect();
+                                    entries.push(wgpu::BindGroupEntry {
+                                        binding: 4,
+                                        resource: wgpu::BindingResource::TextureView(view),
+                                    });
+                                    entries.push(wgpu::BindGroupEntry {
+                                        binding: 5,
+                                        resource: wgpu::BindingResource::Sampler(sampler),
+                                    });
+                                    device.create_bind_group(&wgpu::BindGroupDescriptor {
+                                        label: Some("gaanim-3d-fill"),
+                                        layout: &pipelines.fill_layout,
+                                        entries: &entries,
+                                    })
+                                })
+                                .clone()
+                        };
+                        fill.runs
                             .iter()
-                            .enumerate()
-                            .map(|(binding, buffer)| wgpu::BindGroupEntry {
-                                binding: binding as u32,
-                                resource: buffer.as_entire_binding(),
-                            })
-                            .collect();
-                        device.create_bind_group(&wgpu::BindGroupDescriptor {
-                            label: Some("gaanim-3d-fill"),
-                            layout: &pipelines.fill_layout,
-                            entries: &entries,
-                        })
+                            .map(|(range, brush)| (range.clone(), group(brush.as_ref())))
+                            .collect()
                     }),
                     _source: Arc::clone(&draw.source),
                 });
@@ -3470,13 +3739,12 @@ impl GpuThreeD {
                     else {
                         continue;
                     };
-                    if let Some(fill) = &uploaded.fill {
+                    if let Some(runs) = &uploaded.fill {
                         // A quad per outline, which tests its texels.
                         pass.set_pipeline(&pipelines.shadow_fill);
                         pass.set_bind_group(0, bind_group, &[(first * DRAW_STRIDE) as u32]);
-                        pass.set_bind_group(2, fill, &[]);
                         pass.set_vertex_buffer(0, uploaded.vertices.slice(..));
-                        pass.draw(0..6, draw.instances.clone());
+                        draw_runs(&mut pass, runs, &draw.instances);
                         continue;
                     }
                     let Some(indices) = &uploaded.indices else {
@@ -3497,11 +3765,88 @@ impl GpuThreeD {
                     pass.set_bind_group(0, bind_group, &[(first * DRAW_STRIDE) as u32]);
                     pass.set_vertex_buffer(0, uploaded.vertices.slice(..));
                     pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
-                    pass.draw_indexed(0..draw.source.count, 0, first as u32..end as u32);
+                    pass.draw_indexed(0..draw.source.count, 0, copies_of(frame, first, end));
                 }
             }
         }
 
+        // Draws `first..end`, meshes alike drawn as instances of one: those
+        // blurred or not, as `blurred` says, the blurred ones as translucent
+        // layers drawn apart (see `glow::draw_soft`).
+        let draw_one =
+            |pass: &mut wgpu::RenderPass<'_>, first: usize, end: usize, blurred: bool| {
+                let draw = &frame.draws[first];
+                if draw.blur.is_some() != blurred {
+                    return;
+                }
+                let Some(uploaded) = self.uploads.get(&(Arc::as_ptr(&draw.source) as usize)) else {
+                    return;
+                };
+                if let Some(runs) = &uploaded.fill {
+                    // A quad per outline.
+                    pass.set_pipeline(&pipelines.fill);
+                    pass.set_bind_group(0, bind_group, &[(first * DRAW_STRIDE) as u32]);
+                    pass.set_bind_group(1, &shadow_maps.group, &[]);
+                    pass.set_vertex_buffer(0, uploaded.vertices.slice(..));
+                    draw_runs(pass, runs, &draw.instances);
+                    // Then its depth, which the translucent layers read.
+                    if !blurred {
+                        pass.set_pipeline(&pipelines.fill_depth);
+                        draw_runs(pass, runs, &draw.instances);
+                    }
+                    return;
+                }
+                let set = match (&uploaded.model, models, joints_group) {
+                    (Some((vertices, texture)), Some(models), Some(joints)) => {
+                        pass.set_bind_group(2, texture, &[]);
+                        pass.set_bind_group(3, joints, &[draw.joints.unwrap_or(0)]);
+                        pass.set_vertex_buffer(2, vertices.slice(..));
+                        &models.meshes[usize::from(draw.culled)]
+                    }
+                    (Some(_), ..) => return,
+                    _ if draw.source.lines => &pipelines.lines,
+                    _ => &pipelines.meshes[usize::from(draw.culled)],
+                };
+                pass.set_bind_group(0, bind_group, &[(first * DRAW_STRIDE) as u32]);
+                pass.set_vertex_buffer(0, uploaded.vertices.slice(..));
+                if let Some(indices) = &uploaded.indices {
+                    pass.set_vertex_buffer(1, instance_buffer.slice(..));
+                    pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
+                }
+                let passes: &[Pass] = if draw.translucent || blurred {
+                    &[Pass::Layer, Pass::Blend]
+                } else {
+                    &[Pass::Opaque]
+                };
+                for &each in passes {
+                    pass.set_bind_group(
+                        1,
+                        if matches!(each, Pass::Layer) {
+                            &scratch.depth_group
+                        } else {
+                            &shadow_maps.group
+                        },
+                        &[],
+                    );
+                    pass.set_pipeline(&set[each as usize]);
+                    if draw.source.lines {
+                        // A quad per segment shown.
+                        if !draw.instances.is_empty() {
+                            pass.draw(0..6, draw.instances.clone());
+                        }
+                    } else {
+                        pass.draw_indexed(0..draw.source.count, 0, copies_of(frame, first, end));
+                    }
+                }
+                if draw.outlined
+                    && !blurred
+                    && let Some(outline) = &uploaded.outline
+                {
+                    pass.set_pipeline(&pipelines.outline[usize::from(draw.source.closed)]);
+                    pass.set_vertex_buffer(2, outline.slice(..));
+                    pass.draw_indexed(0..draw.source.count, 0, copies_of(frame, first, end));
+                }
+            };
         let translucent = frame.draws.iter().filter(|draw| draw.translucent).count();
         // The opaque draws, alike meshes as one, then one pass per
         // translucent drawable with a layer depth of its own; the last pass
@@ -3564,75 +3909,6 @@ impl GpuThreeD {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            // Draws `first..end`, meshes alike drawn as instances of one.
-            let draw_one = |pass: &mut wgpu::RenderPass<'_>, first: usize, end: usize| {
-                let draw = &frame.draws[first];
-                let Some(uploaded) = self.uploads.get(&(Arc::as_ptr(&draw.source) as usize)) else {
-                    return;
-                };
-                if let Some(fill) = &uploaded.fill {
-                    // A quad per outline.
-                    pass.set_pipeline(&pipelines.fill);
-                    pass.set_bind_group(0, bind_group, &[(first * DRAW_STRIDE) as u32]);
-                    pass.set_bind_group(1, &shadow_maps.group, &[]);
-                    pass.set_bind_group(2, fill, &[]);
-                    pass.set_vertex_buffer(0, uploaded.vertices.slice(..));
-                    pass.draw(0..6, draw.instances.clone());
-                    // Then its depth, which the translucent layers read.
-                    pass.set_pipeline(&pipelines.fill_depth);
-                    pass.draw(0..6, draw.instances.clone());
-                    return;
-                }
-                let set = match (&uploaded.model, models, joints_group) {
-                    (Some((vertices, texture)), Some(models), Some(joints)) => {
-                        pass.set_bind_group(2, texture, &[]);
-                        pass.set_bind_group(3, joints, &[draw.joints.unwrap_or(0)]);
-                        pass.set_vertex_buffer(2, vertices.slice(..));
-                        &models.meshes[usize::from(draw.culled)]
-                    }
-                    (Some(_), ..) => return,
-                    _ if draw.source.lines => &pipelines.lines,
-                    _ => &pipelines.meshes[usize::from(draw.culled)],
-                };
-                pass.set_bind_group(0, bind_group, &[(first * DRAW_STRIDE) as u32]);
-                pass.set_vertex_buffer(0, uploaded.vertices.slice(..));
-                if let Some(indices) = &uploaded.indices {
-                    pass.set_vertex_buffer(1, instance_buffer.slice(..));
-                    pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
-                }
-                let passes: &[Pass] = if draw.translucent {
-                    &[Pass::Layer, Pass::Blend]
-                } else {
-                    &[Pass::Opaque]
-                };
-                for &each in passes {
-                    pass.set_bind_group(
-                        1,
-                        if matches!(each, Pass::Layer) {
-                            &scratch.depth_group
-                        } else {
-                            &shadow_maps.group
-                        },
-                        &[],
-                    );
-                    pass.set_pipeline(&set[each as usize]);
-                    if draw.source.lines {
-                        // A quad per segment shown.
-                        if !draw.instances.is_empty() {
-                            pass.draw(0..6, draw.instances.clone());
-                        }
-                    } else {
-                        pass.draw_indexed(0..draw.source.count, 0, first as u32..end as u32);
-                    }
-                }
-                if draw.outlined
-                    && let Some(outline) = &uploaded.outline
-                {
-                    pass.set_pipeline(&pipelines.outline[usize::from(draw.source.closed)]);
-                    pass.set_vertex_buffer(2, outline.slice(..));
-                    pass.draw_indexed(0..draw.source.count, 0, first as u32..end as u32);
-                }
-            };
             if opaque {
                 while next < frame.draws.len() && !frame.draws[next].translucent {
                     let first = next;
@@ -3640,10 +3916,10 @@ impl GpuThreeD {
                     while next < frame.draws.len() && draw_alike(frame, first, next) {
                         next += 1;
                     }
-                    draw_one(&mut pass, first, next);
+                    draw_one(&mut pass, first, next, false);
                 }
             } else if next < frame.draws.len() {
-                draw_one(&mut pass, next, next + 1);
+                draw_one(&mut pass, next, next + 1, false);
                 next += 1;
             }
         }
@@ -3658,7 +3934,15 @@ impl GpuThreeD {
                 let Some(uploaded) = self.uploads.get(&(Arc::as_ptr(&draw.source) as usize)) else {
                     return;
                 };
-                if uploaded.fill.is_some() {
+                if let Some(runs) = &uploaded.fill {
+                    let Some(pipeline) = glow.fill() else {
+                        return;
+                    };
+                    pass.set_pipeline(pipeline);
+                    pass.set_bind_group(0, bind_group, &[(at * DRAW_STRIDE) as u32]);
+                    pass.set_bind_group(1, &shadow_maps.group, &[]);
+                    pass.set_vertex_buffer(0, uploaded.vertices.slice(..));
+                    draw_runs(pass, runs, &draw.instances);
                     return;
                 }
                 let pipeline = match (&uploaded.model, models, joints_group) {
@@ -3686,19 +3970,24 @@ impl GpuThreeD {
                 } else if let Some(indices) = &uploaded.indices {
                     pass.set_vertex_buffer(1, instance_buffer.slice(..));
                     pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
-                    pass.draw_indexed(0..draw.source.count, 0, at as u32..at as u32 + 1);
+                    pass.draw_indexed(0..draw.source.count, 0, draw.copies.clone());
                 }
             };
-            glow::draw_glows(
+            glow::draw_soft(
                 device,
                 queue,
                 &mut encoder,
                 glow,
                 targets,
                 &frame.draws,
-                &scratch.depth,
-                target,
+                &|first, second| draw_alike(frame, first, second),
+                glow::SoftTargets {
+                    depth: &scratch.depth,
+                    layer: &scratch.layer,
+                    target,
+                },
                 &silhouette,
+                &|pass: &mut wgpu::RenderPass<'_>, first, end| draw_one(pass, first, end, true),
             );
         }
         queue.submit(Some(encoder.finish()));
@@ -4748,6 +5037,9 @@ mod tests {
             lines: None,
             material: None,
             glow: None,
+            shadow: None,
+            blur: None,
+            instances: None,
         };
         let mut sources = MeshSources::default();
         let mut meshes =
@@ -4811,6 +5103,9 @@ mod tests {
                 fill: None,
                 joints: None,
                 glow: None,
+                shadow: None,
+                blur: None,
+                instances: None,
             },
         );
         // The fixed key light casts one map, at full size.
@@ -4883,6 +5178,9 @@ mod tests {
                     fill: None,
                     joints: None,
                     glow: None,
+                    shadow: None,
+                    blur: None,
+                    instances: None,
                 },
             );
         }
@@ -4939,6 +5237,9 @@ mod tests {
                     fill: None,
                     joints: None,
                     glow: None,
+                    shadow: None,
+                    blur: None,
+                    instances: None,
                 },
             );
         }
@@ -5002,6 +5303,9 @@ mod tests {
                 fill: None,
                 joints: None,
                 glow: None,
+                shadow: None,
+                blur: None,
+                instances: None,
             },
         );
         let frames: Vec<GpuMeshFrame> = meshes
@@ -5055,6 +5359,9 @@ mod tests {
                     fill: None,
                     joints: None,
                     glow: None,
+                    shadow: None,
+                    blur: None,
+                    instances: None,
                 },
             );
         }
@@ -5121,6 +5428,7 @@ mod tests {
                 color: peniko::Color::from_rgb8(255, 0, 0),
                 gradient: None,
                 clip: None,
+                image: None,
             }],
         };
         let above = placed(1.0, DVec3::new(0.0, 0.0, 1.0));
@@ -5141,6 +5449,9 @@ mod tests {
                 fill: None,
                 joints: None,
                 glow: None,
+                shadow: None,
+                blur: None,
+                instances: None,
             },
         );
         assert!(meshes.push_fill(
@@ -5158,6 +5469,9 @@ mod tests {
                 fill: Some(&fill),
                 joints: None,
                 glow: None,
+                shadow: None,
+                blur: None,
+                instances: None,
             },
         ));
         let illumination = Illumination {
@@ -5211,6 +5525,7 @@ mod tests {
                 color: peniko::Color::from_rgb8(255, 0, 0),
                 gradient: None,
                 clip: None,
+                image: None,
             }],
         };
         let front = placed(1.0, DVec3::new(0.0, 0.0, 1.0));
@@ -5232,6 +5547,9 @@ mod tests {
                 fill: None,
                 joints: None,
                 glow: None,
+                shadow: None,
+                blur: None,
+                instances: None,
             },
         );
         assert!(meshes.push_fill(
@@ -5249,6 +5567,9 @@ mod tests {
                 fill: Some(&fill),
                 joints: None,
                 glow: None,
+                shadow: None,
+                blur: None,
+                instances: None,
             },
         ));
         let illumination = Illumination {
@@ -5307,6 +5628,9 @@ mod tests {
                     fill: None,
                     joints: None,
                     glow: None,
+                    shadow: None,
+                    blur: None,
+                    instances: None,
                 },
             );
         }
@@ -5348,6 +5672,74 @@ mod tests {
         );
     }
 
+    /// A mesh drawn at many points takes one record per copy shown, in one
+    /// draw, each placed, sized and colored by its copy; hidden copies take
+    /// none.
+    #[test]
+    fn copies_of_a_mesh_draw_as_one_with_a_record_each() {
+        let camera = camera(Projection::Orthographic { zoom: 1.0 });
+        let (ndc_to_canvas, line_width) = canvas_projection(&camera).unwrap();
+        let mesh = lit_quad();
+        let opacity = GlobalOpacity(1.0);
+        let transform = placed(2.0, DVec3::new(1.0, 0.0, 0.0));
+        let frame = |reveal: f32| {
+            let instances = MeshInstances {
+                copies: Arc::new(MeshCopies {
+                    positions: vec![[0.0; 3], [1.0, 0.0, 0.0], [0.0, 2.0, 0.0]],
+                    scales: Some(vec![[1.0; 3], [0.5; 3], [1.0; 3]]),
+                    rotations: None,
+                    colors: Some(vec![[1.0, 0.0, 0.0, 1.0]; 3]),
+                }),
+                reveal,
+            };
+            let mut sources = MeshSources::default();
+            let mut meshes =
+                GpuMeshes::new(&mut sources, (1920, 1080), camera.to_vello_transform(), 0).unwrap();
+            meshes.push(
+                0,
+                [(1, 1), (1, 1)],
+                [None, None],
+                &Content {
+                    transform: &transform,
+                    opacity: &opacity,
+                    mesh: Some(&mesh),
+                    lines: None,
+                    material: mesh.material.as_ref(),
+                    line_width: None,
+                    line_range: None,
+                    fill: None,
+                    joints: None,
+                    glow: None,
+                    shadow: None,
+                    blur: None,
+                    instances: Some(&instances),
+                },
+            );
+            meshes
+                .finish(&camera, ndc_to_canvas, line_width, &Illumination::default())
+                .remove(0)
+                .1
+        };
+        let shown = frame(1.0);
+        assert_eq!(shown.draws.len(), 1);
+        assert_eq!(shown.draws[0].copies, 0..3);
+        assert_eq!(shown.instances.len(), 3 * INSTANCE_BYTES);
+        let value = |record: usize, at: usize| {
+            let start = record * INSTANCE_BYTES + at * 4;
+            f32::from_le_bytes(shown.instances[start..start + 4].try_into().unwrap())
+        };
+        // The third copy sits 2 units up in the drawable, 4 in the world;
+        // the second is half the size; each takes its own color.
+        assert_eq!([value(2, 12), value(2, 13)], [1.0, 4.0]);
+        assert_eq!(value(1, 0), 1.0);
+        assert_eq!(value(0, 28), 1.0);
+        assert_eq!(value(0, 29), 0.0);
+        // Before they grow in, none draws.
+        let hidden = frame(0.0);
+        assert_eq!(hidden.draws[0].copies, 0..0);
+        assert!(hidden.instances.is_empty());
+    }
+
     #[test]
     fn meshes_alike_share_one_upload_and_draw_as_one() {
         let camera = camera(Projection::Orthographic { zoom: 1.0 });
@@ -5379,6 +5771,9 @@ mod tests {
                     fill: None,
                     joints: None,
                     glow: None,
+                    shadow: None,
+                    blur: None,
+                    instances: None,
                 },
             );
         }
@@ -5506,6 +5901,9 @@ mod tests {
                 fill: None,
                 joints: None,
                 glow: None,
+                shadow: None,
+                blur: None,
+                instances: None,
             },
         );
         let frames: Vec<GpuMeshFrame> = meshes
@@ -5566,6 +5964,9 @@ mod tests {
                 lines: None,
                 material: None,
                 glow: None,
+                shadow: None,
+                blur: None,
+                instances: None,
             },
         );
         let frames: Vec<GpuMeshFrame> = meshes
@@ -5663,6 +6064,9 @@ mod tests {
                     fill: None,
                     joints: joints.as_ref(),
                     glow: None,
+                    shadow: None,
+                    blur: None,
+                    instances: None,
                 },
             );
         }
@@ -5690,6 +6094,25 @@ mod tests {
     /// glow, drawn as [`draw_meshes`] draws them, and whether the glow
     /// pipelines were built.
     fn draw_glowing(meshes: &[(TriangleMeshData, DMat4, Option<Glow>)]) -> Option<(Vec<u8>, bool)> {
+        let meshes: Vec<_> = meshes
+            .iter()
+            .map(|(mesh, matrix, glow)| (mesh.clone(), *matrix, glow.clone(), None, None))
+            .collect();
+        draw_soft(&meshes)
+    }
+
+    /// A mesh, where it stands, and its glow, shadow and blur.
+    type Soft = (
+        TriangleMeshData,
+        DMat4,
+        Option<Glow>,
+        Option<DropShadow>,
+        Option<GaussianBlur>,
+    );
+
+    /// Draw `meshes` with their glows, shadows and blurs: the pixels, and
+    /// whether the glow pipelines were built.
+    fn draw_soft(meshes: &[Soft]) -> Option<(Vec<u8>, bool)> {
         let mut gpu = crate::background::test_gpu::test_gpu()?;
         let mut camera = Camera::ortho_2d_frame(4.0, 4.0, 64, 64);
         camera.position = DVec3::new(0.0, 0.0, 10.0);
@@ -5698,14 +6121,16 @@ mod tests {
         let opacity = GlobalOpacity(1.0);
         let transforms: Vec<GlobalSpatialTransform> = meshes
             .iter()
-            .map(|(_, matrix, _)| GlobalSpatialTransform {
+            .map(|(_, matrix, _, _, _)| GlobalSpatialTransform {
                 mat4: *matrix,
                 ..Default::default()
             })
             .collect();
         let mut sources = MeshSources::default();
         let mut pending = GpuMeshes::new(&mut sources, (64, 64), placement, 0).unwrap();
-        for (index, ((mesh, _, glow), transform)) in meshes.iter().zip(&transforms).enumerate() {
+        for (index, ((mesh, _, glow, shadow, blur), transform)) in
+            meshes.iter().zip(&transforms).enumerate()
+        {
             let key = index as u64 + 1;
             pending.push(
                 0,
@@ -5722,6 +6147,9 @@ mod tests {
                     fill: None,
                     joints: None,
                     glow: glow.clone(),
+                    shadow: shadow.clone(),
+                    blur: *blur,
+                    instances: None,
                 },
             );
         }
@@ -5769,6 +6197,162 @@ mod tests {
         let far = pixel(&glowing, 53, 32);
         assert!(far[3] < near[3], "{far:?} {near:?}");
         assert!(pixel(&glowing, 62, 32)[3] < 4);
+    }
+
+    /// A mesh's drop shadow falls beside it by its offset, in its color,
+    /// and hides under the mesh itself.
+    #[test]
+    fn a_shadow_falls_beside_a_mesh_by_its_offset() {
+        let shadow = DropShadow {
+            offset: gaanim_core::glam::DVec2::new(0.5, -0.5),
+            blur_radius: 0.05,
+            color: peniko::Color::new([0.0, 0.0, 0.0, 1.0]),
+        };
+        let Some((pixels, built)) = draw_soft(&[(
+            quad(peniko::Color::WHITE),
+            DMat4::IDENTITY,
+            None,
+            Some(shadow),
+            None,
+        )]) else {
+            return;
+        };
+        assert!(built);
+        // The quad spans pixels 16 to 48, its shadow 24 to 56, 8 pixels
+        // right and down.
+        assert_eq!(pixel(&pixels, 32, 32), [255, 255, 255, 255]);
+        let cast = pixel(&pixels, 52, 52);
+        assert!(cast[3] > 230 && cast[0] < 8, "{cast:?}");
+        assert_eq!(pixel(&pixels, 52, 20)[3], 0);
+        assert_eq!(pixel(&pixels, 12, 12)[3], 0);
+    }
+
+    /// A blurred mesh spreads its color over what lies behind it, and what
+    /// lies in front of it hides its blur.
+    #[test]
+    fn a_blurred_mesh_spreads_its_color_over_what_lies_behind() {
+        let blue = peniko::Color::new([0.0, 0.0, 1.0, 1.0]);
+        let behind = DMat4::from_translation(DVec3::new(0.0, 0.0, -1.0))
+            * DMat4::from_scale(DVec3::splat(1.8));
+        // A green strip in front of the white quad's lower edge.
+        let front = DMat4::from_translation(DVec3::new(0.0, -1.0, 1.0))
+            * DMat4::from_scale(DVec3::new(1.9, 0.12, 1.0));
+        let blur = GaussianBlur { sigma: 0.25 };
+        let Some((pixels, built)) = draw_soft(&[
+            (quad(blue), behind, None, None, None),
+            (
+                quad(peniko::Color::WHITE),
+                DMat4::IDENTITY,
+                None,
+                None,
+                Some(blur),
+            ),
+            (
+                quad(peniko::Color::new([0.0, 1.0, 0.0, 1.0])),
+                front,
+                None,
+                None,
+                None,
+            ),
+        ]) else {
+            return;
+        };
+        assert!(built);
+        // The white quad spans pixels 16 to 48, blurred by 4 pixels: white
+        // in its middle, half white at its edge, blue farther out.
+        let middle = pixel(&pixels, 32, 32);
+        assert!(middle.iter().all(|value| *value > 245), "{middle:?}");
+        let inside = pixel(&pixels, 45, 32);
+        assert!(inside[0] < 245 && inside[0] > 128, "{inside:?}");
+        let outside = pixel(&pixels, 51, 32);
+        assert!(
+            outside[0] > 40 && outside[0] < 128 && outside[2] > 200,
+            "{outside:?}"
+        );
+        let far = pixel(&pixels, 60, 32);
+        assert!(far[0] < 8 && far[2] > 245, "{far:?}");
+        // The strip in front stays green across the quad's edge.
+        let strip = pixel(&pixels, 32, 48);
+        assert!(strip[1] > 245 && strip[0] < 8, "{strip:?}");
+    }
+
+    /// Outlines filled in a drawable's plane glow and cast a drop shadow as
+    /// meshes do.
+    #[test]
+    fn filled_outlines_glow_and_cast_shadows() {
+        let Some(mut gpu) = crate::background::test_gpu::test_gpu() else {
+            return;
+        };
+        let mut camera = Camera::ortho_2d_frame(4.0, 4.0, 64, 64);
+        camera.position = DVec3::new(0.0, 0.0, 10.0);
+        let (ndc_to_canvas, line_width) = canvas_projection(&camera).unwrap();
+        let placement = camera.to_vello_transform();
+        let opacity = GlobalOpacity(1.0);
+        let at_origin = GlobalSpatialTransform::default();
+        // A white square 2 units on a side: pixels 16 to 48.
+        let square = kurbo::Shape::to_path(&kurbo::Rect::new(0.0, 0.0, 2.0, 2.0), 0.0);
+        let fill = PlaneFillData {
+            glyphs: vec![gaanim_scene::PlaneGlyph {
+                outline: Arc::new(square),
+                placement: kurbo::Affine::translate((-1.0, -1.0)),
+                color: peniko::Color::WHITE,
+                gradient: None,
+                clip: None,
+                image: None,
+            }],
+        };
+        let mut draw = |glow: Option<Glow>, shadow: Option<DropShadow>| {
+            let mut sources = MeshSources::default();
+            let mut meshes = GpuMeshes::new(&mut sources, (64, 64), placement, 0).unwrap();
+            assert!(meshes.push_fill(
+                0,
+                (1, 1),
+                None,
+                &Content {
+                    transform: &at_origin,
+                    opacity: &opacity,
+                    mesh: None,
+                    lines: None,
+                    material: None,
+                    line_width: None,
+                    line_range: None,
+                    fill: Some(&fill),
+                    joints: None,
+                    glow,
+                    shadow,
+                    blur: None,
+                    instances: None,
+                },
+            ));
+            let frames: Vec<GpuMeshFrame> = meshes
+                .finish(&camera, ndc_to_canvas, line_width, &Illumination::default())
+                .into_iter()
+                .map(|(_, frame)| frame)
+                .collect();
+            let mut scene = vello::Scene::new();
+            scene.append(&frames[0].scene(), Some(placement));
+            let mut three_d = GpuThreeD::default();
+            three_d.prepare(&gpu.device, &gpu.queue, &mut gpu.renderer, &frames);
+            let target = gpu.target(64, 64);
+            gpu.render(&scene, &target);
+            gpu.read(&target)
+        };
+        let glowing = draw(red_glow(), None);
+        assert_eq!(pixel(&glowing, 32, 32), [255, 255, 255, 255]);
+        let near = pixel(&glowing, 50, 32);
+        assert!(near[0] > 60 && near[3] > 60 && near[1] < 8, "{near:?}");
+        let shadowed = draw(
+            None,
+            Some(DropShadow {
+                offset: gaanim_core::glam::DVec2::new(0.5, -0.5),
+                blur_radius: 0.05,
+                color: peniko::Color::new([0.0, 0.0, 0.0, 1.0]),
+            }),
+        );
+        assert_eq!(pixel(&shadowed, 32, 32), [255, 255, 255, 255]);
+        let cast = pixel(&shadowed, 52, 52);
+        assert!(cast[3] > 230 && cast[0] < 8, "{cast:?}");
+        assert_eq!(pixel(&shadowed, 12, 12)[3], 0);
     }
 
     /// The glow of a mesh hidden behind an opaque one does not show.
@@ -5947,6 +6531,7 @@ mod tests {
                 color: peniko::Color::from_rgb8(255, 0, 0),
                 gradient: None,
                 clip: None,
+                image: None,
             }],
         };
         let at_origin = GlobalSpatialTransform::default();
@@ -5968,6 +6553,9 @@ mod tests {
             fill: None,
             joints: None,
             glow: None,
+            shadow: None,
+            blur: None,
+            instances: None,
         };
         meshes.push(0, [(2, 1), (2, 1)], [None, None], &card(&front));
         meshes.push(0, [(3, 1), (3, 1)], [None, None], &card(&back));
@@ -5986,6 +6574,9 @@ mod tests {
                 fill: Some(&fill),
                 joints: None,
                 glow: None,
+                shadow: None,
+                blur: None,
+                instances: None,
             },
         ));
         let frames: Vec<GpuMeshFrame> = meshes
@@ -6056,6 +6647,7 @@ mod tests {
                         offset: corner - contour_corner,
                         outside: align == crate::effects::StrokeAlign::Outside,
                     }),
+                    image: None,
                 }],
             };
             let mut sources = MeshSources::default();
@@ -6075,6 +6667,9 @@ mod tests {
                     fill: Some(&fill),
                     joints: None,
                     glow: None,
+                    shadow: None,
+                    blur: None,
+                    instances: None,
                 },
             ));
             let frames: Vec<GpuMeshFrame> = meshes
@@ -6162,6 +6757,7 @@ mod tests {
                     color: red,
                     gradient: Some((Arc::new(gradient.clone()), kurbo::Affine::translate(corner))),
                     clip: None,
+                    image: None,
                 }],
             };
             let mut sources = MeshSources::default();
@@ -6181,6 +6777,9 @@ mod tests {
                     fill: Some(&fill),
                     joints: None,
                     glow: None,
+                    shadow: None,
+                    blur: None,
+                    instances: None,
                 },
             ));
             let frames: Vec<GpuMeshFrame> = meshes
@@ -6225,6 +6824,112 @@ mod tests {
                         &expected[at..at + 4],
                     );
                 }
+            }
+        }
+    }
+
+    /// An outline filled with an image draws its texels where Vello draws
+    /// the image, the right way up, and nothing where the image is
+    /// transparent.
+    #[test]
+    fn image_fills_match_their_2d_drawing() {
+        let Some(mut gpu) = crate::background::test_gpu::test_gpu() else {
+            return;
+        };
+        let mut camera = Camera::ortho_2d_frame(4.0, 4.0, 64, 64);
+        camera.position = DVec3::new(0.0, 0.0, 10.0);
+        let (ndc_to_canvas, line_width) = canvas_projection(&camera).unwrap();
+        let placement = camera.to_vello_transform();
+        let opacity = GlobalOpacity(1.0);
+        let at_origin = GlobalSpatialTransform::default();
+        // A square 3 units on a side, 16 pixels per unit: pixels 8 to 56,
+        // filled with an image of 8 x 8 texels, 6 pixels each, its last
+        // column transparent.
+        let square = kurbo::Shape::to_path(&kurbo::Rect::new(-1.5, -1.5, 1.5, 1.5), 0.0);
+        let texels: Vec<u8> = (0..64_u32)
+            .flat_map(|at| {
+                let (column, row) = (at % 8, at / 8);
+                let alpha = if column == 7 { 0 } else { 255 };
+                [(column * 32) as u8, (row * 32) as u8, 128, alpha]
+            })
+            .collect();
+        let mut brush = peniko::ImageBrush::new(ImageData {
+            data: Blob::from(texels),
+            format: ImageFormat::Rgba8,
+            alpha_type: ImageAlphaType::Alpha,
+            width: 8,
+            height: 8,
+        });
+        brush.sampler.quality = peniko::ImageQuality::Low;
+        let to_local = kurbo::Affine::translate((-1.5, -1.5)) * kurbo::Affine::scale(3.0 / 8.0);
+        let corner = kurbo::Vec2::new(-1.5, -1.5);
+        let fill = PlaneFillData {
+            glyphs: vec![gaanim_scene::PlaneGlyph {
+                outline: Arc::new(kurbo::Affine::translate(-corner) * square.clone()),
+                placement: kurbo::Affine::translate(corner),
+                color: peniko::Color::WHITE,
+                gradient: None,
+                clip: None,
+                image: Some(gaanim_scene::PlaneImage {
+                    brush: brush.clone(),
+                    to_pixels: to_local.inverse() * kurbo::Affine::translate(corner),
+                }),
+            }],
+        };
+        let mut sources = MeshSources::default();
+        let mut meshes = GpuMeshes::new(&mut sources, (64, 64), placement, 0).unwrap();
+        assert!(meshes.push_fill(
+            0,
+            (1, 1),
+            None,
+            &Content {
+                transform: &at_origin,
+                opacity: &opacity,
+                mesh: None,
+                lines: None,
+                material: None,
+                line_width: None,
+                line_range: None,
+                fill: Some(&fill),
+                joints: None,
+                glow: None,
+                shadow: None,
+                blur: None,
+                instances: None,
+            },
+        ));
+        let frames: Vec<GpuMeshFrame> = meshes
+            .finish(&camera, ndc_to_canvas, line_width, &Illumination::default())
+            .into_iter()
+            .map(|(_, frame)| frame)
+            .collect();
+        let mut scene = vello::Scene::new();
+        scene.append(&frames[0].scene(), Some(placement));
+        let mut three_d = GpuThreeD::default();
+        three_d.prepare(&gpu.device, &gpu.queue, &mut gpu.renderer, &frames);
+        let target = gpu.target(64, 64);
+        gpu.render(&scene, &target);
+        let drawn = gpu.read(&target);
+        let mut flat = vello::Scene::new();
+        flat.draw_image(&brush, placement * to_local);
+        let target = gpu.target(64, 64);
+        gpu.render(&flat, &target);
+        let expected = gpu.read(&target);
+        // The middle of each texel.
+        for row in 0..8 {
+            for column in 0..8 {
+                let (x, y) = (8 + column * 6 + 3, 8 + row * 6 + 3);
+                let at = (y * 64 + x) * 4;
+                let worst = (0..4)
+                    .map(|channel| drawn[at + channel].abs_diff(expected[at + channel]))
+                    .max()
+                    .unwrap();
+                assert!(
+                    worst <= 3,
+                    "texel ({column}, {row}): {:?} against {:?}",
+                    &drawn[at..at + 4],
+                    &expected[at..at + 4],
+                );
             }
         }
     }
@@ -6381,6 +7086,7 @@ mod tests {
                         color: peniko::Color::from_rgb8(20, 20, 30),
                         gradient: None,
                         clip: None,
+                        image: None,
                     });
                 }
                 x += advance * scale;
@@ -6490,6 +7196,9 @@ mod tests {
                     fill: None,
                     joints: None,
                     glow: None,
+                    shadow: None,
+                    blur: None,
+                    instances: None,
                 },
                 false,
             );
@@ -6533,6 +7242,9 @@ mod tests {
                         fill: Some(&fill),
                         joints: None,
                         glow: None,
+                        shadow: None,
+                        blur: None,
+                        instances: None,
                     },
                     true,
                 );

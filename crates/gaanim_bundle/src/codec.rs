@@ -925,6 +925,54 @@ pub fn read_lines(
     })
 }
 
+/// Encode the copies of a mesh drawn at many points (format 9): their
+/// positions, predicted from `storage`'s bases as a line list's points
+/// are, and, stored whole, their scales, turns and colors.
+pub fn write_copies(w: &mut Writer, copies: &gaanim_scene::MeshCopies, storage: Storage<'_>) {
+    write_storage(w, storage);
+    let bases: Vec<_> = storage.bases.iter().map(|base| base.points).collect();
+    write_changes(w, &copies.positions, &bases, storage.grid);
+    if !bases.is_empty() {
+        return;
+    }
+    w.option(copies.scales.as_deref(), write_points);
+    w.option(copies.rotations.as_deref(), write_points);
+    w.option(copies.colors.as_deref(), write_points);
+}
+
+/// Decode what [`write_copies`] wrote, its bases among `earlier`, the
+/// copies of its segment before it.
+pub fn read_copies(
+    r: &mut Reader<'_>,
+    earlier: &[Arc<gaanim_scene::MeshCopies>],
+) -> Result<gaanim_scene::MeshCopies> {
+    let (grid, bases) = read_storage(r, earlier)?;
+    let copies = if let Some(base) = bases.first() {
+        if bases
+            .iter()
+            .any(|other| other.positions.len() != base.positions.len())
+        {
+            return Err(corrupt("copies predicted from ones of other layouts"));
+        }
+        let points: Vec<_> = bases.iter().map(|base| &base.positions[..]).collect();
+        gaanim_scene::MeshCopies {
+            positions: read_changes(r, base.positions.len(), &points, grid)?,
+            ..(*base).clone()
+        }
+    } else {
+        gaanim_scene::MeshCopies {
+            positions: read_changes(r, 0, &[], grid)?,
+            scales: r.option(read_points)?,
+            rotations: r.option(read_points)?,
+            colors: r.option(read_points)?,
+        }
+    };
+    if !copies.is_consistent() {
+        return Err(corrupt("copies whose lists differ in length"));
+    }
+    Ok(copies)
+}
+
 // ---------------------------------------------------------------------------
 // Strokes and fills
 // ---------------------------------------------------------------------------

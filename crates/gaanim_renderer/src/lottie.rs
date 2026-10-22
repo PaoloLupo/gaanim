@@ -363,8 +363,101 @@ struct LottieLayerContext<'a> {
     next_layer_index: Option<usize>,
 }
 
-struct LottieRenderSink<'a> {
-    scene: &'a mut vello::Scene,
+/// What a Lottie scene is drawn into: a Vello scene, or the outlines the 3D
+/// pass fills for a drawable in the 3D world ([`crate::in_world`]).
+pub(crate) trait LottieCanvas {
+    fn push_layer(
+        &mut self,
+        blend: vello::peniko::BlendMode,
+        alpha: f32,
+        transform: vello::kurbo::Affine,
+        shape: &impl vello::kurbo::Shape,
+    );
+    fn push_clip_layer(
+        &mut self,
+        transform: vello::kurbo::Affine,
+        shape: &impl vello::kurbo::Shape,
+    );
+    fn pop_layer(&mut self);
+    fn fill(
+        &mut self,
+        transform: vello::kurbo::Affine,
+        brush: &vello::peniko::Brush,
+        shape: &impl vello::kurbo::Shape,
+    );
+    fn stroke(
+        &mut self,
+        style: &vello::kurbo::Stroke,
+        transform: vello::kurbo::Affine,
+        brush: &vello::peniko::Brush,
+        shape: &impl vello::kurbo::Shape,
+    );
+    fn draw_image(&mut self, image: &vello::peniko::ImageBrush, transform: vello::kurbo::Affine);
+}
+
+impl LottieCanvas for vello::Scene {
+    fn push_layer(
+        &mut self,
+        blend: vello::peniko::BlendMode,
+        alpha: f32,
+        transform: vello::kurbo::Affine,
+        shape: &impl vello::kurbo::Shape,
+    ) {
+        vello::Scene::push_layer(
+            self,
+            vello::peniko::Fill::NonZero,
+            blend,
+            alpha,
+            transform,
+            shape,
+        );
+    }
+
+    fn push_clip_layer(
+        &mut self,
+        transform: vello::kurbo::Affine,
+        shape: &impl vello::kurbo::Shape,
+    ) {
+        vello::Scene::push_clip_layer(self, vello::peniko::Fill::NonZero, transform, shape);
+    }
+
+    fn pop_layer(&mut self) {
+        vello::Scene::pop_layer(self);
+    }
+
+    fn fill(
+        &mut self,
+        transform: vello::kurbo::Affine,
+        brush: &vello::peniko::Brush,
+        shape: &impl vello::kurbo::Shape,
+    ) {
+        vello::Scene::fill(
+            self,
+            vello::peniko::Fill::NonZero,
+            transform,
+            brush,
+            None,
+            shape,
+        );
+    }
+
+    fn stroke(
+        &mut self,
+        style: &vello::kurbo::Stroke,
+        transform: vello::kurbo::Affine,
+        brush: &vello::peniko::Brush,
+        shape: &impl vello::kurbo::Shape,
+    ) {
+        vello::Scene::stroke(self, style, transform, brush, None, shape);
+    }
+
+    fn draw_image(&mut self, image: &vello::peniko::ImageBrush, transform: vello::kurbo::Affine) {
+        vello::Scene::draw_image(self, image, transform);
+    }
+}
+
+struct LottieRenderSink<'a, C: LottieCanvas> {
+    scene: &'a mut C,
     composition: &'a velato::Composition,
     image_layers: &'a [LottieImageLayer],
     solid_layers: &'a [LottieSolidLayer],
@@ -375,7 +468,7 @@ struct LottieRenderSink<'a> {
     draw_state: LottieDrawState,
 }
 
-impl<'a> LottieRenderSink<'a> {
+impl<'a, C: LottieCanvas> LottieRenderSink<'a, C> {
     fn current_context(&self) -> Option<LottieLayerContext<'a>> {
         if let Some(context) = self.layer_groups.last() {
             *context
@@ -485,22 +578,13 @@ impl<'a> LottieRenderSink<'a> {
         let blend = layer
             .blend_mode
             .unwrap_or_else(|| vello::peniko::Mix::Normal.into());
-        self.scene.push_layer(
-            vello::peniko::Fill::NonZero,
-            blend,
-            alpha,
-            transform,
-            &bounds,
-        );
+        self.scene.push_layer(blend, alpha, transform, &bounds);
 
         let mut mask_elements = Vec::new();
         for mask in &layer.masks {
             mask.geometry.evaluate(context.frame, &mut mask_elements);
-            self.scene.push_clip_layer(
-                vello::peniko::Fill::NonZero,
-                transform,
-                &mask_elements.as_slice(),
-            );
+            self.scene
+                .push_clip_layer(transform, &mask_elements.as_slice());
             mask_elements.clear();
         }
         Some(layer.masks.len())
@@ -562,7 +646,7 @@ impl<'a> LottieRenderSink<'a> {
     }
 }
 
-impl velato::RenderSink for LottieRenderSink<'_> {
+impl<C: LottieCanvas> velato::RenderSink for LottieRenderSink<'_, C> {
     fn push_layer(
         &mut self,
         blend: impl Into<vello::peniko::BlendMode>,
@@ -570,8 +654,7 @@ impl velato::RenderSink for LottieRenderSink<'_> {
         transform: vello::kurbo::Affine,
         shape: &impl vello::kurbo::Shape,
     ) {
-        self.scene
-            .push_layer(vello::peniko::Fill::NonZero, blend, alpha, transform, shape);
+        self.scene.push_layer(blend.into(), alpha, transform, shape);
     }
 
     fn push_clip_layer(
@@ -579,8 +662,7 @@ impl velato::RenderSink for LottieRenderSink<'_> {
         transform: vello::kurbo::Affine,
         shape: &impl vello::kurbo::Shape,
     ) {
-        self.scene
-            .push_clip_layer(vello::peniko::Fill::NonZero, transform, shape);
+        self.scene.push_clip_layer(transform, shape);
     }
 
     fn pop_layer(&mut self) {
@@ -602,7 +684,7 @@ impl velato::RenderSink for LottieRenderSink<'_> {
             let source = shape.to_path(0.05);
             let outline = gaanim_math::get_subpath(&source, state.reveal);
             if let Some(stroke) = stroke {
-                self.scene.stroke(stroke, transform, brush, None, &outline);
+                self.scene.stroke(stroke, transform, brush, &outline);
             } else {
                 // Temporary outlines use logical scene units, while authored
                 // Lottie paths and strokes are expressed in composition pixels.
@@ -614,20 +696,18 @@ impl velato::RenderSink for LottieRenderSink<'_> {
                     1.0 - state.fill
                 };
                 let paint = brush.clone().multiply_alpha(outline_alpha);
-                self.scene.stroke(&style, transform, &paint, None, &outline);
+                self.scene.stroke(&style, transform, &paint, &outline);
                 if state.reveal >= 1.0 && state.fill > 0.0 {
                     let paint = brush.clone().multiply_alpha(state.fill);
-                    self.scene
-                        .fill(vello::peniko::Fill::NonZero, transform, &paint, None, shape);
+                    self.scene.fill(transform, &paint, shape);
                 }
             }
             return;
         }
         if let Some(stroke) = stroke {
-            self.scene.stroke(stroke, transform, brush, None, shape);
+            self.scene.stroke(stroke, transform, brush, shape);
         } else {
-            self.scene
-                .fill(vello::peniko::Fill::NonZero, transform, brush, None, shape);
+            self.scene.fill(transform, brush, shape);
         }
     }
 
@@ -734,6 +814,41 @@ impl LottiePlayer {
     }
 
     fn render(&mut self, frame: f64) {
+        let mut scene = vello::Scene::new();
+        let mut renderer = std::mem::take(&mut self.renderer);
+        self.draw_frame(&mut renderer, &mut scene, frame);
+        self.renderer = renderer;
+        self.scene = Arc::new(scene);
+        self.sampled_frame = frame;
+    }
+
+    /// Draw what the player shows now into `canvas`, as [`Self::scene`]
+    /// holds it, in the drawable's own units.
+    pub(crate) fn draw_into(&self, canvas: &mut impl LottieCanvas) {
+        self.draw_frame(&mut velato::Renderer::new(), canvas, self.sampled_frame);
+    }
+
+    /// What tells apart the instants the player shows: the frame sampled,
+    /// the asset and background, and how far it is drawn.
+    pub(crate) fn shown(&self) -> (u64, usize, Option<u32>, [u64; 3]) {
+        (
+            self.sampled_frame.to_bits(),
+            Arc::as_ptr(&self.rendered_asset) as usize,
+            self.background,
+            [
+                self.draw_state.reveal.to_bits(),
+                u64::from(self.draw_state.fill.to_bits()),
+                self.draw_state.outline_width.to_bits(),
+            ],
+        )
+    }
+
+    fn draw_frame<C: LottieCanvas>(
+        &self,
+        renderer: &mut velato::Renderer,
+        canvas: &mut C,
+        frame: f64,
+    ) {
         let mut view = self.playback.view;
         if let Some(package) = &self.playback.package {
             let sw = self.rendered_asset.width() as f64;
@@ -760,9 +875,23 @@ impl LottiePlayer {
             -view.source_x * view.scale_x - w2,
             view.source_y * view.scale_y + h2,
         ]);
-        let mut rendered = vello::Scene::new();
+        let clip = vello::kurbo::Rect::new(-w2, -h2, w2, h2);
+        canvas.push_clip_layer(vello::kurbo::Affine::IDENTITY, &clip);
+        if let Some(rgba) = self.background {
+            let color = vello::peniko::Color::from_rgba8(
+                (rgba >> 24) as u8,
+                (rgba >> 16) as u8,
+                (rgba >> 8) as u8,
+                ((rgba as u8) as f32 * self.draw_state.fill.clamp(0.0, 1.0)).round() as u8,
+            );
+            canvas.fill(
+                vello::kurbo::Affine::IDENTITY,
+                &vello::peniko::Brush::Solid(color),
+                &clip,
+            );
+        }
         let mut sink = LottieRenderSink {
-            scene: &mut rendered,
+            scene: canvas,
             composition: &self.rendered_asset.composition,
             image_layers: &self.rendered_asset.image_layers,
             solid_layers: &self.rendered_asset.solid_layers,
@@ -772,39 +901,14 @@ impl LottiePlayer {
             layer_groups: Vec::new(),
             draw_state: self.draw_state,
         };
-        self.renderer.append(
+        renderer.append(
             &self.rendered_asset.composition,
             frame,
             transform,
             1.0,
             &mut sink,
         );
-        let mut scene = vello::Scene::new();
-        let clip = vello::kurbo::Rect::new(-w2, -h2, w2, h2);
-        scene.push_clip_layer(
-            vello::peniko::Fill::NonZero,
-            vello::kurbo::Affine::IDENTITY,
-            &clip,
-        );
-        if let Some(rgba) = self.background {
-            let color = vello::peniko::Color::from_rgba8(
-                (rgba >> 24) as u8,
-                (rgba >> 16) as u8,
-                (rgba >> 8) as u8,
-                ((rgba as u8) as f32 * self.draw_state.fill.clamp(0.0, 1.0)).round() as u8,
-            );
-            scene.fill(
-                vello::peniko::Fill::NonZero,
-                vello::kurbo::Affine::IDENTITY,
-                color,
-                None,
-                &clip,
-            );
-        }
-        scene.append(&rendered, None);
-        scene.pop_layer();
-        self.scene = Arc::new(scene);
-        self.sampled_frame = frame;
+        canvas.pop_layer();
     }
 }
 

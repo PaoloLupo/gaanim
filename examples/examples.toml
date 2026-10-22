@@ -530,6 +530,11 @@ title = "3D morphs"
 description = "A mesh morphing into another with transform_to: spheres, tori and planes matched by their texture coordinates, cubes, cylinders and cones by rays from their center, and one mesh morphing through three targets in turn."
 
 [[example]]
+path = "3d/points_3d.py"
+title = "3D point clouds and copies"
+description = "One drawable that draws one mesh at many points: spheres at each point of a cloud, colored or not, voxels and an arrow field copied from a primitive, and clouds and fields moving copy by copy into another set with transform_to."
+
+[[example]]
 path = "3d/shapes_3d.py"
 description = "Tori, arrows between two points, tubes along open, creased and closed paths, flat sheets of text, equations and shapes, and lit lines between points or the drawables they follow."
 
@@ -547,6 +552,16 @@ description = "A glTF model imported with scene.media.gltf: its rest pose, its a
 path = "3d/glow_3d.py"
 title = "Glow on 3D content"
 description = "A halo around what the camera sees of a sphere, a 3D line and a walking glTF model, grown and faded with animate.glow, and hidden where a solid in front covers it."
+
+[[example]]
+path = "3d/soft_effects_3d.py"
+title = "Shadows and blurs on 3D content"
+description = "Drop shadows cast by a sphere and by a text placed in 3D, a blurred cube that the timeline sharpens, and a blurred ring that a sharp solid in front of it hides."
+
+[[example]]
+path = "3d/media_in_3d.py"
+title = "Images and Lottie in 3D"
+description = "An image and a Lottie scene placed in the 3D world with in_3d(), and an image kept facing the camera with billboard(), each hidden pixel by pixel by a ball passing in front."
 
 [[example]]
 path = "3d/lines_3d.py"

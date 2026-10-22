@@ -13,7 +13,10 @@ instalar una versión nueva, sigue
 
 = 0.17.0
 
-Sin publicar. Una malla 3D se transforma en otra con `animate.transform_to`.
+Sin publicar. Una malla 3D se transforma en otra con `animate.transform_to`,
+`points_3d` e `instances` dibujan miles de puntos o copias de una malla
+como un solo objeto, y las imágenes, las escenas Lottie, las sombras y los
+desenfoques también viven en el mundo 3D.
 
 == Morph entre mallas 3D
 
@@ -39,11 +42,59 @@ Sin publicar. Una malla 3D se transforma en otra con `animate.transform_to`.
   calcula para los materiales que lo dibujan.
 - Nuevo ejemplo, `3d/morph_3d`.
 
+== Nubes de puntos y copias de una malla
+
+- `scene.geometry.points_3d(positions, radius, colors=...)` dibuja una esfera
+  iluminada en cada punto, y `scene.geometry.instances(mesh, positions,
+  scales=..., rotations=..., colors=...)` copia la malla y el material de una
+  primitiva en cada posición, con la escala, el giro y el color de cada
+  copia. Ver
+  #link("/guias/camara-y-3d/#nubes-de-puntos-y-copias-de-una-malla")[Cámara y 3D].
+- La malla se sube una vez y todas las copias se dibujan juntas, así que una
+  nube de miles de puntos es un solo objeto que se mueve, gira, se ilumina y
+  proyecta sombra como cualquier malla.
+- `create()` hace crecer las copias una tras otra y `uncreate()` las encoge;
+  `animate.transform_to` otro objeto de tantas copias lleva cada una a su
+  lugar en el otro.
+- Un paquete `.gaanim` guarda cada conjunto de copias una vez y en cada
+  fotograma solo cuánto han crecido.
+- Nuevo ejemplo, `3d/points_3d`.
+
+== Imágenes, Lottie y efectos en el mundo 3D
+
+- Una imagen o una escena Lottie con `.in_3d()` o `.billboard()` la dibuja
+  el pase 3D, en su plano: las mallas que tiene delante la tapan píxel a
+  píxel, la luz la ilumina con `in_3d(material)` y proyecta sombra donde es
+  al menos medio opaca. Antes se omitían en `in_3d()`, y una etiqueta con
+  ellas se dibujaba encima de todo el 3D. Ver el ejemplo `3d/media_in_3d`.
+- Una escena Lottie se convierte en los contornos que rellena y traza, en
+  cada fotograma: los modos de mezcla se dibujan como el normal y una capa
+  translúcida atenúa cada una de sus formas.
+- `shadow(...)` y `blur(...)` funcionan en mallas, superficies, líneas,
+  modelos glTF y objetos con `.in_3d()`, como `glow(...)`: la sombra parte
+  de la silueta visible, desplazada, y el desenfoque dibuja el objeto aparte
+  y pone su color desenfocado sobre lo que tiene detrás. Lo que está delante
+  tapa los dos. `animate.shadow` y `animate.blur` los animan. Ver
+  #link("/guias/camara-y-3d/#como-se-dibuja-el-3d")[Cámara y 3D] y el
+  ejemplo `3d/soft_effects_3d`.
+- El brillo, la sombra y el desenfoque de las partes de un objeto con
+  `.in_3d()`, como las letras de un texto, valen para todo el objeto.
+- `.billboard()` funciona en imágenes, vídeos y escenas Lottie: antes no los
+  giraba hacia la cámara.
+- `gaanim check` de un paquete con objetos `.in_3d()` ya no da por
+  distintos los fotogramas que recompone: los encuadra con la misma
+  colocación que guarda el paquete, como al grabarlos.
+
 == Al actualizar
 
-- Los paquetes `.gaanim` pasan al formato 8, que guarda los morphs 3D. Gaanim
-  sigue abriendo los de formato 5 a 7; un Gaanim anterior no abre los
-  nuevos, así que actualiza los reproductores que los publican.
+- Los paquetes `.gaanim` pasan al formato 10, que guarda los morphs 3D, las
+  copias de mallas, las imágenes de los objetos en el mundo 3D y la sombra y
+  el desenfoque de los objetos 3D. Gaanim sigue abriendo los de formato 5 a
+  9; un Gaanim anterior no abre los nuevos, así que actualiza los
+  reproductores que los publican.
+- Una imagen, una escena Lottie, una sombra, un brillo o un desenfoque
+  dentro de `.in_3d()` ya no se omiten: revisa las escenas que contaban con
+  ello.
 - `transform_to` y `replacement_transform_to` entre una malla 3D y un objeto
   que no lo es, o entre una malla con material y otra sin él, lanzan
   `ValueError`. Antes la malla no cambiaba.

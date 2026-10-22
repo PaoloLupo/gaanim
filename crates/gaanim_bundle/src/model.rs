@@ -106,6 +106,9 @@ pub struct TableCounts {
     pub meshes: u32,
     #[serde(default, skip_serializing_if = "is_zero")]
     pub lines: u32,
+    /// Copies of meshes drawn at many points (format 9).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub copies: u32,
 }
 
 fn is_zero(value: &u32) -> bool {
@@ -123,6 +126,7 @@ impl TableCounts {
             effects: self.effects + other.effects,
             meshes: self.meshes + other.meshes,
             lines: self.lines + other.lines,
+            copies: self.copies + other.copies,
         }
     }
 
@@ -136,6 +140,7 @@ impl TableCounts {
             effects: self.effects - other.effects,
             meshes: self.meshes - other.meshes,
             lines: self.lines - other.lines,
+            copies: self.copies - other.copies,
         }
     }
 
@@ -183,6 +188,11 @@ pub struct Tables {
     /// vertices stores their change from them (see [`predict`]).
     mesh_chains: HashMap<(u32, blake3::Hash), Chain>,
     line_chains: HashMap<(u32, blake3::Hash), Chain>,
+    /// The copies of meshes drawn at many points, as line lists are stored.
+    pub(crate) copies: Vec<Vec<u8>>,
+    copies_by_hash: HashMap<blake3::Hash, u32>,
+    copies_by_address: ByAddress<gaanim_scene::MeshCopies>,
+    copy_chains: HashMap<(u32, blake3::Hash), Chain>,
     /// Keys of the drawables the post-process leaves out.
     pub(crate) post_exempt: BTreeSet<u32>,
     /// Whether a frame draws glass, which only a GPU pass composes.
@@ -228,6 +238,10 @@ impl Default for Tables {
             lines_by_address: ByAddress::default(),
             mesh_chains: HashMap::new(),
             line_chains: HashMap::new(),
+            copies: Vec::new(),
+            copies_by_hash: HashMap::new(),
+            copies_by_address: ByAddress::default(),
+            copy_chains: HashMap::new(),
             post_exempt: BTreeSet::new(),
             glass: false,
             starts: vec![TableCounts::default()],
@@ -385,6 +399,17 @@ fn lines_layout(lines: &gaanim_scene::LineListData) -> blake3::Hash {
     w.bool(lines.strip);
     codec::write_color(&mut w, lines.color);
     w.option(lines.colors.as_deref(), codec::write_points);
+    blake3::hash(&w.buf)
+}
+
+/// What predicted copies share with those they are predicted from:
+/// everything but their positions' values.
+fn copies_layout(copies: &gaanim_scene::MeshCopies) -> blake3::Hash {
+    let mut w = Writer::new();
+    w.len(copies.positions.len());
+    w.option(copies.scales.as_deref(), codec::write_points);
+    w.option(copies.rotations.as_deref(), codec::write_points);
+    w.option(copies.colors.as_deref(), codec::write_points);
     blake3::hash(&w.buf)
 }
 
@@ -606,6 +631,7 @@ impl Tables {
             effects: self.effect_shaders.len() as u32,
             meshes: self.meshes.len() as u32,
             lines: self.lines.len() as u32,
+            copies: self.copies.len() as u32,
         }
     }
 
@@ -700,6 +726,52 @@ impl Tables {
         self.meshes.push(bytes);
         self.mesh_deps.push(deps.into_iter().collect());
         self.mesh_by_hash.insert(hash, index);
+        index
+    }
+
+    /// Store the copies of a mesh drawn at many points once and return their
+    /// index, their positions predicted from the earlier copies of the
+    /// drawable `track`, as a line list's points are.
+    pub(crate) fn copies(&mut self, copies: &Arc<gaanim_scene::MeshCopies>, track: u32) -> u32 {
+        let index = match self.copies_by_address.get(copies) {
+            Some(index) => index,
+            None => {
+                let mut w = Writer::new();
+                codec::write_copies(&mut w, copies, codec::Storage::default());
+                let whole = w.into_bytes();
+                let hash = blake3::hash(&whole);
+                let index = match self.copies_by_hash.get(&hash) {
+                    Some(index) => *index,
+                    None => {
+                        let index = self.copies.len() as u32;
+                        let start = self.starts.last().expect("a segment is open").copies;
+                        let chain = self
+                            .copy_chains
+                            .entry((track, copies_layout(copies)))
+                            .or_default();
+                        let item = Item {
+                            index,
+                            start,
+                            web: self.grid.is_some(),
+                            points: &copies.positions,
+                            normals: None,
+                        };
+                        let bytes = predict(chain, item, whole, |storage| {
+                            let mut w = Writer::new();
+                            codec::write_copies(&mut w, copies, storage);
+                            w.into_bytes()
+                        });
+                        self.pending_bytes += bytes.len();
+                        self.copies.push(bytes);
+                        self.copies_by_hash.insert(hash, index);
+                        index
+                    }
+                };
+                self.copies_by_address.insert(copies, index);
+                index
+            }
+        };
+        self.note(segment_of(&self.starts, |c| c.copies, index));
         index
     }
 
@@ -824,11 +896,16 @@ impl Tables {
         for lines in &self.lines[range(start.lines, end.lines)] {
             w.buf.extend_from_slice(lines);
         }
+        w.len(counts.copies as usize);
+        for copies in &self.copies[range(start.copies, end.copies)] {
+            w.buf.extend_from_slice(copies);
+        }
         self.starts.push(end);
         self.pending_bytes = 0;
         // Items predict only from their own segment, which loads whole.
         self.mesh_chains.clear();
         self.line_chains.clear();
+        self.copy_chains.clear();
         Some((w.into_bytes(), counts))
     }
 
@@ -941,6 +1018,7 @@ struct Segment {
     recipes: Vec<SegmentRecipe>,
     meshes: Vec<Arc<gaanim_scene::TriangleMeshData>>,
     lines: Vec<Arc<gaanim_scene::LineListData>>,
+    copies: Vec<Arc<gaanim_scene::MeshCopies>>,
 }
 
 /// A recipe of a loaded segment, decoded the first time a frame draws it.
@@ -1113,6 +1191,13 @@ impl DecodedTables {
             let lines = codec::read_lines(&mut r, self.version, &decoded.lines)?;
             decoded.lines.push(Arc::new(lines));
         }
+        // Format 9 added the copies of meshes drawn at many points.
+        if self.version >= 9 {
+            for _ in 0..count(&mut r, expected.copies, "copies")? {
+                let copies = codec::read_copies(&mut r, &decoded.copies)?;
+                decoded.copies.push(Arc::new(copies));
+            }
+        }
         if !r.is_empty() {
             return Err(corrupt("a segment has trailing data"));
         }
@@ -1166,6 +1251,7 @@ impl DecodedTables {
             effects: decoded.effect_shaders.len() as u32,
             meshes: 0,
             lines: 0,
+            copies: 0,
         };
         let mut tables = Self::new(&[counts], 5);
         tables.segments[0] = Some(decoded);
@@ -1214,6 +1300,12 @@ impl DecodedTables {
 
     fn line_list(&self, index: u32) -> Result<Arc<gaanim_scene::LineListData>> {
         lookup(self, |c| c.lines, |s| &s.lines, index, "line list").cloned()
+    }
+}
+
+impl DecodedTables {
+    fn copies(&self, index: u32) -> Result<Arc<gaanim_scene::MeshCopies>> {
+        lookup(self, |c| c.copies, |s| &s.copies, index, "copies").cloned()
     }
 }
 
@@ -1344,8 +1436,51 @@ fn write_three_d(
         .enumerate()
         .filter_map(|(index, source)| source.glow.as_ref().map(|glow| (index, glow)))
         .collect();
+    // After the views, the copies of meshes drawn at many points (format
+    // 9): by source, its copies and how far they have grown in.
+    let copies: Vec<(usize, &gaanim_scene::MeshInstances)> = three_d
+        .sources
+        .iter()
+        .enumerate()
+        .filter_map(|(index, source)| source.instances.as_ref().map(|copies| (index, copies)))
+        .collect();
+    // After the copies, the images outlines are filled with instead of
+    // their color (format 10): by source, each glyph's index, its brush and
+    // the map from its outline's units to the image's pixels.
+    let images: Vec<(usize, Vec<(usize, &gaanim_scene::PlaneImage)>)> = fills
+        .iter()
+        .filter_map(|&(index, fill)| {
+            let glyphs: Vec<_> = fill
+                .glyphs
+                .iter()
+                .enumerate()
+                .filter_map(|(glyph, filled)| filled.image.as_ref().map(|image| (glyph, image)))
+                .collect();
+            (!glyphs.is_empty()).then_some((index, glyphs))
+        })
+        .collect();
+    // Last, the drop shadows of 3D drawables (format 10): by source, its
+    // color, offset and blur.
+    let shadows: Vec<(usize, &gaanim_renderer::effects::DropShadow)> = three_d
+        .sources
+        .iter()
+        .enumerate()
+        .filter_map(|(index, source)| source.shadow.as_ref().map(|shadow| (index, shadow)))
+        .collect();
+    // And their blurs: by source, its sigma.
+    let blurs: Vec<(usize, f64)> = three_d
+        .sources
+        .iter()
+        .enumerate()
+        .filter_map(|(index, source)| source.blur.map(|blur| (index, blur.sigma)))
+        .collect();
     // Each section is written when it or a later one holds something.
-    let later = !palettes.is_empty() || !glows.is_empty() || !views.is_empty();
+    let after_images = !images.is_empty() || !shadows.is_empty() || !blurs.is_empty();
+    let later = !palettes.is_empty()
+        || !glows.is_empty()
+        || !views.is_empty()
+        || !copies.is_empty()
+        || after_images;
     if !widths.is_empty()
         || !ranges.is_empty()
         || !outlines.is_empty()
@@ -1472,7 +1607,7 @@ fn write_three_d(
             }
         }
     }
-    if !glows.is_empty() || !views.is_empty() {
+    if !glows.is_empty() || !views.is_empty() || !copies.is_empty() || after_images {
         w.len(glows.len());
         for (index, glow) in glows {
             w.len(index);
@@ -1485,7 +1620,7 @@ fn write_three_d(
     // what snapshots froze and what views with a 3D camera of their own
     // draw this frame. By screen, the camera it was drawn through, the
     // region and detail of its image, and its content, encoded as a frame's.
-    if !views.is_empty() {
+    if !views.is_empty() || !copies.is_empty() || after_images {
         w.len(views.len());
         for &(screen, frozen) in views {
             w.var(u64::from(screen));
@@ -1495,6 +1630,46 @@ fn write_three_d(
             let mut content = Writer::new();
             write_three_d(&mut content, tables, keys, &frozen.three_d, &[]);
             w.bytes(&content.into_bytes());
+        }
+    }
+    if !copies.is_empty() || after_images {
+        w.len(copies.len());
+        for (index, instances) in copies {
+            let key = keys.key(three_d.sources[index].entity);
+            w.len(index);
+            w.var(u64::from(tables.copies(&instances.copies, key)));
+            w.f32(instances.reveal);
+        }
+    }
+    if after_images {
+        w.len(images.len());
+        for (index, glyphs) in images {
+            w.len(index);
+            w.len(glyphs.len());
+            for (glyph, image) in glyphs {
+                w.len(glyph);
+                codec::write_image_brush(w, tables, &image.brush);
+                for value in image.to_pixels.as_coeffs() {
+                    w.f64(value);
+                }
+            }
+        }
+    }
+    if !shadows.is_empty() || !blurs.is_empty() {
+        w.len(shadows.len());
+        for (index, shadow) in shadows {
+            w.len(index);
+            codec::write_color(w, shadow.color);
+            w.f64(shadow.offset.x);
+            w.f64(shadow.offset.y);
+            w.f64(shadow.blur_radius);
+        }
+    }
+    if !blurs.is_empty() {
+        w.len(blurs.len());
+        for (index, sigma) in blurs {
+            w.len(index);
+            w.f64(sigma);
         }
     }
 }
@@ -1559,6 +1734,9 @@ fn read_three_d(
             fill: None,
             joints: None,
             glow: None,
+            shadow: None,
+            blur: None,
+            instances: None,
             composition: ThreeDComposition {
                 in_views,
                 post_exempt,
@@ -1628,6 +1806,7 @@ fn read_three_d(
                     color,
                     gradient: None,
                     clip: None,
+                    image: None,
                 });
             }
             if index >= sources.len() {
@@ -1732,6 +1911,67 @@ fn read_three_d(
                     resolution,
                 }),
             ));
+        }
+    }
+    if !r.is_empty() {
+        for _ in 0..r.len()? {
+            let index = r.len()?;
+            let copies = tables.copies(r.u32()?)?;
+            let reveal = r.f32()?;
+            sources
+                .get_mut(index)
+                .ok_or_else(|| corrupt("copies of no 3D source"))?
+                .instances = Some(gaanim_scene::MeshInstances { copies, reveal });
+        }
+    }
+    if !r.is_empty() {
+        for _ in 0..r.len()? {
+            let index = r.len()?;
+            let (_, glyphs) = fills
+                .iter_mut()
+                .find(|(filled, _)| *filled == index)
+                .ok_or_else(|| corrupt("images of no filled outlines"))?;
+            for _ in 0..r.len()? {
+                let glyph = r.len()?;
+                let brush = codec::read_image_brush(r, tables)?;
+                let mut to_pixels = [0.0; 6];
+                for value in &mut to_pixels {
+                    *value = r.f64()?;
+                }
+                glyphs
+                    .get_mut(glyph)
+                    .ok_or_else(|| corrupt("an image of no filled outline"))?
+                    .image = Some(gaanim_scene::PlaneImage {
+                    brush,
+                    to_pixels: kurbo::Affine::new(to_pixels),
+                });
+            }
+        }
+    }
+    if !r.is_empty() {
+        for _ in 0..r.len()? {
+            let index = r.len()?;
+            let color = codec::read_color(r)?;
+            let offset = gaanim_core::glam::DVec2::new(r.f64()?, r.f64()?);
+            let blur_radius = r.f64()?;
+            sources
+                .get_mut(index)
+                .ok_or_else(|| corrupt("a shadow of no 3D source"))?
+                .shadow = Some(gaanim_renderer::effects::DropShadow {
+                offset,
+                blur_radius,
+                color,
+            });
+        }
+    }
+    if !r.is_empty() {
+        for _ in 0..r.len()? {
+            let index = r.len()?;
+            let sigma = r.f64()?;
+            sources
+                .get_mut(index)
+                .ok_or_else(|| corrupt("a blur of no 3D source"))?
+                .blur = Some(gaanim_renderer::effects::GaussianBlur { sigma });
         }
     }
     for (index, glyphs) in fills {
@@ -3236,9 +3476,6 @@ mod tests {
         }
     }
 
-    /// A mesh that bends from frame to frame, and a curve that moves, store
-    /// their change from the frames before and decode bit for bit, in
-    /// segments that each decode alone.
     /// The frames of a morph store the two meshes they blend once, and
     /// each frame as how far between them it lies, also in later
     /// segments; they decode exactly and keep the blend, for a repack.
@@ -3277,6 +3514,9 @@ mod tests {
         assert!(size * 4 < changes, "{size} against {changes}");
     }
 
+    /// A mesh that bends from frame to frame, and a curve that moves, store
+    /// their change from the frames before and decode bit for bit, in
+    /// segments that each decode alone.
     #[test]
     fn meshes_and_lines_that_move_store_their_change_and_decode_exactly() {
         let meshes: Vec<_> = (0..40)

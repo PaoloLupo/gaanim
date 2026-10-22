@@ -7,6 +7,7 @@ pub mod export;
 pub mod gltf;
 pub mod host;
 pub mod matrix;
+mod mesh_copies;
 mod mesh_morph;
 pub mod pivot_lens;
 pub mod prelude;

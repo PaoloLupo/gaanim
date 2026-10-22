@@ -1602,6 +1602,70 @@ def validate_primitives_3d_contract(module: object) -> list[str]:
             pass
         else:
             failures.append("a 3D mesh transformed into a drawable that is not one lit as it is")
+    # 2D effects draw on 3D content too, and keep it a Primitive3D.
+    soft = scene.geometry.sphere(0.5).shadow(module.BLACK, 0.1, -0.1, 0.05).blur(0.1).glow(module.RED)
+    if not isinstance(soft, module.Primitive3D):
+        failures.append("a 3D primitive with a shadow, blur and glow is no longer a Primitive3D")
+    for anim in (soft.animate.blur(0.0), soft.animate.shadow(None)):
+        if not isinstance(anim, module.Anim):
+            failures.append("a 3D primitive cannot animate its shadow or blur")
+    return failures
+
+
+def validate_mesh_copies_contract(module: object) -> list[str]:
+    """Exercise point clouds and copies of a mesh: their lists, plays and errors."""
+    failures: list[str] = []
+    scene = module.Scene(frame=(16, 9))
+    row = [(x, 0, 0) for x in range(4)]
+    column = [(0, y, 0) for y in range(4)]
+    cube = scene.geometry.cube(0.3)
+    drawables = (
+        scene.geometry.points_3d(row),
+        scene.geometry.points_3d(column, 0.1, colors=[module.GOLD] * 4, segments=6, rings=4),
+        scene.geometry.instances(cube, row, scales=[0.5, (1, 2, 1), 1, 2], rotations=[(0, 0, 1)] * 4),
+        scene.geometry.instances(cube, column, colors=[module.BLUE] * 4, keep_mesh=True),
+    )
+    for drawable in drawables:
+        if not isinstance(drawable, module.Primitive3D):
+            failures.append("a point cloud or copies did not return a Primitive3D")
+        elif not isinstance(drawable.animate.create(), module.Anim):
+            failures.append("copies cannot animate their creation")
+    for morph in (
+        drawables[0].animate.transform_to(drawables[1]),
+        drawables[2].animate.transform_to(drawables[3]),
+        drawables[0].animate.transform_to(drawables[2]),
+    ):
+        if not isinstance(morph, module.Anim):
+            failures.append("copies cannot transform into as many copies")
+    other = module.Scene(frame=(16, 9))
+    rod = scene.geometry.line_3d((0, 0, 0), (1, 0, 0))
+    invalid_calls = (
+        lambda: scene.geometry.points_3d([]),
+        lambda: scene.geometry.points_3d(row, 0.0),
+        lambda: scene.geometry.points_3d(row, colors=[module.GOLD]),
+        lambda: scene.geometry.points_3d([(float("nan"), 0, 0)]),
+        lambda: scene.geometry.instances(cube, []),
+        lambda: scene.geometry.instances(cube, row, scales=[1.0]),
+        lambda: scene.geometry.instances(drawables[2], row),
+        lambda: scene.geometry.instances(rod, row),
+        lambda: scene.geometry.instances(scene.geometry.circle(1.0), row),
+        lambda: scene.geometry.instances(other.geometry.cube(1.0), row),
+        lambda: drawables[0].animate.transform_to(scene.geometry.points_3d(row[:3])),
+        lambda: drawables[0].animate.transform_to(cube),
+    )
+    for call in invalid_calls:
+        try:
+            call()
+        except ValueError:
+            pass
+        else:
+            failures.append("a point cloud or copies accepted an invalid argument")
+    try:
+        scene.geometry.instances(cube, row, scales=["big"] * 4)
+    except TypeError:
+        pass
+    else:
+        failures.append("Geometry.instances accepted a scale that is neither a number nor a triple")
     return failures
 
 
@@ -3700,6 +3764,7 @@ def main() -> int:
     missing.extend(validate_rough_notation_contract(module))
     missing.extend(validate_extrude_contract(module))
     missing.extend(validate_primitives_3d_contract(module))
+    missing.extend(validate_mesh_copies_contract(module))
     missing.extend(validate_gltf_contract(module))
     missing.extend(validate_in_3d_contract(module))
     missing.extend(validate_deg_contract(module))

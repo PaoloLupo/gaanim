@@ -229,10 +229,13 @@ Primitives, arrows and tubes, extrusion, axonometric drawings and 3D axes.
 | [Transforms 3d](3d/transforms_3d.py) | Turning, moving and scaling drawables in depth with the _3d methods, about their center or a pivot. |
 | [Extrusion](3d/extrusion.py) | Text, equations, SVGs, shapes with holes and groups extruded into lit solids, with depth, bevel, tolerance and materials. |
 | [3D morphs](3d/morph_3d.py) | A mesh morphing into another with transform_to: spheres, tori and planes matched by their texture coordinates, cubes, cylinders and cones by rays from their center, and one mesh morphing through three targets in turn. |
+| [3D point clouds and copies](3d/points_3d.py) | One drawable that draws one mesh at many points: spheres at each point of a cloud, colored or not, voxels and an arrow field copied from a primitive, and clouds and fields moving copy by copy into another set with transform_to. |
 | [Shapes 3d](3d/shapes_3d.py) | Tori, arrows between two points, tubes along open, creased and closed paths, flat sheets of text, equations and shapes, and lit lines between points or the drawables they follow. |
 | [2D drawables in 3D](3d/drawables_in_3d.py) | Text, equations and shapes placed in the 3D world with in_3d(): turned, written, tilted by perspective, hidden by meshes and lit, beside billboard(). |
 | [glTF models](3d/models_3d.py) | A glTF model imported with scene.media.gltf: its rest pose, its animations played one after another with fades, and loops, speeds and reversed plays. |
 | [Glow on 3D content](3d/glow_3d.py) | A halo around what the camera sees of a sphere, a 3D line and a walking glTF model, grown and faded with animate.glow, and hidden where a solid in front covers it. |
+| [Shadows and blurs on 3D content](3d/soft_effects_3d.py) | Drop shadows cast by a sphere and by a text placed in 3D, a blurred cube that the timeline sharpens, and a blurred ring that a sharp solid in front of it hides. |
+| [Images and Lottie in 3D](3d/media_in_3d.py) | An image and a Lottie scene placed in the 3D world with in_3d(), and an image kept facing the camera with billboard(), each hidden pixel by pixel by a ball passing in front. |
 | [Lines 3d](3d/lines_3d.py) | Polylines through 3D points with solid colors and color maps, and paths traced behind moving objects that fade, cap or thin. |
 | [Axes 3d](3d/axes_3d.py) | 3D axes with their grid planes, box sizes, linear, log, symlog and power scales, layers that animate apart, and planes and axes that take the sides the camera shows. |
 | [Plots 3d](3d/plots_3d.py) | Surfaces, parametric curves and vector fields in a 3D space, static and driven by parameters. |

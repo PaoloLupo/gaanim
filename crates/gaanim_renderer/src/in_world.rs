@@ -5,8 +5,11 @@
 //! leaves the parts, marked [`DrawnIn3D`], to it.
 //!
 //! A part's fill and stroke keep their colors and gradients, its opacity and
-//! the progress of a write, and a stroke its alignment and profile; shadows,
-//! glows, blurs, chalk, rasters and Lottie scenes are left out.
+//! the progress of a write, and a stroke its alignment and profile; an
+//! image fills its outline as the 2D renderer clips it there, and a Lottie
+//! scene becomes the outlines it fills and strokes (see [`LottieOutlines`]).
+//! A part's glow, drop shadow or blur becomes the drawable's
+//! ([`PartEffects`]), which the 3D pass draws; chalk is left out.
 //!
 //! Billboards are drawn this way too, facing the camera (see
 //! [`billboards_in_world_system`]), unless they hold what is left out.
@@ -21,8 +24,8 @@ use gaanim_core::peniko;
 use gaanim_math::GlobalSpatialTransform;
 use gaanim_scene::{
     Billboard, BillboardPlane, DrawnIn3D, FillBrush, GlobalOpacity, GroupMarker, HudOverlay,
-    InWorld3D, Path2D, PathSource, PlaneClip, PlaneFillData, PlaneGlyph, RasterImage, RenderLayer,
-    StrokeBrush, Visible,
+    InWorld3D, Path2D, PathSource, PlaneClip, PlaneFillData, PlaneGlyph, PlaneImage, RasterImage,
+    RenderLayer, StrokeBrush, Visible,
 };
 
 use crate::effects::{
@@ -30,7 +33,7 @@ use crate::effects::{
     StrokeScalesWithObject,
 };
 use crate::fragment::{FragmentParts, FragmentRecipe, fragment_recipe};
-use crate::lottie::LottiePlayer;
+use crate::lottie::{LottieCanvas, LottiePlayer};
 
 /// What a part draws at full opacity.
 type Drawn = Arc<[Laid]>;
@@ -46,12 +49,14 @@ struct Laid {
     clip: Option<(Arc<BezPath>, kurbo::Vec2, bool)>,
 }
 
-/// What an outline is filled with: a color, or a gradient in the part's own
-/// units, as the 2D renderer paints it.
+/// What an outline is filled with: a color, a gradient or an image, with
+/// the map from the part's own units to the gradient's units or the image's
+/// pixels, as the 2D renderer paints it.
 #[derive(Clone, Debug, PartialEq)]
 enum Paint {
     Solid(peniko::Color),
-    Gradient(Arc<peniko::Gradient>),
+    Gradient(Arc<peniko::Gradient>, Affine),
+    Image(Arc<peniko::ImageBrush>, Affine),
 }
 
 impl Paint {
@@ -61,7 +66,7 @@ impl Paint {
         match brush {
             peniko::Brush::Solid(color) => Some(Self::Solid(*color)),
             peniko::Brush::Gradient(gradient) if !gradient.stops.is_empty() => {
-                Some(Self::Gradient(Arc::new(gradient.clone())))
+                Some(Self::Gradient(Arc::new(gradient.clone()), Affine::IDENTITY))
             }
             peniko::Brush::Gradient(_) | peniko::Brush::Image(_) => None,
         }
@@ -73,34 +78,59 @@ impl Paint {
         }
         match self {
             Self::Solid(color) => Self::Solid(color.multiply_alpha(alpha)),
-            Self::Gradient(gradient) => {
-                Self::Gradient(Arc::new(gradient.as_ref().clone().multiply_alpha(alpha)))
+            Self::Gradient(gradient, to_gradient) => Self::Gradient(
+                Arc::new(gradient.as_ref().clone().multiply_alpha(alpha)),
+                to_gradient,
+            ),
+            Self::Image(brush, to_pixels) => {
+                let mut brush = brush.as_ref().clone();
+                brush.sampler.alpha *= alpha;
+                Self::Image(Arc::new(brush), to_pixels)
             }
         }
     }
 
-    /// The color and gradient of a glyph of an outline laid at `corner`,
-    /// at `alpha`.
-    fn glyph(
-        &self,
-        alpha: f32,
-        corner: kurbo::Vec2,
-    ) -> (peniko::Color, Option<(Arc<peniko::Gradient>, Affine)>) {
+    /// The color, gradient and image of a glyph of an outline laid at
+    /// `corner`, at `alpha`. An image's alpha goes into the color, which
+    /// multiplies its texels'.
+    fn glyph(&self, alpha: f32, corner: kurbo::Vec2) -> GlyphPaint {
         match self.clone().multiply_alpha(alpha) {
-            Self::Solid(color) => (color, None),
-            Self::Gradient(gradient) => (
+            Self::Solid(color) => (color, None, None),
+            Self::Gradient(gradient, to_gradient) => (
                 gradient.stops[0].color.to_alpha_color(),
-                Some((gradient, Affine::translate(corner))),
+                Some((gradient, to_gradient * Affine::translate(corner))),
+                None,
             ),
+            Self::Image(brush, to_pixels) => {
+                let mut brush = brush.as_ref().clone();
+                let alpha = std::mem::replace(&mut brush.sampler.alpha, 1.0);
+                (
+                    peniko::Color::WHITE.multiply_alpha(alpha),
+                    None,
+                    Some(PlaneImage {
+                        brush,
+                        to_pixels: to_pixels * Affine::translate(corner),
+                    }),
+                )
+            }
         }
     }
 }
+
+/// A glyph's color, gradient and the map to it, and image.
+type GlyphPaint = (
+    peniko::Color,
+    Option<(Arc<peniko::Gradient>, Affine)>,
+    Option<PlaneImage>,
+);
 
 /// The outlines parts drew, by part, while their recipe stays the same, and
 /// outlines alike, shared: the same letter again packs and records once.
 #[derive(Default)]
 pub(crate) struct InWorldParts {
     parts: HashMap<Entity, (FragmentRecipe, Drawn)>,
+    /// What Lottie scenes drew, by part, with the instant they showed.
+    lotties: HashMap<Entity, (LottieShown, Drawn)>,
     /// Outlines laid at their box's corner, by their size and their points on
     /// a grid a 65536th of their size.
     alike: HashMap<Vec<i64>, Weak<BezPath>>,
@@ -124,19 +154,29 @@ type PartData = (
     Option<&'static WriteTipGlow>,
     Option<&'static StrokeAlign>,
     Option<&'static StrokeProfile>,
-    Has<StrokeScalesWithObject>,
+    (
+        Has<StrokeScalesWithObject>,
+        Option<&'static RasterImage>,
+        Option<&'static LottiePlayer>,
+        Option<&'static Glow>,
+        Option<&'static DropShadow>,
+        Option<&'static GaussianBlur>,
+    ),
 );
 
-/// What a part may hold that the 3D pass leaves out: a Lottie scene or a 2D
-/// effect; or an image, a [`RasterImage`] that holds one, since every vector
-/// drawable has an empty one.
-type LeftOut = Or<(
-    With<LottiePlayer>,
-    With<DropShadow>,
-    With<Glow>,
-    With<GaussianBlur>,
-    With<ChalkBrush>,
-)>;
+/// The glow, drop shadow and blur the parts of a drawable in the 3D world
+/// hold, as a text's letters hold the text's: the 3D pass draws them for the
+/// drawable when it has none of its own (see
+/// `crate::pipeline::three_d_elements`).
+#[derive(Component, Clone, Debug, Default, PartialEq)]
+pub struct PartEffects {
+    pub glow: Option<Glow>,
+    pub shadow: Option<DropShadow>,
+    pub blur: Option<GaussianBlur>,
+}
+
+/// What a part may hold that the 3D pass leaves out: chalk.
+type LeftOut = With<ChalkBrush>;
 
 /// A billboard that holds what the 3D pass leaves out, which stays 2D
 /// content drawn over the 3D image.
@@ -146,8 +186,8 @@ pub(crate) struct BillboardOver3D;
 /// Hand each billboard to the 3D pass, as an [`InWorld3D`] drawable that
 /// faces the camera (`billboard_system` keeps its [`BillboardPlane`]), so that the meshes and
 /// lines in front of it hide it pixel by pixel. One whose parts hold what
-/// the 3D pass leaves out ([`LeftOut`], or an image) stays 2D content over
-/// the 3D image, and fades as a whole behind meshes
+/// the 3D pass leaves out ([`LeftOut`]) stays 2D content over the 3D
+/// image, and fades as a whole behind meshes
 /// ([`gaanim_scene::occlusion`]). Each is decided once, when first seen,
 /// before it is placed.
 pub(crate) fn billboards_in_world_system(
@@ -163,17 +203,12 @@ pub(crate) fn billboards_in_world_system(
     >,
     children: Query<&Children>,
     left_out: Query<(), LeftOut>,
-    rasters: Query<&RasterImage>,
 ) {
     for billboard in &billboards {
         let mut stack = vec![billboard];
         let mut drawable = true;
         while let Some(entity) = stack.pop() {
-            if left_out.contains(entity)
-                || rasters
-                    .get(entity)
-                    .is_ok_and(|raster| raster.image.is_some())
-            {
+            if left_out.contains(entity) {
                 drawable = false;
                 break;
             }
@@ -206,6 +241,7 @@ pub(crate) fn sync_in_world_system(
             &GlobalSpatialTransform,
             &GlobalOpacity,
             Option<&PlaneFillData>,
+            Option<&PartEffects>,
         ),
         With<InWorld3D>,
     >,
@@ -216,7 +252,8 @@ pub(crate) fn sync_in_world_system(
 ) {
     let held = &mut *held;
     let mut seen = HashSet::new();
-    for (root, root_transform, root_opacity, current) in &roots {
+    for (root, root_transform, root_opacity, current, current_effects) in &roots {
+        let mut effects = PartEffects::default();
         let to_root = root_transform.affine_2d;
         if to_root.determinant().abs() <= 1e-12 {
             continue;
@@ -244,11 +281,24 @@ pub(crate) fn sync_in_world_system(
                 tip_glow,
                 stroke_align,
                 stroke_profile,
-                stroke_scales,
+                (stroke_scales, raster, lottie, glow, shadow, blur),
             )) = parts.get(entity)
             else {
                 continue;
             };
+            // The first glow and shadow among the parts, the root's aside,
+            // which the 3D pass finds on the root itself.
+            if entity != root {
+                if effects.glow.is_none() {
+                    effects.glow = glow.cloned();
+                }
+                if effects.shadow.is_none() {
+                    effects.shadow = shadow.cloned();
+                }
+                if effects.blur.is_none() {
+                    effects.blur = blur.copied();
+                }
+            }
             if group || *layer != RenderLayer::Vello2D || path.is_none() {
                 continue;
             }
@@ -265,7 +315,7 @@ pub(crate) fn sync_in_world_system(
                 source,
                 fill,
                 stroke,
-                raster: None,
+                raster: raster.filter(|raster| raster.image.is_some()),
                 lottie: false,
                 shadow: None,
                 glow: None,
@@ -288,6 +338,19 @@ pub(crate) fn sync_in_world_system(
                     drawn
                 }
             };
+            // A Lottie scene draws beneath the part's own outline, as in 2D,
+            // drawn again only when it shows another instant.
+            let animated = lottie.map(|player| {
+                let shown = player.shown();
+                match held.lotties.get(&entity) {
+                    Some((kept, drawn)) if *kept == shown => Arc::clone(drawn),
+                    _ => {
+                        let drawn = lottie_drawn(player, &mut held.alike);
+                        held.lotties.insert(entity, (shown, Arc::clone(&drawn)));
+                        drawn
+                    }
+                }
+            });
             // The part's mask, in its own units as its outlines are. A mask
             // that encloses nothing keeps nothing, or all of it inverted.
             let mask = match masks.get(entity).map(ClipMask::kept_contour) {
@@ -300,8 +363,12 @@ pub(crate) fn sync_in_world_system(
             };
             let placement = to_root * transform.affine_2d;
             let alpha = (opacity.0 / root_opacity).clamp(0.0, 1.0);
-            for laid in drawn.iter() {
-                let (color, gradient) = laid.paint.glyph(alpha, laid.corner);
+            for laid in animated
+                .iter()
+                .flat_map(|drawn| drawn.iter())
+                .chain(drawn.iter())
+            {
+                let (color, gradient, image) = laid.paint.glyph(alpha, laid.corner);
                 // A glyph takes one contour: a stroke aligned inside or
                 // outside its shape keeps the one that aligns it.
                 let clip = laid.clip.as_ref().or(mask.as_ref());
@@ -315,14 +382,25 @@ pub(crate) fn sync_in_world_system(
                         offset: laid.corner - *corner,
                         outside: *outside,
                     }),
+                    image,
                 });
             }
         }
         if current.is_none_or(|current| !same_glyphs(&current.glyphs, &glyphs)) {
             commands.entity(root).insert(PlaneFillData { glyphs });
         }
+        if current_effects != Some(&effects) {
+            if effects == PartEffects::default() {
+                if current_effects.is_some() {
+                    commands.entity(root).remove::<PartEffects>();
+                }
+            } else {
+                commands.entity(root).insert(effects);
+            }
+        }
     }
     held.parts.retain(|entity, _| seen.contains(entity));
+    held.lotties.retain(|entity, _| seen.contains(entity));
     if held.alike.len() >= 64 && held.alike.len() >= 2 * held.swept {
         held.alike.retain(|_, outline| outline.strong_count() > 0);
         held.swept = held.alike.len();
@@ -447,14 +525,16 @@ fn same_glyphs(a: &[PlaneGlyph], b: &[PlaneGlyph]) -> bool {
                 && a.color == b.color
                 && a.gradient == b.gradient
                 && a.clip == b.clip
+                && a.image == b.image
                 && (Arc::ptr_eq(&a.outline, &b.outline) || a.outline == b.outline)
         })
 }
 
 /// The outlines `recipe` fills and strokes, as the 2D renderer draws them
-/// (see [`crate::fragment::build_fragment`]): the fill unless a write is
-/// still drawing a closed outline, faded by the write's fill progress, and
-/// the stroke as an outline of its own (see [`stroke_outline`]).
+/// (see [`crate::fragment::build_fragment`]): its image clipped to the
+/// outline in place of the fill, or the fill unless a write is still
+/// drawing a closed outline, faded by the write's fill progress; and the
+/// stroke as an outline of its own (see [`stroke_outline`]).
 fn drawn(recipe: &FragmentRecipe, alike: &mut HashMap<Vec<i64>, Weak<BezPath>>) -> Drawn {
     let empty = BezPath::new();
     let path = recipe.visible_path(&empty);
@@ -476,7 +556,20 @@ fn drawn(recipe: &FragmentRecipe, alike: &mut HashMap<Vec<i64>, Weak<BezPath>>) 
     } else {
         0.0
     };
-    if !trimmed_closed
+    let image = recipe.raster.as_ref().and_then(|raster| {
+        let brush = raster.image.as_ref()?;
+        let to_pixels = raster.local_transform;
+        (to_pixels.determinant().abs() > 1e-12)
+            .then(|| (Arc::new(brush.clone()), to_pixels.inverse()))
+    });
+    if let Some((brush, to_pixels)) = image {
+        drawn.extend(laid(
+            path.clone(),
+            Paint::Image(brush, to_pixels),
+            None,
+            alike,
+        ));
+    } else if !trimmed_closed
         && fill_alpha > 0.0
         && let Some(paint) = recipe.fill.as_ref().and_then(Paint::of)
     {
@@ -505,6 +598,145 @@ fn drawn(recipe: &FragmentRecipe, alike: &mut HashMap<Vec<i64>, Weak<BezPath>>) 
         }
     }
     drawn.into()
+}
+
+/// What tells apart the instants a Lottie scene shows (see
+/// [`LottiePlayer::shown`]).
+type LottieShown = (u64, usize, Option<u32>, [u64; 3]);
+
+/// How closely the outlines of a Lottie scene follow its curves, in its
+/// composition's pixels.
+const LOTTIE_TOLERANCE: f64 = 0.05;
+
+/// The outlines a Lottie scene draws, in its part's own units, as the 3D
+/// pass fills them: each fill, stroke and image an outline of its own, at
+/// the opacity of the layers it lies in, kept within the innermost clip or
+/// mask that cuts it. Blend modes draw as the normal one, and a translucent
+/// layer fades each of its shapes rather than all of them at once.
+#[derive(Default)]
+struct LottieOutlines {
+    /// The opacity and contour of each layer drawn into.
+    layers: Vec<(f32, BezPath)>,
+    drawn: Vec<(BezPath, Paint, Option<BezPath>)>,
+}
+
+impl LottieOutlines {
+    /// Add `outline` painted `paint`, within the layers drawn into.
+    fn push(&mut self, outline: BezPath, paint: Paint) {
+        let alpha: f32 = self.layers.iter().map(|(alpha, _)| *alpha).product();
+        if alpha <= 0.0 || outline.elements().is_empty() {
+            return;
+        }
+        // A rectangle around the outline cuts none of it.
+        let bounds = outline.bounding_box();
+        let clip = self
+            .layers
+            .iter()
+            .rev()
+            .map(|(_, contour)| contour)
+            .find(|contour| {
+                let around = contour.bounding_box();
+                let rectangle =
+                    (contour.area().abs() - around.area()).abs() <= around.area() * 1e-9;
+                !(rectangle && around.contains_rect(bounds))
+            })
+            .cloned();
+        self.drawn
+            .push((outline, paint.multiply_alpha(alpha), clip));
+    }
+
+    /// What `brush` paints, drawn by `transform` from its shape's units.
+    fn paint(brush: &peniko::Brush, transform: Affine) -> Option<Paint> {
+        match brush {
+            peniko::Brush::Solid(color) => Some(Paint::Solid(*color)),
+            peniko::Brush::Gradient(gradient)
+                if !gradient.stops.is_empty() && transform.determinant().abs() > 1e-12 =>
+            {
+                Some(Paint::Gradient(
+                    Arc::new(gradient.clone()),
+                    transform.inverse(),
+                ))
+            }
+            _ => None,
+        }
+    }
+}
+
+impl LottieCanvas for LottieOutlines {
+    fn push_layer(
+        &mut self,
+        _blend: peniko::BlendMode,
+        alpha: f32,
+        transform: Affine,
+        shape: &impl Shape,
+    ) {
+        self.layers
+            .push((alpha, transform * shape.to_path(LOTTIE_TOLERANCE)));
+    }
+
+    fn push_clip_layer(&mut self, transform: Affine, shape: &impl Shape) {
+        self.layers
+            .push((1.0, transform * shape.to_path(LOTTIE_TOLERANCE)));
+    }
+
+    fn pop_layer(&mut self) {
+        self.layers.pop();
+    }
+
+    fn fill(&mut self, transform: Affine, brush: &peniko::Brush, shape: &impl Shape) {
+        if let Some(paint) = Self::paint(brush, transform) {
+            self.push(transform * shape.to_path(LOTTIE_TOLERANCE), paint);
+        }
+    }
+
+    fn stroke(
+        &mut self,
+        style: &kurbo::Stroke,
+        transform: Affine,
+        brush: &peniko::Brush,
+        shape: &impl Shape,
+    ) {
+        if let Some(paint) = Self::paint(brush, transform) {
+            let outline = kurbo::stroke(
+                shape.path_elements(LOTTIE_TOLERANCE),
+                style,
+                &kurbo::StrokeOpts::default(),
+                LOTTIE_TOLERANCE,
+            );
+            self.push(transform * outline, paint);
+        }
+    }
+
+    fn draw_image(&mut self, image: &peniko::ImageBrush, transform: Affine) {
+        let (width, height) = (image.image.width, image.image.height);
+        if width == 0 || height == 0 || transform.determinant().abs() <= 1e-12 {
+            return;
+        }
+        let rectangle = kurbo::Rect::new(0.0, 0.0, f64::from(width), f64::from(height));
+        self.push(
+            transform * rectangle.to_path(0.0),
+            Paint::Image(Arc::new(image.clone()), transform.inverse()),
+        );
+    }
+}
+
+/// The outlines `player` draws at the instant it shows (see
+/// [`LottieOutlines`]).
+fn lottie_drawn(player: &LottiePlayer, alike: &mut HashMap<Vec<i64>, Weak<BezPath>>) -> Drawn {
+    let mut outlines = LottieOutlines::default();
+    player.draw_into(&mut outlines);
+    outlines
+        .drawn
+        .into_iter()
+        .filter_map(|(outline, paint, clip)| {
+            let clip = clip.and_then(|contour| {
+                let (contour, corner) = lay(contour, alike)?;
+                Some((contour, corner, false))
+            });
+            laid(outline, paint, clip, alike)
+        })
+        .collect::<Vec<_>>()
+        .into()
 }
 
 /// The outline a stroke of `style` along `path` draws, as
@@ -652,6 +884,148 @@ mod tests {
         schedule.run(world);
     }
 
+    fn image_brush(width: u32, height: u32) -> peniko::ImageBrush {
+        peniko::ImageBrush::new(peniko::ImageData {
+            data: peniko::Blob::from(vec![255_u8; (width * height * 4) as usize]),
+            format: peniko::ImageFormat::Rgba8,
+            alpha_type: peniko::ImageAlphaType::Alpha,
+            width,
+            height,
+        })
+    }
+
+    /// A Lottie scene becomes the outlines it fills, in its part's units,
+    /// with its colors; the rectangles its composition is clipped to cut
+    /// none of them.
+    #[test]
+    fn lottie_scenes_become_outlines() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "gaanim-lottie-in-world-{}-{unique}.json",
+            std::process::id()
+        ));
+        let still = |value: serde_json::Value| serde_json::json!({"a": 0, "k": value});
+        let transform = serde_json::json!({
+            "a": still(serde_json::json!([0.0, 0.0])),
+            "p": still(serde_json::json!([50.0, 50.0])),
+            "s": still(serde_json::json!([100.0, 100.0])),
+            "r": still(serde_json::json!(0.0)),
+            "o": still(serde_json::json!(100.0)),
+        });
+        let mut group = transform.clone();
+        group["ty"] = serde_json::json!("tr");
+        group["p"] = still(serde_json::json!([0.0, 0.0]));
+        std::fs::write(
+            &path,
+            serde_json::to_vec(&serde_json::json!({
+                "v": "5.7.4", "fr": 30.0, "ip": 0.0, "op": 30.0, "w": 100, "h": 100,
+                "assets": [],
+                "layers": [{
+                    "ddd": 0, "ty": 4, "ind": 1, "st": 0.0, "ip": 0.0, "op": 30.0,
+                    "ks": transform,
+                    "shapes": [{"ty": "gr", "it": [
+                        {"ty": "rc", "s": still(serde_json::json!([40.0, 20.0])),
+                         "p": still(serde_json::json!([0.0, 0.0])), "r": still(serde_json::json!(0.0))},
+                        {"ty": "fl", "c": still(serde_json::json!([1.0, 0.0, 0.0, 1.0])),
+                         "o": still(serde_json::json!(100.0))},
+                        group,
+                    ]}],
+                }],
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let asset = crate::lottie::LottieAsset::load(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+        // One unit per pixel of the composition.
+        let view = gaanim_objects::prelude::ImageView {
+            source_x: 0.0,
+            source_y: 0.0,
+            source_width: 100.0,
+            source_height: 100.0,
+            display_width: 100.0,
+            display_height: 100.0,
+            scale_x: 1.0,
+            scale_y: 1.0,
+            quality: Default::default(),
+        };
+        let playback =
+            crate::lottie::LottiePlayback::new(asset, view, 0.0, None, false, 1.0).unwrap();
+        let mut world = World::new();
+        let root = world
+            .spawn((
+                InWorld3D::default(),
+                Visible,
+                GlobalSpatialTransform::default(),
+                GlobalOpacity(1.0),
+                RenderLayer::Vello2D,
+                Path2D(Arc::new(BezPath::new())),
+                LottiePlayer::new(playback),
+            ))
+            .id();
+        run(&mut world);
+        let fill = world.get::<PlaneFillData>(root).unwrap();
+        assert_eq!(fill.glyphs.len(), 1);
+        let glyph = &fill.glyphs[0];
+        assert_eq!(glyph.color.to_rgba8().r, 255);
+        assert!(glyph.clip.is_none());
+        // A rectangle 40 by 20 about the middle, y up.
+        let size = glyph.outline.bounding_box().size();
+        assert!((size.width - 40.0).abs() < 1e-6 && (size.height - 20.0).abs() < 1e-6);
+        let corner = glyph.placement * kurbo::Point::ZERO;
+        assert!(
+            (corner - kurbo::Point::new(-20.0, -10.0)).hypot() < 1e-6,
+            "{corner:?}"
+        );
+    }
+
+    /// An image part fills its outline with the image, mapped from the
+    /// outline's units to its pixels, at the part's opacity.
+    #[test]
+    fn images_fill_their_outline_in_the_plane() {
+        let mut world = World::new();
+        let root = world
+            .spawn((
+                InWorld3D::default(),
+                Visible,
+                GlobalSpatialTransform::default(),
+                GlobalOpacity(1.0),
+                RenderLayer::Vello2D,
+            ))
+            .id();
+        let mut brush = image_brush(4, 2);
+        brush.sampler.alpha = 0.5;
+        world.spawn((
+            Visible,
+            GlobalSpatialTransform::default(),
+            GlobalOpacity(0.5),
+            RenderLayer::Vello2D,
+            Path2D(Arc::new(kurbo::Rect::new(1.0, 1.0, 3.0, 2.0).to_path(0.0))),
+            // A white fill, which the image replaces.
+            FillBrush::color(peniko::Color::WHITE),
+            RasterImage::new(brush, Affine::translate((1.0, 1.0)) * Affine::scale(0.5)),
+            ChildOf(root),
+        ));
+        run(&mut world);
+        let fill = world.get::<PlaneFillData>(root).unwrap();
+        assert_eq!(fill.glyphs.len(), 1);
+        let glyph = &fill.glyphs[0];
+        let image = glyph.image.as_ref().unwrap();
+        // The outline lies at its box's corner, (1, 1); its far corner is
+        // the image's.
+        let far = image.to_pixels * kurbo::Point::new(2.0, 1.0);
+        assert!(
+            (far - kurbo::Point::new(4.0, 2.0)).hypot() < 1e-9,
+            "{far:?}"
+        );
+        assert_eq!(image.brush.sampler.alpha, 1.0);
+        // The part's opacity and the brush's alpha go into the color.
+        assert!((glyph.color.components[3] - 0.25).abs() < 1e-6);
+    }
+
     #[test]
     fn billboards_go_to_the_3d_pass_unless_they_hold_what_it_leaves_out() {
         let mut world = World::new();
@@ -660,15 +1034,26 @@ mod tests {
         world.spawn((Visible, RasterImage::none(), ChildOf(text)));
         let glowing = world.spawn(Billboard).id();
         world.spawn((Glow::default(), ChildOf(glowing)));
+        let chalked = world.spawn(Billboard).id();
+        world.spawn((ChalkBrush::default(), ChildOf(chalked)));
+        // An image is drawn by the 3D pass too.
+        let pictured = world.spawn(Billboard).id();
+        world.spawn((
+            RasterImage::new(image_brush(2, 2), Affine::IDENTITY),
+            ChildOf(pictured),
+        ));
         let hud = world.spawn((Billboard, HudOverlay)).id();
         let mut schedule = Schedule::default();
         schedule.add_systems(billboards_in_world_system);
         schedule.run(&mut world);
         assert!(world.get::<InWorld3D>(text).is_some());
         assert!(world.get::<BillboardPlane>(text).is_some());
-        // A glowing part keeps it 2D content over the 3D image.
-        assert!(world.get::<InWorld3D>(glowing).is_none());
-        assert!(world.get::<BillboardOver3D>(glowing).is_some());
+        assert!(world.get::<InWorld3D>(pictured).is_some());
+        // A glowing part glows in the 3D pass; one drawn in chalk keeps it
+        // 2D content over the 3D image.
+        assert!(world.get::<InWorld3D>(glowing).is_some());
+        assert!(world.get::<InWorld3D>(chalked).is_none());
+        assert!(world.get::<BillboardOver3D>(chalked).is_some());
         assert!(world.get::<InWorld3D>(hud).is_none());
     }
 

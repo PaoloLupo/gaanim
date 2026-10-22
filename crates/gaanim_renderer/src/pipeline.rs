@@ -4246,9 +4246,12 @@ type ThreeDData = (
     Option<&'static gaanim_scene::StrokeBrush>,
     Option<Ref<'static, gaanim_scene::LineListSource>>,
     Option<Ref<'static, gaanim_scene::PlaneFillData>>,
-    Option<&'static gaanim_scene::InWorld3D>,
-    Option<&'static gaanim_scene::BillboardPlane>,
-    Option<&'static gaanim_scene::SkinPalette>,
+    (
+        Option<&'static gaanim_scene::InWorld3D>,
+        Option<&'static gaanim_scene::BillboardPlane>,
+        Option<&'static gaanim_scene::SkinPalette>,
+        Option<&'static gaanim_scene::MeshInstances>,
+    ),
 );
 /// 3D primitives, and 2D drawables placed in the 3D world.
 type ThreeDFilter = (
@@ -4309,9 +4312,12 @@ type ThreeDItem<'a> = (
     Option<&'a gaanim_scene::StrokeBrush>,
     Option<Ref<'a, gaanim_scene::LineListSource>>,
     Option<Ref<'a, gaanim_scene::PlaneFillData>>,
-    Option<&'a gaanim_scene::InWorld3D>,
-    Option<&'a gaanim_scene::BillboardPlane>,
-    Option<&'a gaanim_scene::SkinPalette>,
+    (
+        Option<&'a gaanim_scene::InWorld3D>,
+        Option<&'a gaanim_scene::BillboardPlane>,
+        Option<&'a gaanim_scene::SkinPalette>,
+        Option<&'a gaanim_scene::MeshInstances>,
+    ),
 );
 
 fn three_d_source<'a>(
@@ -4328,9 +4334,7 @@ fn three_d_source<'a>(
         stroke,
         source,
         fill,
-        in_world,
-        billboard,
-        palette,
+        (in_world, billboard, palette, instances),
     ): ThreeDItem<'a>,
 ) -> ThreeDSource<'a> {
     // A line revealing part of its source draws the source over that part:
@@ -4363,6 +4367,9 @@ fn three_d_source<'a>(
             joints: palette.map(|palette| &palette.0),
             // Looked up on its ancestors too (see `three_d_elements`).
             glow: None,
+            shadow: None,
+            blur: None,
+            instances,
         },
         hud,
         exempt,
@@ -4390,16 +4397,16 @@ fn extract_three_d(
     );
     let mut content = world.query_filtered::<ThreeDData, ThreeDFilter>();
     let mut parents = world.query::<&ChildOf>();
-    let mut glows = world.query::<&crate::effects::Glow>();
+    let mut effects = world.query_filtered::<SoftEffectsData, SoftEffectsFilter>();
     let world: &World = world;
-    let any_glow = glows.iter(world).next().is_some();
-    let mut glow_of = |entity| glows.get(world, entity).ok().cloned();
+    let any_effect = effects.iter(world).next().is_some();
+    let mut effects_of = |entity| soft_effects(effects.get(world, entity).ok());
     three_d_elements(
         camera,
         &lighting,
         content.iter(world).map(three_d_source),
         |entity| parents.get(world, entity).ok().map(ChildOf::parent),
-        any_glow.then_some(&mut glow_of as &mut dyn FnMut(Entity) -> Option<_>),
+        any_effect.then_some(&mut effects_of as &mut EffectsOf),
         transition_frame,
         with_lineage,
         opacity_fallback,
@@ -4481,6 +4488,12 @@ pub struct CapturedThreeDSource {
     pub joints: Option<Arc<[[f32; 16]]>>,
     /// The glow of the drawable or of the group that holds it.
     pub glow: Option<crate::effects::Glow>,
+    /// Its drop shadow, found as its glow is.
+    pub shadow: Option<crate::effects::DropShadow>,
+    /// Its blur, found as its glow is.
+    pub blur: Option<crate::effects::GaussianBlur>,
+    /// Copies of the mesh drawn instead of it, one at each point.
+    pub instances: Option<gaanim_scene::MeshInstances>,
     pub composition: ThreeDComposition,
 }
 
@@ -4551,6 +4564,9 @@ fn captured_gpu_three_d(
                     fill: source.fill.as_deref(),
                     joints: source.joints.as_ref(),
                     glow: source.glow.clone(),
+                    shadow: source.shadow.clone(),
+                    blur: source.blur,
+                    instances: source.instances.as_ref(),
                 },
                 source.composition.clone(),
             )
@@ -4759,13 +4775,64 @@ fn frozen_three_d_in_order(shown: &[Arc<FrozenView>]) -> Vec<&FrozenThreeD> {
 /// Native 3D content (see [`crate::three_d`]) as drawables beneath the 2D
 /// content: with `gpu`, the images the GPU draws it into, whose frames this
 /// returns. With `capture`, also what a recording keeps to draw it again.
+/// What a 3D drawable glows, casts a shadow and is blurred with: its own
+/// glow, drop shadow and blur, or, for a 2D drawable in the 3D world, those
+/// of its parts.
+type SoftEffectsData = (
+    Option<&'static crate::effects::Glow>,
+    Option<&'static crate::effects::DropShadow>,
+    Option<&'static crate::effects::GaussianBlur>,
+    Option<&'static crate::in_world::PartEffects>,
+);
+type SoftEffectsFilter = Or<(
+    With<crate::effects::Glow>,
+    With<crate::effects::DropShadow>,
+    With<crate::effects::GaussianBlur>,
+    With<crate::in_world::PartEffects>,
+)>;
+
+/// The glow, drop shadow and blur of an entity.
+type SoftEffects = (
+    Option<crate::effects::Glow>,
+    Option<crate::effects::DropShadow>,
+    Option<crate::effects::GaussianBlur>,
+);
+
+/// The [`SoftEffects`] of an entity.
+type EffectsOf<'f> = dyn FnMut(Entity) -> SoftEffects + 'f;
+
+/// What [`SoftEffectsData`] finds of an entity.
+type SoftEffectsFound<'a> = (
+    Option<&'a crate::effects::Glow>,
+    Option<&'a crate::effects::DropShadow>,
+    Option<&'a crate::effects::GaussianBlur>,
+    Option<&'a crate::in_world::PartEffects>,
+);
+
+/// The [`SoftEffects`] of an entity, given what [`SoftEffectsData`] found of
+/// it.
+fn soft_effects(found: Option<SoftEffectsFound<'_>>) -> SoftEffects {
+    let Some((glow, shadow, blur, parts)) = found else {
+        return (None, None, None);
+    };
+    (
+        glow.or(parts.and_then(|parts| parts.glow.as_ref()))
+            .cloned(),
+        shadow
+            .or(parts.and_then(|parts| parts.shadow.as_ref()))
+            .cloned(),
+        blur.or(parts.and_then(|parts| parts.blur.as_ref()))
+            .copied(),
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 fn three_d_elements<'a>(
     camera: &gaanim_math::Camera,
     lighting: &crate::three_d::Illumination,
     sources: impl Iterator<Item = ThreeDSource<'a>>,
     mut parent_of: impl FnMut(Entity) -> Option<Entity>,
-    mut glow_of: Option<&mut dyn FnMut(Entity) -> Option<crate::effects::Glow>>,
+    mut effects_of: Option<&mut EffectsOf>,
     transition_frame: Option<&gaanim_scene::SceneTransitionFrame>,
     with_lineage: bool,
     opacity_fallback: kurbo::Rect,
@@ -4778,15 +4845,20 @@ fn three_d_elements<'a>(
     let mut sources: Vec<(Entity, crate::three_d::Content<'a>, ThreeDComposition)> = sources
         .map(|(entity, mut content, hud, exempt, layer, revision)| {
             revisions.push(revision);
-            // A drawable glows with its own glow or that of the nearest
-            // group holding it, as a glTF model's nodes take its root's.
-            if let Some(glow_of) = glow_of.as_mut() {
+            // A drawable glows, casts a shadow and is blurred with its own
+            // glow, shadow and blur or those of the nearest group holding
+            // one, as a glTF model's nodes take its root's.
+            if let Some(effects_of) = effects_of.as_mut() {
                 let mut at = Some(entity);
-                while let Some(current) = at {
-                    if let Some(glow) = glow_of(current) {
-                        content.glow = Some(glow);
-                        break;
-                    }
+                while let Some(current) = at
+                    && (content.glow.is_none()
+                        || content.shadow.is_none()
+                        || content.blur.is_none())
+                {
+                    let (glow, shadow, blur) = effects_of(current);
+                    content.glow = content.glow.take().or(glow);
+                    content.shadow = content.shadow.take().or(shadow);
+                    content.blur = content.blur.take().or(blur);
                     at = parent_of(current);
                 }
             }
@@ -4832,6 +4904,9 @@ fn three_d_elements<'a>(
                     }),
                     joints: content.joints.cloned(),
                     glow: content.glow.clone(),
+                    shadow: content.shadow.clone(),
+                    blur: content.blur,
+                    instances: content.instances.cloned(),
                     composition: composition.clone(),
                 },
             )
@@ -6819,7 +6894,7 @@ pub fn gaanim_render_system(
         (
             Option<Res<gaanim_scene::Lighting3D>>,
             LightQuery,
-            Query<&crate::effects::Glow>,
+            Query<SoftEffectsData, SoftEffectsFilter>,
         ),
         Query<&GlobalOpacity>,
         Query<&crate::object_effects::ShaderEffect>,
@@ -7425,8 +7500,8 @@ pub fn gaanim_render_system(
         let meshes = placement.and_then(|(size, placement)| {
             crate::three_d::GpuMeshes::new(&mut mesh_sources, size, placement, 0)
         });
-        let mut glow_of = |entity| glow_query.get(entity).ok().cloned();
-        let any_glow = !glow_query.is_empty();
+        let mut effects_of = |entity| soft_effects(glow_query.get(entity).ok());
+        let any_effect = !glow_query.is_empty();
         // Views with a 3D camera of their own draw from the captured content.
         let own_views = own_views_in_order(&camera_views);
         let OwnViewScratch {
@@ -7439,7 +7514,7 @@ pub fn gaanim_render_system(
             &illumination(lighting.as_deref(), light_query.iter()),
             three_d_query.iter().map(three_d_source),
             |entity| child_query.get(entity).ok().map(ChildOf::parent),
-            any_glow.then_some(&mut glow_of as &mut dyn FnMut(Entity) -> Option<_>),
+            any_effect.then_some(&mut effects_of as &mut EffectsOf),
             transition_frame.as_deref(),
             !camera_views.is_empty(),
             opacity_fallback,

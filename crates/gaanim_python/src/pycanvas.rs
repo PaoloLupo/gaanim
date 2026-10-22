@@ -5535,6 +5535,104 @@ impl PyGeometry {
         Py::new(py, PyPrimitive3D::initializer(handle))
     }
 
+    /// One drawable with a lit sphere at each of many points.
+    #[pyo3(signature = (positions, radius=0.05, *, colors=None, segments=12, rings=8, material=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn points_3d<'py>(
+        &self,
+        py: Python<'py>,
+        positions: Vec<[f64; 3]>,
+        radius: f64,
+        colors: Option<Vec<PyColor>>,
+        segments: u32,
+        rings: u32,
+        material: Option<PyMaterial3D>,
+    ) -> PyResult<Py<PyPrimitive3D>> {
+        crate::custom::ensure_authoring_allowed()?;
+        let handle = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .points_3d(
+                &positions,
+                radius,
+                (segments, rings),
+                colors.map(|colors| colors.into_iter().map(|color| color.0).collect()),
+                material.map(|value| value.0).unwrap_or_default(),
+            )
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        Py::new(py, PyPrimitive3D::initializer(handle))
+    }
+
+    /// One drawable that draws a primitive's mesh at each of many points.
+    #[pyo3(signature = (mesh, positions, *, scales=None, rotations=None, colors=None, keep_mesh=false))]
+    #[allow(clippy::too_many_arguments)]
+    fn instances<'py>(
+        &self,
+        py: Python<'py>,
+        mesh: PyRef<'py, PyDrawable>,
+        positions: Vec<[f64; 3]>,
+        scales: Option<Vec<Bound<'py, PyAny>>>,
+        rotations: Option<Vec<[f64; 3]>>,
+        colors: Option<Vec<PyColor>>,
+        keep_mesh: bool,
+    ) -> PyResult<Py<PyPrimitive3D>> {
+        crate::custom::ensure_authoring_allowed()?;
+        // A scale is one number for all three axes, or one per axis.
+        let scales = scales
+            .map(|scales| {
+                scales
+                    .iter()
+                    .map(|scale| match scale.extract::<f64>() {
+                        Ok(value) => Ok([value as f32; 3]),
+                        Err(_) => scale
+                            .extract::<[f64; 3]>()
+                            .map(|axes| axes.map(|value| value as f32))
+                            .map_err(|_| {
+                                pyo3::exceptions::PyTypeError::new_err(
+                                    "each scale is a number or an (x, y, z) triple",
+                                )
+                            }),
+                    })
+                    .collect::<PyResult<Vec<_>>>()
+            })
+            .transpose()?;
+        let copies = gaanim_scene::MeshCopies {
+            positions: positions
+                .iter()
+                .map(|point| point.map(|value| value as f32))
+                .collect(),
+            scales,
+            rotations: rotations.map(|turns| {
+                turns
+                    .iter()
+                    .map(|[x, y, z]| {
+                        gaanim_core::glam::DQuat::from_euler(
+                            gaanim_core::glam::EulerRot::XYZ,
+                            *x,
+                            *y,
+                            *z,
+                        )
+                        .as_quat()
+                        .to_array()
+                    })
+                    .collect()
+            }),
+            colors: colors.map(|colors| {
+                colors
+                    .into_iter()
+                    .map(|color| gaanim_api::canvas::linear_color(color.0))
+                    .collect()
+            }),
+        };
+        let mut canvas = self.inner.lock().expect("scene canvas poisoned");
+        let handle = canvas
+            .instances(&mesh.0, copies, keep_mesh)
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        drop(canvas);
+        Py::new(py, PyPrimitive3D::initializer(handle))
+    }
+
     /// A lit mesh from vertices and triangles in its own coordinates.
     #[pyo3(signature = (vertices, triangles, *, colors=None, material=None))]
     fn mesh<'py>(
