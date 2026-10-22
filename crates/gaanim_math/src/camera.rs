@@ -827,6 +827,23 @@ impl Camera {
             * Affine::translate((-self.position.x, -self.position.y))
     }
 
+    /// The map from scene units to this camera's pixels that the 2D canvas
+    /// is drawn through: an orthographic camera's view, or, under
+    /// perspective, the fixed canvas the 3D content is drawn over, centered,
+    /// unrotated and unzoomed.
+    pub fn canvas_transform(&self) -> Affine {
+        match self.projection {
+            Projection::Perspective { .. } => {
+                let ppu = self.pixels_per_unit();
+                Affine::translate((
+                    self.viewport_width as f64 * 0.5,
+                    self.viewport_height as f64 * 0.5,
+                )) * Affine::scale_non_uniform(ppu, -ppu)
+            }
+            Projection::Orthographic { .. } => self.to_vello_transform(),
+        }
+    }
+
     /// Converts a world coordinate into screen coordinates (pixels measured from top-left corner).
     pub fn world_to_screen(&self, world: DVec3) -> DVec2 {
         self.world_to_screen_size(world, self.viewport_width, self.viewport_height)

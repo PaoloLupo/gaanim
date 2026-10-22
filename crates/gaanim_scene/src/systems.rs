@@ -11,12 +11,18 @@ use bevy::prelude::{
 use gaanim_math::{GlobalSpatialTransform, SpatialTransform};
 
 /// Resolve the timeline-authored camera and an optional presentation override.
+///
+/// While a transition shows the outgoing segment with the camera it ended
+/// with ([`crate::SceneTransitionFrame::outgoing_rest`]), that side keeps
+/// it when it differs from the resolved camera; an editor view override
+/// shows both sides through itself.
 pub fn resolve_camera_system(
     authored: Option<Res<gaanim_math::Camera>>,
     rig: Option<Res<gaanim_math::CameraRigCamera>>,
     view_override: Res<gaanim_math::CameraViewOverride>,
     viewport: Res<gaanim_math::CameraViewport>,
     mut resolved: ResMut<gaanim_math::ResolvedCamera>,
+    transition: Option<ResMut<crate::SceneTransitionFrame>>,
 ) {
     if let Some(camera) = view_override
         .0
@@ -25,6 +31,14 @@ pub fn resolve_camera_system(
     {
         resolved.camera = camera;
         resolved.viewport = *viewport;
+    }
+    if let Some(mut frame) = transition {
+        let outgoing = frame
+            .outgoing_camera
+            .filter(|_| view_override.0.is_none() && frame.outgoing_rest.is_some());
+        if frame.outgoing_camera.is_some() || outgoing.is_some() {
+            frame.set_outgoing_camera(outgoing, &resolved.camera);
+        }
     }
 }
 
@@ -319,6 +333,22 @@ pub fn hud_pin(camera: &gaanim_math::Camera) -> Option<gaanim_core::kurbo::Affin
     (pin != Affine::IDENTITY).then_some(pin)
 }
 
+/// The camera `entity` is drawn with: the one its side of a transition
+/// keeps, or `current`.
+fn side_camera<'a>(
+    transition: Option<&'a crate::SceneTransitionFrame>,
+    current: &'a gaanim_math::Camera,
+    entity: Entity,
+    parents: &Query<&'static ChildOf>,
+) -> &'a gaanim_math::Camera {
+    transition.map_or(current, |frame| {
+        let side = frame.side_of(entity, |entity| {
+            parents.get(entity).ok().map(ChildOf::parent)
+        });
+        frame.camera_for(side, current)
+    })
+}
+
 /// [`hud_pin`] of the camera a frame shows, read straight from a world by
 /// code that composes world transforms itself before the camera phase.
 ///
@@ -393,6 +423,7 @@ pub fn world_parallax_pin(
 #[allow(clippy::too_many_arguments)]
 pub fn pin_parallax_layers_system(
     camera: Option<Res<gaanim_math::ResolvedCamera>>,
+    transition: Option<Res<crate::SceneTransitionFrame>>,
     layers: Query<(Entity, &crate::components::ParallaxLayer)>,
     children_query: Query<&'static Children>,
     mut transforms: Query<(
@@ -422,6 +453,7 @@ pub fn pin_parallax_layers_system(
     for (root, layer) in &layers {
         let pin = camera
             .as_deref()
+            .map(|camera| side_camera(transition.as_deref(), &camera.camera, root, &parents))
             .and_then(|camera| parallax_pin(camera, layer.depth));
         // Unpinned layers are exactly what propagation produced; recompose
         // once more after a pin ends so none keeps the last pinned placement.
@@ -467,6 +499,7 @@ pub fn pin_parallax_layers_system(
 #[allow(clippy::too_many_arguments)]
 pub fn pin_hud_overlays_system(
     camera: Option<Res<gaanim_math::ResolvedCamera>>,
+    transition: Option<Res<crate::SceneTransitionFrame>>,
     hud: Query<Entity, With<crate::components::HudOverlay>>,
     children_query: Query<&'static Children>,
     mut transforms: Query<(
@@ -480,7 +513,18 @@ pub fn pin_hud_overlays_system(
     layers: Query<&'static crate::components::ParallaxLayer>,
     mut pinned: Local<bool>,
 ) {
+    let transition = transition.as_deref();
+    // A HUD of the side a transition takes away stays where that side's
+    // camera put it.
+    let camera_of = |root: Entity| {
+        camera
+            .as_deref()
+            .map(|camera| side_camera(transition, &camera.camera, root, &parents))
+    };
     let pin = camera.as_deref().and_then(|camera| hud_pin(camera));
+    let outgoing_pin = transition
+        .and_then(|frame| frame.outgoing_camera.as_ref())
+        .and_then(hud_pin);
     // A HUD inside a parallax layer stays on screen: the layer's pin, which
     // `pin_parallax_layers_system` put first in its parent's transform, is
     // taken back out.
@@ -496,24 +540,25 @@ pub fn pin_hud_overlays_system(
             }
             current = parent;
         }
-        let camera = camera.as_deref()?;
-        parallax_pin(camera, depth?).map(|pin| {
+        parallax_pin(camera_of(root)?, depth?).map(|pin| {
             GlobalSpatialTransform::from_local(&SpatialTransform::from_affine_2d(&pin.inverse()))
         })
     };
     // Unpinned HUD transforms are exactly what propagation produced; recompose
     // once more after a pin ends so none keeps the last pinned placement.
-    if pin.is_none() && !*pinned {
+    if pin.is_none() && outgoing_pin.is_none() && !*pinned {
         return;
     }
-    *pinned = pin.is_some();
-    let pin = pin.unwrap_or(gaanim_core::kurbo::Affine::IDENTITY);
-    let pin = GlobalSpatialTransform::from_local(&SpatialTransform::from_affine_2d(&pin));
+    *pinned = pin.is_some() || outgoing_pin.is_some();
     for root in &hud {
         let parent = parents.get(root).ok().map(ChildOf::parent);
         if parent.is_some_and(|parent| hud.contains(parent)) {
             continue;
         }
+        let pin = camera_of(root)
+            .and_then(hud_pin)
+            .unwrap_or(gaanim_core::kurbo::Affine::IDENTITY);
+        let pin = GlobalSpatialTransform::from_local(&SpatialTransform::from_affine_2d(&pin));
         let parent_global = parent
             .and_then(|parent| transforms.get(parent).ok().map(|(_, g, _)| *g))
             .map(|parent| match parallax_unpin(root) {
@@ -1027,10 +1072,15 @@ fn propagate_style_recursive(
 /// and as large (see [`billboard_plane`]), so meshes and lines in front of
 /// it hide it pixel by pixel.
 ///
+/// A billboard of the side a transition takes away faces the camera that
+/// side keeps (see [`crate::SceneTransitionFrame::camera_for`]).
+///
 /// [`BillboardPlane`]: crate::components::BillboardPlane
-#[allow(clippy::type_complexity)]
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub fn billboard_system(
     camera: Option<bevy::prelude::Res<gaanim_math::ResolvedCamera>>,
+    transition: Option<Res<crate::SceneTransitionFrame>>,
+    parents: Query<&ChildOf>,
     children_query: Query<&Children>,
     mut query: Query<
         (
@@ -1057,30 +1107,37 @@ pub fn billboard_system(
     use gaanim_core::glam::{DMat4, DVec2, DVec3};
     use gaanim_core::kurbo::{Affine, Point};
 
-    let Some(cam) = camera else { return };
-    let cam_rot = cam.rotation;
-    let is_perspective = matches!(cam.projection, gaanim_math::Projection::Perspective { .. });
-    // In perspective, the canvas is the fixed Vello world the 3D pass maps
-    // to (`canvas_projection` in the renderer), in scene units with y up;
-    // the canvas camera applies the host viewport to both.
-    let ppu = cam.pixels_per_unit().max(1e-9);
-    let hw = cam.viewport_width as f64 * 0.5;
-    let hh = cam.viewport_height as f64 * 0.5;
-    let vello = Affine::translate((hw, hh)) * Affine::scale_non_uniform(ppu, -ppu);
-    let inv = vello.inverse();
-    // Orthographic: turn with the camera, whose view turns the other way,
-    // so the label stays upright on screen.
-    let z_angle = if is_perspective { 0.0 } else { cam.z_angle() };
-    let project = |point: DVec3| {
-        if is_perspective {
-            let screen = cam.world_to_screen(point);
-            let at = inv * Point::new(screen.x, screen.y);
-            DVec2::new(at.x, at.y)
-        } else {
-            point.truncate()
-        }
-    };
+    let Some(current) = camera else { return };
+    let current = &current.camera;
     for (entity, mut global, transform_opt, axis_label, plane, bounds, shift) in &mut query {
+        let cam = transition.as_deref().map_or(current, |frame| {
+            let side = frame.side_of(entity, |entity| {
+                parents.get(entity).ok().map(ChildOf::parent)
+            });
+            frame.camera_for(side, current)
+        });
+        let cam_rot = cam.rotation;
+        let is_perspective = matches!(cam.projection, gaanim_math::Projection::Perspective { .. });
+        // In perspective, the canvas is the fixed Vello world the 3D pass maps
+        // to (`canvas_projection` in the renderer), in scene units with y up;
+        // the canvas camera applies the host viewport to both.
+        let ppu = cam.pixels_per_unit().max(1e-9);
+        let hw = cam.viewport_width as f64 * 0.5;
+        let hh = cam.viewport_height as f64 * 0.5;
+        let vello = Affine::translate((hw, hh)) * Affine::scale_non_uniform(ppu, -ppu);
+        let inv = vello.inverse();
+        // Orthographic: turn with the camera, whose view turns the other way,
+        // so the label stays upright on screen.
+        let z_angle = if is_perspective { 0.0 } else { cam.z_angle() };
+        let project = |point: DVec3| {
+            if is_perspective {
+                let screen = cam.world_to_screen(point);
+                let at = inv * Point::new(screen.x, screen.y);
+                DVec2::new(at.x, at.y)
+            } else {
+                point.truncate()
+            }
+        };
         // Preserve world position and scale, replace rotation with camera rotation.
         // The result is built aside and written only when it differs, so a
         // static billboard does not report a changed transform every frame.
@@ -1725,6 +1782,60 @@ mod tests {
         assert!(a > 0.0 && d < 0.0);
         let at = global * gaanim_core::kurbo::Point::ORIGIN;
         assert!((at - gaanim_core::kurbo::Point::new(2.0, 1.0)).hypot() < 1e-9);
+    }
+
+    /// A billboard of the side a transition takes away faces the camera
+    /// that side keeps: through the current camera and the side's view, it
+    /// shows where that camera shows it. One of the incoming side faces the
+    /// current camera.
+    #[test]
+    fn a_billboard_leaving_through_a_transition_faces_the_camera_its_side_keeps() {
+        use gaanim_core::kurbo::Point;
+        let current = gaanim_math::Camera::ortho_2d_frame(16.0, 9.0, 1600, 900);
+        let kept = axis_camera(gaanim_core::glam::DVec3::new(6.0, 4.0, 10.0));
+        let point = gaanim_core::glam::DVec3::new(1.0, 0.5, -0.5);
+        let mut world = World::new();
+        world.insert_resource(gaanim_math::ResolvedCamera::new(
+            current,
+            gaanim_math::CameraViewport::default(),
+        ));
+        let local = SpatialTransform::new_3d(point.x, point.y, point.z);
+        let mut label = || {
+            world
+                .spawn((
+                    local,
+                    GlobalSpatialTransform::from_local(&local),
+                    crate::components::Billboard,
+                ))
+                .id()
+        };
+        let (leaving, entering) = (label(), label());
+        let mut frame = crate::SceneTransitionFrame::default();
+        frame.outgoing.insert(leaving);
+        frame.incoming.insert(entering);
+        frame.set_outgoing_camera(Some(kept), &current);
+        let view = frame.view_for(crate::TransitionSide::Outgoing).unwrap();
+        world.insert_resource(frame);
+        let mut schedule = Schedule::default();
+        schedule.add_systems(billboard_system);
+        schedule.run(&mut world);
+
+        let on_screen = |entity: Entity, view: gaanim_core::kurbo::Affine| {
+            let global = world.get::<GlobalSpatialTransform>(entity).unwrap();
+            current.canvas_transform() * view * global.affine_2d * Point::ORIGIN
+        };
+        let expected = kept.world_to_screen(point);
+        let shown = on_screen(leaving, view);
+        assert!(
+            (shown - Point::new(expected.x, expected.y)).hypot() < 1e-6,
+            "{shown:?} {expected:?}"
+        );
+        let expected = current.world_to_screen(point);
+        let shown = on_screen(entering, gaanim_core::kurbo::Affine::IDENTITY);
+        assert!(
+            (shown - Point::new(expected.x, expected.y)).hypot() < 1e-6,
+            "{shown:?} {expected:?}"
+        );
     }
 
     /// A perspective camera on a 16 by 9 frame looking from `eye` at the

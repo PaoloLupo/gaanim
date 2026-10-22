@@ -1837,7 +1837,6 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     /// Schedule visibility for every descendant except the root. The root is
     /// omitted when its entry animation owns the root opacity, for example
     /// `FadeIn` and `FadeInFrom`.
-
     pub(crate) fn schedule_show_descendants_at(&mut self, root_id: ObjectId, time: f64) {
         self.schedule_show_descendants_at_except(root_id, time, &HashSet::new());
     }

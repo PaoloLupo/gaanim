@@ -81,11 +81,28 @@ impl CameraBinding {
 }
 
 /// Apply active persistent bindings in stable creation order.
-
 ///
 /// Each binding only touches its declared channels. Invalid runtime values
 /// are rejected for that evaluation rather than silently clamped.
 pub fn apply_camera_bindings(world: &mut World, time: f64) {
+    let Some(camera) = world.get_resource::<gaanim_math::Camera>().copied() else {
+        return;
+    };
+    let bound = bind_camera(world, time, camera);
+    if let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>()
+        && *camera != bound
+    {
+        *camera = bound;
+    }
+}
+
+/// `camera` as the bindings active at `time` leave it, read against the
+/// world as it is (see [`apply_camera_bindings`]).
+pub fn bind_camera(
+    world: &mut World,
+    time: f64,
+    mut camera: gaanim_math::Camera,
+) -> gaanim_math::Camera {
     let mut bindings = {
         let mut query = world.query::<&CameraBinding>();
         query
@@ -119,9 +136,6 @@ pub fn apply_camera_bindings(world: &mut World, time: f64) {
                     .and_then(|endpoint| resolve_tracking_endpoint(endpoint, world));
                 let zoom = zoom.as_ref().and_then(|value| value.evaluate(world));
                 let angle = rotation.as_ref().and_then(|value| value.evaluate(world));
-                let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>() else {
-                    continue;
-                };
                 if let Some(center) = center.filter(|center| center.is_finite()) {
                     camera.position.x += (center.x - camera.position.x) * influence;
                     camera.position.y += (center.y - camera.position.y) * influence;
@@ -166,9 +180,6 @@ pub fn apply_camera_bindings(world: &mut World, time: f64) {
                     ))
                     .filter(|shift| shift.is_finite())
                 });
-                let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>() else {
-                    continue;
-                };
                 let fallback_eye =
                     if (camera.position - camera.target).length_squared() <= f64::EPSILON {
                         camera.target + DVec3::Z * 10.0
@@ -205,6 +216,7 @@ pub fn apply_camera_bindings(world: &mut World, time: f64) {
             }
         }
     }
+    camera
 }
 
 #[cfg(test)]

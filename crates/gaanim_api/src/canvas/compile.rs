@@ -16346,6 +16346,77 @@ mod tests {
         assert_eq!(camera_x(stops[1] + frame), 120.0);
     }
 
+    /// While a transition shows it, the outgoing segment keeps the camera it
+    /// ended with, its constraint included, though the incoming segment
+    /// releases the constraint and resets the camera as it starts; the
+    /// incoming segment has its own camera from the transition's first frame.
+    #[test]
+    fn the_outgoing_segment_keeps_its_camera_while_it_leaves() {
+        let mut canvas = SceneModel::new(1280, 720);
+        canvas.segment("model", None).unwrap();
+        let _cube = canvas
+            .cube(1.0, gaanim_scene::Material3D::default())
+            .unwrap();
+        let eye = DVec3::new(9.0, 5.0, 8.0);
+        let constraint = canvas
+            .camera_bind_3d(
+                Some(CanvasEndpoint::Static(eye)),
+                Some(CanvasEndpoint::Static(DVec3::new(3.0, 1.0, -2.0))),
+                Some(ScalarSource::constant(0.6)),
+                CanvasEndpoint::Static(DVec3::Y),
+                None,
+                ScalarSource::constant(1.0),
+                true,
+            )
+            .unwrap();
+        canvas.wait(1.0);
+        canvas.stop(None).unwrap();
+        canvas
+            .segment(
+                "next",
+                Some(gaanim_timeline::transition::TransitionType::cross_fade(0.6)),
+            )
+            .unwrap();
+        constraint.disable();
+        let reset = canvas.camera_reset(0.0);
+        canvas.play(vec![reset]);
+        canvas.wait(1.0);
+        let (mut world, mut timeline) = compile_camera_timeline(canvas);
+        world.init_resource::<gaanim_math::ResolvedCamera>();
+        world.init_resource::<gaanim_math::CameraViewOverride>();
+        world.init_resource::<gaanim_math::CameraViewport>();
+        let mut camera_phase = bevy::prelude::Schedule::default();
+        camera_phase.add_systems(gaanim_scene::systems::resolve_camera_system);
+        let mut at = |time: f64| {
+            timeline.seek(&mut world, time);
+            world.insert_resource(std::mem::replace(&mut timeline, Timeline::new()));
+            gaanim_timeline::camera_binding_system(&mut world);
+            gaanim_timeline::camera_rig_system(&mut world);
+            camera_phase.run(&mut world);
+            timeline = world.remove_resource::<Timeline>().unwrap();
+            let shown = world.resource::<gaanim_math::ResolvedCamera>().camera;
+            let outgoing = world
+                .get_resource::<gaanim_scene::SceneTransitionFrame>()
+                .and_then(|frame| frame.outgoing_camera);
+            (shown, outgoing)
+        };
+        let is_bound = |camera: &gaanim_math::Camera| (camera.position - eye).length() < 1e-9;
+        // Before the transition, one camera: the constraint's.
+        let (shown, outgoing) = at(0.95);
+        assert!(is_bound(&shown) && outgoing.is_none());
+        // While it fades, the model keeps that camera and the next segment
+        // shows the reset one.
+        for time in [1.02, 1.3, 1.55] {
+            let (shown, outgoing) = at(time);
+            assert!(!is_bound(&shown), "at {time}: {shown:?}");
+            let outgoing = outgoing.unwrap_or_else(|| panic!("no outgoing camera at {time}"));
+            assert!(is_bound(&outgoing), "at {time}: {outgoing:?}");
+        }
+        // Once it ends, one camera again.
+        let (shown, outgoing) = at(1.8);
+        assert!(!is_bound(&shown) && outgoing.is_none());
+    }
+
     /// What only says which segment holds a drawable, as `reuse` made just
     /// after a stop, stays at the stop's instant, with what follows it.
     #[test]

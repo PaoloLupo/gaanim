@@ -508,7 +508,11 @@ pub fn overlay_layers(
 pub(crate) fn reset_transition_frame(world: &mut World) {
     match world.get_resource_mut::<SceneTransitionFrame>() {
         Some(mut frame) => {
-            if !frame.is_empty() || !frame.incoming.is_empty() || !frame.outgoing.is_empty() {
+            if !frame.is_empty()
+                || !frame.incoming.is_empty()
+                || !frame.outgoing.is_empty()
+                || frame.outgoing_rest.is_some()
+            {
                 *frame = SceneTransitionFrame::default();
             }
         }
@@ -605,6 +609,32 @@ pub(crate) fn apply_shader_transition(
         values,
     });
     world.insert_resource(frame);
+}
+
+/// Keep `camera`, the authored camera as the outgoing segment ended at
+/// `end`, for the outgoing side, splitting the scenes into sides where the
+/// transition did not; the camera phase draws that side with it, through
+/// the constraints active then, if it differs from the camera at the
+/// playhead.
+pub(crate) fn keep_outgoing_camera(
+    world: &mut World,
+    scene_entities: &[(Entity, SceneId, bool)],
+    from: SceneId,
+    to: SceneId,
+    camera: gaanim_math::Camera,
+    end: f64,
+) {
+    let mut frame = world.get_resource_or_insert_with(SceneTransitionFrame::default);
+    if frame.outgoing.is_empty() && frame.incoming.is_empty() {
+        for &(entity, scene, _) in scene_entities {
+            if scene == from {
+                frame.outgoing.insert(entity);
+            } else if scene == to {
+                frame.incoming.insert(entity);
+            }
+        }
+    }
+    frame.outgoing_rest = Some((camera, end));
 }
 
 /// Record the segment-background times and overlay layers of this seek.

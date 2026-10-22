@@ -1660,6 +1660,44 @@ impl Timeline {
         result
     }
 
+    /// The authored camera as the clips leave it just before `time`: the
+    /// camera of the last keyframe before it, with the camera clips since
+    /// then applied as a seek there applies them. The world's camera is
+    /// left as it was.
+    fn camera_before(
+        &self,
+        world: &mut World,
+        entity_map: &ObjectEntityMap,
+        time: f64,
+    ) -> Option<gaanim_math::Camera> {
+        let (keyframe, snapshot) = self.keyframes.range(..OrderedFloat(time)).next_back()?;
+        let base = snapshot.camera?;
+        let current = world.get_resource::<gaanim_math::Camera>().copied()?;
+        world.insert_resource(base);
+        for clip in self.clips_in_range(keyframe.0, time) {
+            let ClipPayload::Animation(anim) = &clip.payload else {
+                continue;
+            };
+            if clip.start >= time || !moves_camera(&anim.lens) {
+                continue;
+            }
+            let Some(&entity) = entity_map.get(&anim.target) else {
+                continue;
+            };
+            let completed = clip.end() <= time;
+            let progress = if completed {
+                1.0
+            } else {
+                ((time - clip.start) / clip.duration).clamp(0.0, 1.0)
+            };
+            let t = anim.rate_func.evaluate(progress);
+            apply_lens_spec(world, entity, &anim.lens, t, completed);
+        }
+        let rest = world.get_resource::<gaanim_math::Camera>().copied();
+        world.insert_resource(current);
+        rest
+    }
+
     /// The snapshot a seek to `target` restores: the latest keyframe at or
     /// before it, or a later segment checkpoint, captured now if needed.
     fn restore_base(&mut self, world: &mut World, target: f64) -> Option<OrderedFloat<f64>> {
@@ -2689,6 +2727,22 @@ impl Timeline {
                 active_transition_span,
                 &overlays,
             );
+            // While it leaves, the outgoing segment keeps the camera it
+            // ended with.
+            if let Some(((transition_type, _, from, to), (end, _))) =
+                active_transition.zip(active_transition_span)
+                && transition_type.keeps_outgoing_camera()
+                && let Some(camera) = self.camera_before(world, &entity_map, end)
+            {
+                crate::transition_mask::keep_outgoing_camera(
+                    world,
+                    &scene_entities,
+                    from,
+                    to,
+                    camera,
+                    end,
+                );
+            }
 
             // Toggle visibility: entities belonging to non-visible scenes get hidden
             for &(entity, scene_id, visible) in &scene_entities {
@@ -5383,6 +5437,34 @@ fn apply_lens_spec(
             // Custom dynamically-registered extensions are evaluated by normal ECS tween systems.
         }
     }
+}
+
+/// Whether `lens` writes the authored camera, and nothing else.
+fn moves_camera(lens: &PropertyLensSpec) -> bool {
+    matches!(
+        lens,
+        PropertyLensSpec::CameraState { .. }
+            | PropertyLensSpec::CameraPosition { .. }
+            | PropertyLensSpec::CameraPositionSource { .. }
+            | PropertyLensSpec::CameraRotation { .. }
+            | PropertyLensSpec::CameraZoom { .. }
+            | PropertyLensSpec::CameraZoomSource { .. }
+            | PropertyLensSpec::CameraPanZoom { .. }
+            | PropertyLensSpec::CameraRotationSource { .. }
+            | PropertyLensSpec::CameraOrthographic { .. }
+            | PropertyLensSpec::CameraReset { .. }
+            | PropertyLensSpec::CameraFollow { .. }
+            | PropertyLensSpec::CameraFollowEndpoint { .. }
+            | PropertyLensSpec::CameraFrameDynamic { .. }
+            | PropertyLensSpec::CameraTarget { .. }
+            | PropertyLensSpec::CameraLookAt { .. }
+            | PropertyLensSpec::CameraOrbit { .. }
+            | PropertyLensSpec::CameraLookAtSource { .. }
+            | PropertyLensSpec::CameraPerspective { .. }
+            | PropertyLensSpec::CameraPathFollow { .. }
+            | PropertyLensSpec::CameraLensShift { .. }
+            | PropertyLensSpec::CameraDollyZoom { .. }
+    )
 }
 
 /// Record the visible window a trim or flash applies, so that systems which
