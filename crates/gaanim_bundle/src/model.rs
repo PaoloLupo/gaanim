@@ -1496,8 +1496,12 @@ fn write_three_d(
         .enumerate()
         .filter_map(|(index, source)| source.morph.as_ref().map(|weights| (index, weights)))
         .collect();
+    // Then how translucent content blends (format 12): the surfaces each
+    // pixel blends in depth order, 0 when drawables blend as layers.
+    let peeled = three_d.transparency.layers;
     // Each section is written when it or a later one holds something.
-    let after_blurs = !blurs.is_empty() || !morphs.is_empty();
+    let after_morphs = peeled > 0;
+    let after_blurs = !blurs.is_empty() || !morphs.is_empty() || after_morphs;
     let after_images = !images.is_empty() || !shadows.is_empty() || after_blurs;
     let later = !palettes.is_empty()
         || !glows.is_empty()
@@ -1695,7 +1699,7 @@ fn write_three_d(
             w.f64(sigma);
         }
     }
-    if !morphs.is_empty() {
+    if !morphs.is_empty() || after_morphs {
         w.len(morphs.len());
         for (index, weights) in morphs {
             w.len(index);
@@ -1704,6 +1708,9 @@ fn write_three_d(
                 w.f32(*weight);
             }
         }
+    }
+    if after_morphs {
+        w.u8(peeled);
     }
 }
 
@@ -2022,6 +2029,10 @@ fn read_three_d(
                 .morph = Some(weights.into());
         }
     }
+    let mut transparency = gaanim_scene::Transparency3D::default();
+    if !r.is_empty() {
+        transparency.layers = r.u8()?.min(gaanim_scene::Transparency3D::MAX_LAYERS);
+    }
     for (index, glyphs) in fills {
         sources[index].fill = Some(Arc::new(gaanim_scene::PlaneFillData { glyphs }));
     }
@@ -2029,6 +2040,7 @@ fn read_three_d(
         CapturedThreeD {
             lighting,
             lights,
+            transparency,
             opacity_fallback,
             sources,
         },

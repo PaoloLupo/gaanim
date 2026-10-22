@@ -2429,6 +2429,7 @@ pub struct SceneModel {
     pub talk_target: Option<f64>,
     pub(crate) camera_position: gaanim_core::glam::DVec3,
     pub(crate) lighting_3d: gaanim_scene::Lighting3D,
+    pub(crate) transparency_3d: gaanim_scene::Transparency3D,
     pub(crate) state: SharedCanvasState,
     /// The compilation that [`Self::bounds_of`] measures in.
     pub(crate) measured: super::measure::MeasureCache,
@@ -2483,6 +2484,7 @@ impl SceneModel {
             talk_target: None,
             camera_position: gaanim_core::glam::DVec3::ZERO,
             lighting_3d: gaanim_scene::Lighting3D::default(),
+            transparency_3d: gaanim_scene::Transparency3D::default(),
             state: Arc::new(Authored::new(CanvasState::new())),
             measured: Default::default(),
             camera_hold_probes: Default::default(),
@@ -4507,6 +4509,15 @@ impl SceneModel {
             enabled,
             intensity,
             shadows,
+        };
+    }
+
+    /// How translucent 3D content blends: each drawable as one layer, from
+    /// back to front (`layers == 0`), or every surface in its depth order at
+    /// each pixel, up to `layers` deep (see [`gaanim_scene::Transparency3D`]).
+    pub fn transparency_3d(&mut self, layers: u8) {
+        self.transparency_3d = gaanim_scene::Transparency3D {
+            layers: layers.min(gaanim_scene::Transparency3D::MAX_LAYERS),
         };
     }
 

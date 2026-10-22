@@ -3718,6 +3718,7 @@ impl SceneModel {
             .commands
             .insert_resource(gaanim_media::PreviewAudioTracks(self.audio_tracks.clone()));
         builder.commands.insert_resource(self.lighting_3d);
+        builder.commands.insert_resource(self.transparency_3d);
         Compiled {
             checkpoint,
             ids: id_map,

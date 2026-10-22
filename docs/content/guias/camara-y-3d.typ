@@ -790,7 +790,18 @@ puntos se reproducen a la frecuencia de la pantalla.
   construyen sus pipelines.
 - Un objeto translúcido (con opacidad, o con colores con transparencia) se
   ve como una capa: su superficie más cercana se mezcla una vez sobre lo que
-  tiene detrás. Los objetos translúcidos se dibujan de atrás hacia delante.
+  tiene detrás. Los objetos translúcidos se dibujan de atrás hacia delante,
+  ordenados por su centro, así que dos que se cruzan se mezclan en el mismo
+  orden a los dos lados del cruce.
+- Con `scene.geometry.transparency_3d("order_independent")`, cada
+  superficie translúcida se mezcla en el orden en que está en cada píxel
+  (_depth peeling_): el pase 3D separa, de la más cercana a la más lejana,
+  hasta `layers` superficies por píxel (4 por defecto) y las mezcla en ese
+  orden. Los objetos que se cruzan, los anidados y los pliegues de una misma
+  superficie se ven en su orden, y una malla de dos caras deja ver su lado
+  lejano. Cada capa dibuja otra vez el contenido translúcido; solo los
+  fotogramas con algo translúcido construyen sus pipelines. Ver el ejemplo
+  `3d/transparency_3d`.
 - Una línea sobre una superficie en el mismo plano, como la rejilla del
   suelo bajo un gráfico, queda debajo de la superficie.
 - Las sombras salen de mapas de sombra: uno por luz direccional y seis

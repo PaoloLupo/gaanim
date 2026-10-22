@@ -1503,6 +1503,19 @@ vase = scene.geometry.revolve(
 )
 
 #api-entry(
+  name: "Geometry.transparency_3d",
+  kind: "method",
+  signature: "transparency_3d(mode=\"sorted\", *, layers=4) -> None",
+  desc: [Elige cómo se mezcla el contenido 3D translúcido con lo que tiene detrás. `"sorted"` (por defecto) dibuja cada objeto translúcido como una capa, su superficie más cercana, y mezcla los objetos de atrás hacia delante según su centro: un objeto se desvanece entero sin mostrar su lado lejano, pero dos que se cruzan se mezclan en el mismo orden a ambos lados del cruce. `"order_independent"` mezcla cada superficie translúcida en el orden en que está en cada píxel, hasta `layers` superficies de fondo (de 1 a 16): los objetos que se cruzan, una esfera translúcida dentro de una caja translúcida y los pliegues de una superficie se mezclan en el orden en que están, y una malla abierta o de dos caras deja ver su lado lejano a través del cercano. Cada capa vuelve a dibujar el contenido translúcido, así que una pila más honda cuesta más; lo que queda más allá de la última capa no se ve. Los contornos rellenos en el mundo 3D (`in_3d`, billboards) se siguen mezclando de atrás hacia delante sobre las superficies, y los objetos desenfocados aparte. Un `layers` fuera de 1 a 16 u otro `mode` lanzan `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+scene.geometry.transparency_3d("order_independent", layers=6)
+```
+]
+
+#api-entry(
   name: "Geometry.light_3d",
   kind: "factory",
   signature: "light_3d(kind=\"point\", *, color=None, intensity=1.0) -> Drawable",

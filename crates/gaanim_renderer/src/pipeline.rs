@@ -1366,6 +1366,7 @@ impl Freezer<'_> {
                 three_d: CapturedThreeD {
                     lighting: own.three_d.lighting,
                     lights: own.three_d.lights.clone(),
+                    transparency: own.three_d.transparency,
                     opacity_fallback: own.three_d.opacity_fallback,
                     sources,
                 },
@@ -1418,6 +1419,7 @@ impl Freezer<'_> {
                 three_d: CapturedThreeD {
                     lighting: three_d.lighting,
                     lights: three_d.lights.clone(),
+                    transparency: three_d.transparency,
                     opacity_fallback: three_d.opacity_fallback,
                     sources,
                 },
@@ -4273,9 +4275,11 @@ type LightData = (
 /// Query of the [`LightData`] of the lights shown.
 type LightQuery<'w, 's> = Query<'w, 's, LightData, With<Visible>>;
 
-/// The lighting of lit 3D content: the scene's preset and the lights shown.
+/// The lighting of lit 3D content: the scene's preset and the lights shown;
+/// and how its translucent content blends.
 fn illumination<'a>(
     lighting: Option<&gaanim_scene::Lighting3D>,
+    transparency: Option<&gaanim_scene::Transparency3D>,
     lights: impl Iterator<
         Item = (
             &'a gaanim_scene::Light3D,
@@ -4294,6 +4298,7 @@ fn illumination<'a>(
                 crate::three_d::Light::new(light, position, opacity.0)
             })
             .collect(),
+        transparency: transparency.copied().unwrap_or_default(),
     }
 }
 /// Query of the tips drawn on strokes.
@@ -4396,6 +4401,7 @@ fn extract_three_d(
     let mut lights = world.query_filtered::<LightData, With<Visible>>();
     let lighting = illumination(
         world.get_resource::<gaanim_scene::Lighting3D>(),
+        world.get_resource::<gaanim_scene::Transparency3D>(),
         lights.iter(world),
     );
     let mut content = world.query_filtered::<ThreeDData, ThreeDFilter>();
@@ -4509,6 +4515,7 @@ pub struct CapturedThreeDSource {
 pub struct CapturedThreeD {
     pub lighting: gaanim_scene::Lighting3D,
     pub lights: Vec<crate::three_d::Light>,
+    pub transparency: gaanim_scene::Transparency3D,
     /// Layer bounds of the elements of an opaque drawable.
     pub opacity_fallback: kurbo::Rect,
     pub sources: Vec<CapturedThreeDSource>,
@@ -4601,6 +4608,7 @@ fn captured_gpu_three_d(
     let lighting = crate::three_d::Illumination {
         lighting: captured.lighting,
         lights: captured.lights.clone(),
+        transparency: captured.transparency,
     };
     match crate::three_d::GpuMeshes::new(sources, target.size, target.placement, target.slot).map(
         |gpu| {
@@ -4742,6 +4750,7 @@ fn own_view_three_d(views: &[&ExtractedCameraView], captured: &CapturedThreeD) {
             three_d: CapturedThreeD {
                 lighting: captured.lighting,
                 lights: captured.lights.clone(),
+                transparency: captured.transparency,
                 opacity_fallback: captured.opacity_fallback,
                 sources,
             },
@@ -4887,6 +4896,7 @@ fn three_d_elements<'a>(
     if let Some((capture, held)) = capture {
         capture.lighting = lighting.lighting;
         capture.lights = lighting.lights.clone();
+        capture.transparency = lighting.transparency;
         capture.opacity_fallback = opacity_fallback;
         capture.sources = sources
             .iter()
@@ -6884,7 +6894,7 @@ pub fn gaanim_render_system(
         tip_query,
         backdrop_query,
         three_d_query,
-        (lighting, light_query, glow_query),
+        (lighting, light_query, glow_query, transparency),
         opacity_query,
         effect_query,
         signal_query,
@@ -6902,6 +6912,7 @@ pub fn gaanim_render_system(
             Option<Res<gaanim_scene::Lighting3D>>,
             LightQuery,
             Query<SoftEffectsData, SoftEffectsFilter>,
+            Option<Res<gaanim_scene::Transparency3D>>,
         ),
         Query<&GlobalOpacity>,
         Query<&crate::object_effects::ShaderEffect>,
@@ -7518,7 +7529,11 @@ pub fn gaanim_render_system(
         } = own_scratch;
         gpu_frames = three_d_elements(
             &camera.camera,
-            &illumination(lighting.as_deref(), light_query.iter()),
+            &illumination(
+                lighting.as_deref(),
+                transparency.as_deref(),
+                light_query.iter(),
+            ),
             three_d_query.iter().map(three_d_source),
             |entity| child_query.get(entity).ok().map(ChildOf::parent),
             any_effect.then_some(&mut effects_of as &mut EffectsOf),
@@ -7814,6 +7829,7 @@ mod tests {
         let transform = GlobalSpatialTransform::from_local(&at);
         let lit = illumination(
             None,
+            None,
             [(&light, &transform, &GlobalOpacity(0.5))].into_iter(),
         );
         assert_eq!(lit.lights.len(), 1);
@@ -7825,6 +7841,7 @@ mod tests {
         assert!(!shown.directional);
         assert!((shown.color[0] - 1.0).abs() < 1e-6, "{shown:?}");
         let hidden = illumination(
+            None,
             None,
             [(&light, &transform, &GlobalOpacity(0.0))].into_iter(),
         );

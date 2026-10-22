@@ -9318,6 +9318,29 @@ class Geometry:
             scene.geometry.lighting_3d("studio", intensity=1.2)
         """
         ...
+    def transparency_3d(self, mode: Literal["sorted", "order_independent"] = "sorted", *, layers: int = 4) -> None:
+        """Choose how translucent 3D content blends with what lies behind it.
+
+        ``"sorted"`` (the default) draws each translucent drawable as one
+        layer, its nearest surface, and blends the drawables from back to
+        front by their middles: a drawable fades as a whole, without showing
+        its own far side, but two that cross blend in one order on both
+        sides of where they cross. ``"order_independent"`` blends every
+        translucent surface in its depth order at each pixel, up to
+        ``layers`` surfaces deep (1 to 16): drawables that cross, a
+        translucent sphere in a translucent box and the folds of one
+        surface blend in the order they lie, and an open or two-sided mesh
+        shows its far side through its near one. Each layer draws the
+        translucent content once more, so a deeper stack costs more; what
+        lies past the last layer is left out. Outlines filled in the 3D
+        world (``in_3d``, billboards) still blend from back to front after
+        the surfaces, and blurred drawables apart. A ``layers`` outside 1
+        to 16 or another ``mode`` raises ``ValueError``.
+
+        Example:
+            scene.geometry.transparency_3d("order_independent", layers=6)
+        """
+        ...
     def light_3d(
         self,
         kind: Literal["point", "directional"] = "point",

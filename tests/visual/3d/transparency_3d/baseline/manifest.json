@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "width": 960,
+  "height": 540,
+  "snapshots": [
+    {
+      "id": "seek_0000_t_1_560000",
+      "time_seconds": 1.56,
+      "file": "seek_0000_t_1_560000.png"
+    },
+    {
+      "id": "seek_0001_t_2_520000",
+      "time_seconds": 2.52,
+      "file": "seek_0001_t_2_520000.png"
+    },
+    {
+      "id": "seek_0002_t_5_400000",
+      "time_seconds": 5.4,
+      "file": "seek_0002_t_5_400000.png"
+    },
+    {
+      "id": "seek_0003_t_6_600000",
+      "time_seconds": 6.6,
+      "file": "seek_0003_t_6_600000.png"
+    },
+    {
+      "id": "seek_0004_t_8_760000",
+      "time_seconds": 8.76,
+      "file": "seek_0004_t_8_760000.png"
+    },
+    {
+      "id": "seek_0005_t_10_200000",
+      "time_seconds": 10.2,
+      "file": "seek_0005_t_10_200000.png"
+    }
+  ]
+}

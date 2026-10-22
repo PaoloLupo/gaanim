@@ -799,6 +799,22 @@ impl Default for Lighting3D {
     }
 }
 
+/// How translucent 3D content blends with what lies behind it. By default
+/// (`layers == 0`) each translucent drawable draws as one layer, its nearest
+/// surface, and drawables blend from back to front, ordered by their
+/// middles. With `layers` above 0, every translucent surface blends in its
+/// depth order at each pixel, up to `layers` surfaces deep: drawables that
+/// cross, and the folds of one, blend in the order they lie.
+#[derive(Resource, Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct Transparency3D {
+    pub layers: u8,
+}
+
+impl Transparency3D {
+    /// The most surfaces a pixel blends in depth order.
+    pub const MAX_LAYERS: u8 = 16;
+}
+
 /// Where a [`Light3D`] shines from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LightKind3D {

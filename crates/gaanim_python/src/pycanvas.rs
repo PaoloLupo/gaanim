@@ -5756,6 +5756,31 @@ impl PyGeometry {
         Ok(())
     }
 
+    #[pyo3(signature = (mode="sorted", *, layers=4))]
+    fn transparency_3d(&self, mode: &str, layers: i64) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
+        let max = i64::from(gaanim_scene::Transparency3D::MAX_LAYERS);
+        if !(1..=max).contains(&layers) {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "layers must be between 1 and {max}"
+            )));
+        }
+        let layers = match mode {
+            "sorted" => 0,
+            "order_independent" => layers as u8,
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "mode must be 'sorted' or 'order_independent'",
+                ));
+            }
+        };
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .transparency_3d(layers);
+        Ok(())
+    }
+
     #[pyo3(signature = (function, x_range=(-5.0, 5.0), y_range=(-5.0, 5.0), x_samples=20, y_samples=20, color=None))]
     fn surface(
         &self,

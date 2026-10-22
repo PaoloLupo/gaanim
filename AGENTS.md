@@ -46,7 +46,11 @@ This file guides repository work; model selection belongs to the calling client.
     Animations are timeline clips (`gaanim_api::gltf::GltfClipLens`). Glow
     on 3D content is drawn by the same pass (`three_d/glow.rs`): visible
     silhouettes against the opaque depth, blurred and laid into the image,
-    with pipelines built only when a frame first draws a glow. A camera
+    with pipelines built only when a frame first draws a glow. With
+    `gaanim_scene::Transparency3D` (`transparency_3d`), translucent surfaces
+    are depth-peeled (`three_d/peel.rs`): each pass keeps the nearest
+    surface behind the last layer and draws its color under the layers
+    before, built only when a frame first peels. A camera
     view snapshot (`effects::CameraSnapshot`) shows what the view showed at
     one instant: `gaanim_api::runtime` builds the scene a second time, seeks
     it to each snapshot and freezes what the view drew into

@@ -37,7 +37,8 @@ use gaanim_core::{kurbo, peniko};
 use gaanim_math::{Camera, GlobalSpatialTransform, Projection};
 use gaanim_scene::{
     AlphaMode, GlobalOpacity, Light3D, LightKind3D, Lighting3D, LineListData, Material3D,
-    MeshCopies, MeshInstances, MeshTexture, PlaneFillData, TextureWrap, TriangleMeshData,
+    MeshCopies, MeshInstances, MeshTexture, PlaneFillData, TextureWrap, Transparency3D,
+    TriangleMeshData,
 };
 use peniko::{Blob, ImageAlphaType, ImageData, ImageFormat};
 use vello::wgpu;
@@ -46,6 +47,7 @@ use wgpu::util::DeviceExt;
 use crate::effects::{DropShadow, GaussianBlur, Glow};
 
 mod glow;
+mod peel;
 
 /// A light as shading uses it: where it is in the world and its linear
 /// color, scaled by its intensity and its entity's opacity.
@@ -72,11 +74,12 @@ impl Light {
 }
 
 /// How lit 3D content is lit in a frame: the scene's [`Lighting3D`] and the
-/// lights it shows.
+/// lights it shows; and how its translucent content blends.
 #[derive(Debug, Clone, Default)]
 pub struct Illumination {
     pub lighting: Lighting3D,
     pub lights: Vec<Light>,
+    pub transparency: Transparency3D,
 }
 
 /// One drawable's 3D content, as the ECS holds it.
@@ -1069,6 +1072,10 @@ pub struct GpuMeshFrame {
     /// most, aligned for the dynamic offsets that bind them, and between
     /// them the morph targets and weights of the morphed draws.
     joints: Arc<[u8]>,
+    /// The translucent surfaces each pixel blends in depth order (see
+    /// [`peel`]), 0 when translucent draws blend as layers from back to
+    /// front.
+    peel: u8,
     digest: u64,
 }
 
@@ -1125,6 +1132,7 @@ impl GpuMeshFrame {
             }
         }
         update(&self.joints);
+        update(&[self.peel]);
     }
 }
 
@@ -1602,6 +1610,7 @@ impl<'a> GpuMeshes<'a> {
             draw_uniforms.hash(&mut hasher);
             instances.hash(&mut hasher);
             joints.hash(&mut hasher);
+            illumination.transparency.layers.hash(&mut hasher);
             for draw in &draws {
                 (Arc::as_ptr(&draw.source) as usize).hash(&mut hasher);
                 draw.culled.hash(&mut hasher);
@@ -1626,6 +1635,7 @@ impl<'a> GpuMeshes<'a> {
                     shadow_size: shadows.size,
                     shadow_layers: Arc::clone(&shadow_layers),
                     joints: joints.into(),
+                    peel: illumination.transparency.layers,
                     digest: hasher.finish(),
                 },
             ));
@@ -2224,7 +2234,12 @@ impl Scratch {
         Self {
             size,
             color: texture("gaanim-3d-color", COLOR_FORMAT, attachment),
-            layer: texture("gaanim-3d-layer-depth", DEPTH_FORMAT, attachment),
+            // Peels read the layer's depth (see `peel`).
+            layer: texture(
+                "gaanim-3d-layer-depth",
+                DEPTH_FORMAT,
+                attachment | wgpu::TextureUsages::TEXTURE_BINDING,
+            ),
             depth,
             depth_group,
         }
@@ -3485,6 +3500,10 @@ pub struct GpuThreeD {
     /// Built the first time a frame draws a glow, and its textures.
     glow: Option<glow::GlowPipelines>,
     glow_targets: Option<glow::GlowTargets>,
+    /// Built the first time a frame peels its translucent surfaces, and the
+    /// textures they peel into, which bind the scratch targets.
+    peel: Option<peel::PeelPipelines>,
+    peel_targets: Option<peel::PeelTargets>,
     uploads: HashMap<usize, Uploaded>,
     /// Models' and filled outlines' textures by the id of their pixels and
     /// whether they are read as they are (normal maps), and their samplers.
@@ -3619,6 +3638,7 @@ impl GpuThreeD {
             .is_none_or(|scratch| scratch.size != size)
         {
             self.scratch = Some(Scratch::new(device, pipelines, size));
+            self.peel_targets = None;
         }
         let scratch = self.scratch.as_ref().expect("scratch targets are set");
         let draws_models = frame.draws.iter().any(|draw| draw.source.model.is_some());
@@ -3626,6 +3646,37 @@ impl GpuThreeD {
             self.models = Some(ModelPipelines::new(device, queue, pipelines));
         }
         let models = self.models.as_ref().filter(|_| draws_models);
+        // Translucent draws peel when the frame peels (see `peel`), but for
+        // filled outlines, which blend from back to front after the peeled
+        // layers, and blurred ones, which `glow::draw_soft` draws.
+        let peels =
+            |draw: &GpuDraw| frame.peel > 0 && draw.translucent && draw.source.fill.is_none();
+        let peeled = frame
+            .draws
+            .iter()
+            .any(|draw| peels(draw) && draw.blur.is_none());
+        if peeled {
+            let peel = self
+                .peel
+                .get_or_insert_with(|| peel::PeelPipelines::new(device, pipelines));
+            if let Some(models) = models
+                && frame
+                    .draws
+                    .iter()
+                    .any(|draw| peels(draw) && draw.source.model.is_some())
+            {
+                peel.add_models(device, pipelines, models);
+            }
+            if self.peel_targets.is_none() {
+                self.peel_targets = Some(peel::PeelTargets::new(
+                    device,
+                    peel,
+                    size,
+                    &scratch.depth,
+                    &scratch.layer,
+                ));
+            }
+        }
         let glows = frame
             .draws
             .iter()
@@ -4137,16 +4188,14 @@ impl GpuThreeD {
                     pass.draw_indexed(0..draw.source.count, 0, copies_of(frame, first, end));
                 }
             };
-        let translucent = frame.draws.iter().filter(|draw| draw.translucent).count();
-        // The opaque draws, alike meshes as one, then one pass per
-        // translucent drawable with a layer depth of its own; the last pass
-        // resolves.
-        let mut next = 0;
-        let mut passes_left = 1 + translucent;
-        while passes_left > 0 {
-            passes_left -= 1;
-            let opaque = passes_left == translucent;
-            let last = passes_left == 0;
+        // The translucent draws that blend as layers from back to front: all
+        // of them, or those that do not peel.
+        let sorted: Vec<usize> = (0..frame.draws.len())
+            .filter(|&index| frame.draws[index].translucent && !peels(&frame.draws[index]))
+            .collect();
+        // Begins a pass over the color: the opaque draws' with their depth, or
+        // a translucent layer's with a depth of its own; the last resolves.
+        let begin = |encoder: &mut wgpu::CommandEncoder, opaque: bool, last: bool| {
             #[cfg(test)]
             let timestamp_writes =
                 self.timing
@@ -4158,60 +4207,137 @@ impl GpuThreeD {
                     });
             #[cfg(not(test))]
             let timestamp_writes = None;
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("gaanim-3d"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &scratch.color,
-                    depth_slice: None,
-                    resolve_target: last.then_some(target),
-                    ops: wgpu::Operations {
-                        load: if opaque {
-                            wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT)
-                        } else {
-                            wgpu::LoadOp::Load
+            encoder
+                .begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("gaanim-3d"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &scratch.color,
+                        depth_slice: None,
+                        resolve_target: last.then_some(target),
+                        ops: wgpu::Operations {
+                            load: if opaque {
+                                wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT)
+                            } else {
+                                wgpu::LoadOp::Load
+                            },
+                            store: if last {
+                                wgpu::StoreOp::Discard
+                            } else {
+                                wgpu::StoreOp::Store
+                            },
                         },
-                        store: if last {
-                            wgpu::StoreOp::Discard
+                    })],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: if opaque {
+                            &scratch.depth
                         } else {
-                            wgpu::StoreOp::Store
+                            &scratch.layer
                         },
-                    },
-                })],
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: if opaque {
-                        &scratch.depth
-                    } else {
-                        &scratch.layer
-                    },
-                    depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(0.0),
-                        // The translucent layers read the opaque depth, and
-                        // the glows test their silhouettes against it.
-                        store: if opaque && (!last || glows) {
-                            wgpu::StoreOp::Store
-                        } else {
-                            wgpu::StoreOp::Discard
-                        },
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(0.0),
+                            // The translucent layers read the opaque depth,
+                            // and the glows test their silhouettes against it.
+                            store: if opaque && (!last || glows) {
+                                wgpu::StoreOp::Store
+                            } else {
+                                wgpu::StoreOp::Discard
+                            },
+                        }),
+                        stencil_ops: None,
                     }),
-                    stencil_ops: None,
-                }),
-                timestamp_writes,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
-            if opaque {
-                while next < frame.draws.len() && !frame.draws[next].translucent {
-                    let first = next;
-                    next += 1;
-                    while next < frame.draws.len() && draw_alike(frame, first, next) {
-                        next += 1;
-                    }
-                    draw_one(&mut pass, first, next, false);
-                }
-            } else if next < frame.draws.len() {
-                draw_one(&mut pass, next, next + 1, false);
+                    timestamp_writes,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                })
+                .forget_lifetime()
+        };
+        // The opaque draws, alike meshes as one; then the peeled layers; then
+        // one pass per translucent drawable that blends as a layer, with a
+        // layer depth of its own.
+        {
+            let mut pass = begin(&mut encoder, true, sorted.is_empty() && !peeled);
+            let mut next = 0;
+            while next < frame.draws.len() && !frame.draws[next].translucent {
+                let first = next;
                 next += 1;
+                while next < frame.draws.len() && draw_alike(frame, first, next) {
+                    next += 1;
+                }
+                draw_one(&mut pass, first, next, false);
             }
+        }
+        if peeled
+            && let (Some(peel), Some(peel_targets)) =
+                (self.peel.as_ref(), self.peel_targets.as_ref())
+        {
+            // Draws the peeled draws with the peel's pipelines, `group` (or
+            // the shadow maps, which shade their color) bound to group 1.
+            let draw_peel = |pass: &mut wgpu::RenderPass<'_>,
+                             which: peel::Peel,
+                             group: Option<&wgpu::BindGroup>| {
+                for (index, draw) in frame.draws.iter().enumerate() {
+                    if !peels(draw) || draw.blur.is_some() {
+                        continue;
+                    }
+                    let Some(uploaded) = self.uploads.get(&(Arc::as_ptr(&draw.source) as usize))
+                    else {
+                        continue;
+                    };
+                    let pipeline = match (&uploaded.model, models, joints_group) {
+                        (Some((vertices, texture)), Some(_), Some(joints)) => {
+                            let Some(pipeline) = peel.model(draw.culled, which) else {
+                                continue;
+                            };
+                            pass.set_bind_group(2, texture, &[]);
+                            pass.set_bind_group(3, joints, &[draw.joints.unwrap_or(0)]);
+                            pass.set_vertex_buffer(2, vertices.slice(..));
+                            pipeline
+                        }
+                        (Some(_), ..) => continue,
+                        _ if draw.source.lines => peel.lines(which),
+                        _ => peel.mesh(draw.culled, which),
+                    };
+                    pass.set_pipeline(pipeline);
+                    pass.set_bind_group(0, bind_group, &[(index * DRAW_STRIDE) as u32]);
+                    pass.set_bind_group(1, group.unwrap_or(&shadow_maps.group), &[]);
+                    pass.set_vertex_buffer(0, uploaded.vertices.slice(..));
+                    if draw.source.lines {
+                        if !draw.instances.is_empty() {
+                            pass.draw(0..6, draw.instances.clone());
+                        }
+                    } else if let Some(indices) = &uploaded.indices {
+                        pass.set_vertex_buffer(1, instance_buffer.slice(..));
+                        pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
+                        pass.draw_indexed(0..draw.source.count, 0, draw.copies.clone());
+                    }
+                }
+            };
+            let last = sorted.is_empty();
+            #[cfg(test)]
+            let timestamp_writes = self.timing.as_ref().filter(|_| last).map(|query_set| {
+                wgpu::RenderPassTimestampWrites {
+                    query_set,
+                    beginning_of_pass_write_index: None,
+                    end_of_pass_write_index: Some(1),
+                }
+            });
+            #[cfg(not(test))]
+            let timestamp_writes = None;
+            peel::draw_peeled(
+                &mut encoder,
+                peel,
+                peel_targets,
+                frame.peel,
+                &scratch.color,
+                &scratch.layer,
+                last.then_some(target),
+                timestamp_writes,
+                &draw_peel,
+            );
+        }
+        for (position, &index) in sorted.iter().enumerate() {
+            let mut pass = begin(&mut encoder, false, position + 1 == sorted.len());
+            draw_one(&mut pass, index, index + 1, false);
         }
         if glows
             && let (Some(glow), Some(targets)) = (self.glow.as_ref(), self.glow_targets.as_mut())
@@ -5783,6 +5909,7 @@ mod tests {
                 directional: true,
                 color: [1.0; 3],
             }],
+            ..Default::default()
         };
         let frames: Vec<GpuMeshFrame> = meshes
             .finish(&camera, ndc_to_canvas, line_width, &illumination)
@@ -5894,6 +6021,7 @@ mod tests {
                 directional: true,
                 color: [1.0; 3],
             }],
+            ..Default::default()
         };
         let frames: Vec<GpuMeshFrame> = meshes
             .finish(&camera, ndc_to_canvas, line_width, &illumination)
@@ -5990,6 +6118,7 @@ mod tests {
         let illumination = Illumination {
             lighting: Lighting3D::default(),
             lights: Vec::new(),
+            ..Default::default()
         };
         let frames: Vec<GpuMeshFrame> = meshes
             .finish(&camera, ndc_to_canvas, line_width, &illumination)
@@ -6053,6 +6182,7 @@ mod tests {
         let illumination = Illumination {
             lighting: Lighting3D::default(),
             lights,
+            ..Default::default()
         };
         let frames: Vec<GpuMeshFrame> = meshes
             .finish(&camera, ndc_to_canvas, line_width, &illumination)
@@ -6605,6 +6735,151 @@ mod tests {
         let target = gpu.target(64, 64);
         gpu.render(&scene, &target);
         Some((gpu.read(&target), three_d.glow.is_some()))
+    }
+
+    /// The RGBA pixels of `meshes`, each placed by its matrix and at its
+    /// opacity, drawn as [`draw_meshes`] draws them with translucent
+    /// content blending as `transparency` says, and whether the peel
+    /// pipelines were built.
+    fn draw_translucent(
+        meshes: &[(TriangleMeshData, DMat4, f32)],
+        transparency: Transparency3D,
+    ) -> Option<(Vec<u8>, bool)> {
+        let mut gpu = crate::background::test_gpu::test_gpu()?;
+        let mut camera = Camera::ortho_2d_frame(4.0, 4.0, 64, 64);
+        camera.position = DVec3::new(0.0, 0.0, 10.0);
+        let (ndc_to_canvas, line_width) = canvas_projection(&camera).unwrap();
+        let placement = camera.to_vello_transform();
+        let placed: Vec<(GlobalSpatialTransform, GlobalOpacity)> = meshes
+            .iter()
+            .map(|(_, matrix, opacity)| {
+                let transform = GlobalSpatialTransform {
+                    mat4: *matrix,
+                    ..Default::default()
+                };
+                (transform, GlobalOpacity(*opacity))
+            })
+            .collect();
+        let mut sources = MeshSources::default();
+        let mut pending = GpuMeshes::new(&mut sources, (64, 64), placement, 0).unwrap();
+        for (index, ((mesh, _, _), (transform, opacity))) in meshes.iter().zip(&placed).enumerate()
+        {
+            let key = index as u64 + 1;
+            pending.push(
+                0,
+                [(key, 1), (key, 1)],
+                [None, None],
+                &Content {
+                    transform,
+                    opacity,
+                    mesh: Some(mesh),
+                    lines: None,
+                    material: mesh.material.as_ref(),
+                    line_width: None,
+                    line_range: None,
+                    fill: None,
+                    joints: None,
+                    glow: None,
+                    shadow: None,
+                    blur: None,
+                    instances: None,
+                    morph: None,
+                },
+            );
+        }
+        let illumination = Illumination {
+            transparency,
+            ..Default::default()
+        };
+        let frames: Vec<GpuMeshFrame> = pending
+            .finish(&camera, ndc_to_canvas, line_width, &illumination)
+            .into_iter()
+            .map(|(_, frame)| frame)
+            .collect();
+        let mut scene = vello::Scene::new();
+        scene.append(&frames[0].scene(), Some(placement));
+        let mut three_d = GpuThreeD::default();
+        three_d.prepare(&gpu.device, &gpu.queue, &mut gpu.renderer, &frames);
+        let target = gpu.target(64, 64);
+        gpu.render(&scene, &target);
+        Some((gpu.read(&target), three_d.peel.is_some()))
+    }
+
+    /// Two translucent quads that cross, red nearer on the left and blue on
+    /// the right: peeled, each half shows the nearer one over the other;
+    /// sorted as layers, one lies over the other on both halves.
+    #[test]
+    fn peeled_translucent_drawables_blend_in_the_order_they_lie_where_they_cross() {
+        let red = quad(peniko::Color::new([1.0, 0.0, 0.0, 1.0]));
+        let blue = quad(peniko::Color::new([0.0, 0.0, 1.0, 1.0]));
+        let crossing = |angle: f64| DMat4::from_rotation_y(angle);
+        let meshes = [(red, crossing(0.5), 0.5), (blue, crossing(-0.5), 0.5)];
+        let Some((sorted, built)) = draw_translucent(&meshes, Transparency3D::default()) else {
+            return;
+        };
+        assert!(!built, "a frame that does not peel builds no peel pipeline");
+        let (peeled, built) = draw_translucent(&meshes, Transparency3D { layers: 4 }).unwrap();
+        assert!(built);
+        let (left, right) = (pixel(&peeled, 24, 32), pixel(&peeled, 40, 32));
+        assert!(
+            left[0] > left[2] + 40,
+            "red lies nearer on the left: {left:?}"
+        );
+        assert!(
+            right[2] > right[0] + 40,
+            "blue lies nearer on the right: {right:?}"
+        );
+        assert_eq!(left[3], right[3]);
+        let (left, right) = (pixel(&sorted, 24, 32), pixel(&sorted, 40, 32));
+        assert_eq!(
+            left[0] > left[2],
+            right[0] > right[2],
+            "sorted, one quad lies over the other on both halves: {left:?} {right:?}"
+        );
+    }
+
+    /// One translucent drawable folded over itself shows its far fold
+    /// through its near one when peeled, and only its nearest surface when
+    /// it blends as a layer; one layer peels only the nearest.
+    #[test]
+    fn peeled_layers_show_the_folds_of_one_translucent_drawable() {
+        let mut folded = quad(peniko::Color::WHITE);
+        folded.vertices = vec![
+            [-1.0, -1.0, 0.5],
+            [1.0, -1.0, 0.5],
+            [1.0, 1.0, 0.5],
+            [-1.0, 1.0, 0.5],
+            [-1.0, -1.0, -0.5],
+            [1.0, -1.0, -0.5],
+            [1.0, 1.0, -0.5],
+            [-1.0, 1.0, -0.5],
+        ];
+        folded.indices = vec![0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7];
+        folded.color = None;
+        let (red, blue) = ([1.0, 0.0, 0.0, 1.0], [0.0, 0.0, 1.0, 1.0]);
+        folded.colors = Some(vec![red, red, red, red, blue, blue, blue, blue]);
+        let meshes = [(folded, DMat4::IDENTITY, 0.5)];
+        let Some((sorted, _)) = draw_translucent(&meshes, Transparency3D::default()) else {
+            return;
+        };
+        let (peeled, _) = draw_translucent(&meshes, Transparency3D { layers: 4 }).unwrap();
+        let (nearest, _) = draw_translucent(&meshes, Transparency3D { layers: 1 }).unwrap();
+        let (sorted, peeled, nearest) = (
+            pixel(&sorted, 32, 32),
+            pixel(&peeled, 32, 32),
+            pixel(&nearest, 32, 32),
+        );
+        assert!(
+            sorted[2] < 4,
+            "a layer shows its nearest surface: {sorted:?}"
+        );
+        assert!(peeled[2] > 40 && peeled[0] > peeled[2], "{peeled:?}");
+        assert!(peeled[3] > sorted[3], "{peeled:?} {sorted:?}");
+        // The peeled layer passes through 8 bits once more.
+        assert!(
+            nearest.iter().zip(sorted).all(|(a, b)| a.abs_diff(b) <= 2),
+            "{nearest:?} {sorted:?}"
+        );
     }
 
     fn red_glow() -> Option<Glow> {

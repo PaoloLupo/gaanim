@@ -102,9 +102,10 @@ pub const FORMAT: &str = "gaanim-bundle";
 /// meshes a morph blends once and each frame as how far between them it
 /// lies; version 9 adds the copies of meshes drawn at many points, version
 /// 10 the images that fill outlines in the 3D world and the shadows and
-/// blurs of 3D content, and version 11 normal maps and morph targets on
-/// imported models' meshes and the weights of those targets each frame.
-pub const VERSION: u32 = 11;
+/// blurs of 3D content, version 11 normal maps and morph targets on
+/// imported models' meshes and the weights of those targets each frame, and
+/// version 12 how translucent 3D content blends.
+pub const VERSION: u32 = 12;
 /// Oldest version this build still reads: bundles published in other pages
 /// keep playing when the hosted players move to a newer version.
 pub const OLDEST_READABLE: u32 = 5;
@@ -2572,7 +2573,8 @@ mod tests {
 
     /// An imported model's mesh comes back with its texture, normal map,
     /// alpha mode, sides, skin weights and morph targets, stored once, and
-    /// each frame with the palette of its joints and its targets' weights.
+    /// each frame with the palette of its joints and its targets' weights,
+    /// and how its translucent content blends.
     #[test]
     fn imported_meshes_and_their_palettes_and_weights_round_trip() {
         use gaanim_core::peniko::{Blob, ImageAlphaType, ImageData, ImageFormat};
@@ -2675,8 +2677,12 @@ mod tests {
         let mut writer = BundleWriter::new(std::io::Cursor::new(Vec::new()), "test");
         for (index, palette) in [identity, moved].into_iter().enumerate() {
             let mut captured = frame(index as f64 / 60.0);
+            // The first frame peels its translucent surfaces, the second
+            // blends them as layers.
+            let layers = if index == 0 { 5 } else { 0 };
             captured.capture.three_d = Some(gaanim_renderer::pipeline::CapturedThreeD {
                 sources: vec![source(palette, &weights[index])],
+                transparency: gaanim_scene::Transparency3D { layers },
                 ..Default::default()
             });
             writer.push_frame(&captured, [0; 32]).unwrap();
@@ -2692,6 +2698,7 @@ mod tests {
         for (index, palette) in [identity, moved].into_iter().enumerate() {
             let decoded = bundle.frame(index).unwrap();
             let three_d = decoded.capture.three_d.unwrap();
+            assert_eq!(three_d.transparency.layers, if index == 0 { 5 } else { 0 });
             let back = &three_d.sources[0];
             let back_mesh = back.mesh.as_deref().unwrap();
             assert_eq!(back_mesh.vertices, mesh.vertices, "frame {index}");

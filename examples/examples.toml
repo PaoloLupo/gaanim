@@ -569,6 +569,11 @@ title = "Shadows and blurs on 3D content"
 description = "Drop shadows cast by a sphere and by a text placed in 3D, a blurred cube that the timeline sharpens, and a blurred ring that a sharp solid in front of it hides."
 
 [[example]]
+path = "3d/transparency_3d.py"
+title = "Order-independent transparency"
+description = "Translucent panels that cross, a ball passing through a panel, nested shells, a ring in a box, a knot and a Möbius strip, each surface blended in the order it lies at each pixel."
+
+[[example]]
 path = "3d/media_in_3d.py"
 title = "Images and Lottie in 3D"
 description = "An image and a Lottie scene placed in the 3D world with in_3d(), and an image kept facing the camera with billboard(), each hidden pixel by pixel by a ball passing in front."

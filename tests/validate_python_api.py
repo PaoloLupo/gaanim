@@ -1737,6 +1737,23 @@ def validate_morph_target_contract(module: object, scene: object, assets: Path) 
     return failures
 
 
+def validate_transparency_3d_contract(module: object) -> list[str]:
+    """Choose how translucent 3D content blends."""
+    failures: list[str] = []
+    scene = module.Scene(frame=(16, 9))
+    if scene.geometry.transparency_3d("order_independent", layers=6) is not None:
+        failures.append("Geometry.transparency_3d returned a value")
+    scene.geometry.transparency_3d()
+    for operation in (
+        lambda: scene.geometry.transparency_3d("depth_peeling"),
+        lambda: scene.geometry.transparency_3d("order_independent", layers=0),
+        lambda: scene.geometry.transparency_3d("order_independent", layers=17),
+    ):
+        if not raises_error(ValueError, operation):
+            failures.append("a transparency_3d call did not raise ValueError")
+    return failures
+
+
 def validate_in_3d_contract(module: object) -> list[str]:
     """Exercise 2D drawables placed in the 3D world."""
     failures: list[str] = []
@@ -3797,6 +3814,7 @@ def main() -> int:
     missing.extend(validate_mesh_copies_contract(module))
     missing.extend(validate_gltf_contract(module))
     missing.extend(validate_in_3d_contract(module))
+    missing.extend(validate_transparency_3d_contract(module))
     missing.extend(validate_deg_contract(module))
     missing.extend(validate_matrix_contract(module))
     missing.extend(validate_matrix_logical_units(module))
