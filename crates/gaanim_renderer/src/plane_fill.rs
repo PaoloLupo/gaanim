@@ -137,12 +137,15 @@ pub(crate) fn build(fill: &PlaneFillData) -> Option<Fill> {
         if !placement.iter().all(|value| value.is_finite()) {
             continue;
         }
+        let [a, b, c, d, e, f] = placement.map(|value| value as f32);
+        // The corners from the placement the shader reads, which bundles
+        // store: a frame read back bounds its outlines as it was recorded.
+        let drawn = Affine::new([a, b, c, d, e, f].map(f64::from));
         let [x0, y0, x1, y1] = packed.bounds;
         for (x, y) in [(x0, y0), (x1, y0), (x1, y1), (x0, y1)] {
-            let point = glyph.placement * Point::new(x.into(), y.into());
+            let point = drawn * Point::new(x.into(), y.into());
             corners.push(DVec3::new(point.x, point.y, 0.0));
         }
-        let [a, b, c, d, e, f] = placement.map(|value| value as f32);
         let color = to_linear(glyph.color);
         // Its image's or gradient's record, counted from 1; 0 for its color.
         // An image that shows nothing leaves nothing to draw.

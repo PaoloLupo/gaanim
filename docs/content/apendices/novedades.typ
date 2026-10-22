@@ -81,6 +81,9 @@ desenfoques también viven en el mundo 3D.
   `.in_3d()`, como las letras de un texto, valen para todo el objeto.
 - `.billboard()` funciona en imágenes, vídeos y escenas Lottie: antes no los
   giraba hacia la cámara.
+- `gaanim check` de un paquete con objetos `.in_3d()` ya no da por
+  distintos los fotogramas que recompone: los encuadra con la misma
+  colocación que guarda el paquete, como al grabarlos.
 
 == Al actualizar
 

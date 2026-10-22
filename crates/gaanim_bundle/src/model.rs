@@ -1650,7 +1650,7 @@ fn write_three_d(
                 w.len(glyph);
                 codec::write_image_brush(w, tables, &image.brush);
                 for value in image.to_pixels.as_coeffs() {
-                    w.f32(value as f32);
+                    w.f64(value);
                 }
             }
         }
@@ -1936,7 +1936,7 @@ fn read_three_d(
                 let brush = codec::read_image_brush(r, tables)?;
                 let mut to_pixels = [0.0; 6];
                 for value in &mut to_pixels {
-                    *value = f64::from(r.f32()?);
+                    *value = r.f64()?;
                 }
                 glyphs
                     .get_mut(glyph)
