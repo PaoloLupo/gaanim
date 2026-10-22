@@ -1597,16 +1597,25 @@ sola imagen, con un efecto de shader en su raíz que reemplaza cualquier
 `shader_effect` puesto en la propia capa; una capa desenfocada se dibuja fuera
 de pantalla y cuesta más.
 
+El contenido 3D se desenfoca igual, píxel a píxel, mientras la cámara está
+apartada de su objetivo de `look_at`: la profundidad de un punto es su
+distancia a lo largo de la vista en unidades de la distancia de la cámara a
+ese objetivo, así que `focus=1` deja nítida la profundidad del objetivo y
+`focus=0.5` lo que está a medio camino de la cámara. Lo que queda detrás de un
+borde nítido no se extiende sobre él, y lo translúcido se desenfoca según lo
+que tiene detrás. La imagen 3D desenfocada también cuesta más. Ver el ejemplo
+`3d/depth_of_field_3d`.
+
 #api-entry(
   name: "Camera.depth_of_field",
   kind: "method",
   params: (
-    (name: "focus", type: "float | None", default: "None", desc: [Profundidad nítida, finita y positiva; `1` es el plano de la escena.]),
+    (name: "focus", type: "float | None", default: "None", desc: [Profundidad nítida, finita y positiva; `1` es el plano de la escena, o en 3D la profundidad del objetivo de la cámara.]),
     (name: "aperture", type: "float | None", default: "None", desc: [Escala del desenfoque, en unidades de escena; `0` lo apaga.]),
     (name: "max_blur", type: "float | None", default: "None", desc: [Desenfoque máximo, en unidades de escena.]),
   ),
   returns: (type: "Camera", desc: [La cámara.]),
-  desc: [Fija la profundidad de campo en el cursor. Los valores omitidos se conservan; al principio el foco es 1, la apertura 0 (sin desenfoque) y `max_blur` 0.5. Un foco no finito o no positivo, o una `aperture` o `max_blur` negativos o no finitos lanzan `ValueError`.],
+  desc: [Fija la profundidad de campo de las capas de parallax y del contenido 3D en el cursor. Los valores omitidos se conservan; al principio el foco es 1, la apertura 0 (sin desenfoque) y `max_blur` 0.5. Un foco no finito o no positivo, o una `aperture` o `max_blur` negativos o no finitos lanzan `ValueError`.],
 )[
 ```python
 # output: depth_of_field.webp

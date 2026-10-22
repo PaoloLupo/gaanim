@@ -755,6 +755,51 @@ cada eje, con sus números, a una arista del contorno de la caja. Al orbitar,
 cambian de lado cuando la cámara cruza el plano que pasa por el centro de la
 caja. Con `sides="fixed"` se quedan en la esquina más baja de la caja.
 
+== Campos escalares: isosuperficies y volúmenes
+
+Un campo escalar da un valor a cada punto del espacio: una densidad, una
+temperatura, un potencial. `scene.geometry.isosurface(campo, nivel, ...)`
+dibuja la superficie donde el campo vale `nivel`, y
+`scene.geometry.volume(campo, ...)` el campo entero, como una nube que
+brilla y absorbe la luz. Los dos muestrean `campo(x, y, z)` en una rejilla
+de `resolution` puntos por lado sobre la caja de `x_range`, `y_range` y
+`z_range` (con `vectorized=True`, una sola llamada con arrays de numpy), o
+toman un array 3D de valores indexado `[x][y][z]`:
+
+```python
+import math
+from gaanim import Material3D, Scene
+
+scene = Scene(frame=(16, 9))
+blob = lambda x, y, z: x * x + 0.5 * y * y + z * z
+shell = scene.geometry.isosurface(blob, 1.0, x_range=(-1.5, 1.5), y_range=(-2, 2), z_range=(-1.5, 1.5), material=Material3D.matte("#60a5fa"))
+cloud = scene.geometry.volume(lambda x, y, z: math.exp(-3 * blob(x, y, z)), color_map="magma", density=6.0).move_to(4, 0)
+scene.play([shell.animate.fade_in(), cloud.animate.fade_in()])
+scene.render()
+```
+
+- La isosuperficie sale suave a cualquier resolución (_surface nets_: un
+  vértice por celda que cruza, y normales del gradiente del campo) y mira
+  hacia fuera: hacia el lado del nivel donde quedan la mayoría de las
+  paredes de la caja. Donde la caja la corta queda abierta, y se ilumina
+  por las dos caras. Es una `Primitive3D`: su material se anima, y
+  `animate.transform_to` la transforma en otra isosuperficie, por ejemplo la
+  del mismo campo a otro nivel.
+- En el volumen, cada valor, situado en `value_range` (por defecto del menor
+  al mayor), brilla con el color que le da `color_map` y es tan opaco como
+  dice `opacity`, cuyos valores se reparten por el rango: `(0, 1)` oculta
+  los valores bajos y `(0, 0, 1)` todo menos la mitad alta. Un valor
+  opaco absorbe `density` de la luz por unidad de escena.
+- Cada píxel recorre el volumen a lo largo de su rayo desde el ojo hasta lo
+  opaco, así que un sólido dentro de la nube se ve a través de la parte que
+  queda delante. El volumen se dibuja después de lo opaco y antes de lo
+  translúcido: una superficie translúcida delante de la nube se mezcla
+  encima, y una que está detrás se ve delante de ella.
+- Varias isosuperficies del mismo campo, una dentro de otra y translúcidas,
+  se ven en su orden con `transparency_3d("order_independent")`.
+
+Ver el ejemplo `3d/fields_3d`.
+
 == Cómo se dibuja el 3D
 
 Gaanim rasteriza el 3D en la GPU. Cada malla y cada línea se sube una vez,
@@ -790,11 +835,31 @@ puntos se reproducen a la frecuencia de la pantalla.
   construyen sus pipelines.
 - Un objeto translúcido (con opacidad, o con colores con transparencia) se
   ve como una capa: su superficie más cercana se mezcla una vez sobre lo que
-  tiene detrás. Los objetos translúcidos se dibujan de atrás hacia delante.
+  tiene detrás. Los objetos translúcidos se dibujan de atrás hacia delante,
+  ordenados por su centro, así que dos que se cruzan se mezclan en el mismo
+  orden a los dos lados del cruce.
+- Con `scene.camera.depth_of_field(...)`, la imagen 3D se desenfoca al
+  final, con brillos y sombras, según la profundidad de cada píxel: primero a
+  lo ancho y luego a lo alto, y cada píxel se extiende sobre sus vecinos con
+  su propio desenfoque. Lo que queda detrás no se extiende sobre lo que está
+  delante más de lo que este se desenfoca, así que un borde nítido delante
+  de un fondo desenfocado conserva su borde. Solo los fotogramas
+  desenfocados construyen sus pipelines. Ver el ejemplo
+  `3d/depth_of_field_3d`.
+- Con `scene.geometry.transparency_3d("order_independent")`, cada
+  superficie translúcida se mezcla en el orden en que está en cada píxel
+  (_depth peeling_): el pase 3D separa, de la más cercana a la más lejana,
+  hasta `layers` superficies por píxel (4 por defecto) y las mezcla en ese
+  orden. Los objetos que se cruzan, los anidados y los pliegues de una misma
+  superficie se ven en su orden, y una malla de dos caras deja ver su lado
+  lejano. Cada capa dibuja otra vez el contenido translúcido; solo los
+  fotogramas con algo translúcido construyen sus pipelines. Ver el ejemplo
+  `3d/transparency_3d`.
 - Una línea sobre una superficie en el mismo plano, como la rejilla del
   suelo bajo un gráfico, queda debajo de la superficie.
-- Las sombras salen de mapas de sombra: uno por luz direccional y seis
-  (un cubo) por luz puntual, que cubren todas las mallas. Proyectan sombra
+- Las sombras salen de mapas de sombra: uno por luz direccional, uno en
+  perspectiva por foco (`light_3d("spot")`, un poco más ancho que su cono) y
+  seis (un cubo) por luz puntual, que cubren todas las mallas. Proyectan sombra
   las mallas opacas y los objetos 2D con `.in_3d()`, donde son al menos
   medio opacos; no las mallas translúcidas, las líneas ni lo que brilla
   (`Material3D.emissive`), que puede contener la luz que lo hace brillar.

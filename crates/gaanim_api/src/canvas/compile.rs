@@ -3718,6 +3718,7 @@ impl SceneModel {
             .commands
             .insert_resource(gaanim_media::PreviewAudioTracks(self.audio_tracks.clone()));
         builder.commands.insert_resource(self.lighting_3d);
+        builder.commands.insert_resource(self.transparency_3d);
         Compiled {
             checkpoint,
             ids: id_map,
@@ -11880,6 +11881,11 @@ impl SceneModel {
                 Self::post_apply(builder, mref.id, spec, id_map, frame_bounds);
                 mref
             }
+            SpawnKind::Volume(volume) => {
+                let mref = builder.spawn_volume(volume.clone());
+                Self::post_apply(builder, mref.id, spec, id_map, frame_bounds);
+                mref
+            }
             SpawnKind::Primitive3D(mesh) => {
                 let extruded = spec.extrusion.as_ref().and_then(|extrusion| {
                     let source = id_map.get(&extrusion.source).copied()?;
@@ -15462,6 +15468,74 @@ mod tests {
         assert_eq!(at(&mut app, 2.0), 24);
         assert_eq!(at(&mut app, 0.0), 33 * 17);
         assert_eq!(at(&mut app, 2.5), 24);
+    }
+
+    /// A field's isosurface is a lit mesh with normals, and its volume a
+    /// drawable bounded by the field's box that holds its values, mapped
+    /// over their range, and the colors of its values.
+    #[test]
+    fn isosurfaces_and_volumes_spawn_from_a_sampled_field() {
+        use bevy::prelude::App;
+        use gaanim_objects::isosurface::SampledField;
+        use gaanim_scene::{LocalBounds, TriangleMeshData, VolumeData};
+        let n = 12;
+        let values = (0..n * n * n)
+            .map(|index| {
+                let at = |step: usize| -1.0 + 2.0 * (step as f32) / (n - 1) as f32;
+                let (x, y, z) = (at(index % n), at(index / n % n), at(index / (n * n)));
+                x * x + y * y + z * z
+            })
+            .collect();
+        let field = SampledField {
+            values,
+            size: [n; 3],
+            min: DVec3::splat(-1.0),
+            max: DVec3::new(1.0, 1.0, 2.0),
+        };
+        let mut canvas = SceneModel::new(1280, 720);
+        let shell = canvas
+            .isosurface(&field, 0.5, gaanim_scene::Material3D::default())
+            .unwrap();
+        let mut transfer = [[0_u8; 4]; 256];
+        transfer[255] = [255, 128, 0, 255];
+        let cloud = canvas.volume(&field, &transfer, None, 2.0);
+        assert!(canvas.isosurface(&field, 9.0, Default::default()).is_err());
+        let mut app = App::new();
+        app.add_plugins(bevy::prelude::MinimalPlugins)
+            .add_plugins(gaanim_scene::GaanimScenePlugin)
+            .add_plugins(gaanim_animation::GaanimAnimationPlugin)
+            .add_plugins(gaanim_timeline::GaanimTimelinePlugin)
+            .add_plugins(gaanim_text::GaanimTextPlugin)
+            .add_plugins(gaanim_renderer::GaanimDerivedGeometryPlugin);
+        app.finish();
+        app.cleanup();
+        app.update();
+        crate::runtime::replay_canvas_into(app.world_mut(), canvas);
+        app.update();
+        let shell = entity_of(app.world_mut(), &shell);
+        let cloud = entity_of(app.world_mut(), &cloud);
+        let world = app.world();
+        let mesh = world.get::<TriangleMeshData>(shell).unwrap();
+        assert!(mesh.material.is_some());
+        assert_eq!(
+            mesh.normals.as_ref().map(Vec::len),
+            Some(mesh.vertices.len())
+        );
+        let volume = world.get::<VolumeData>(cloud).unwrap();
+        assert_eq!(volume.size, [n as u32; 3]);
+        assert_eq!((volume.min, volume.max), ([-1.0; 3], [1.0, 1.0, 2.0]));
+        assert_eq!(volume.density, 2.0);
+        // The lowest values, about the middle, map to 0; the highest, at the
+        // far corners, to 255.
+        let texels = volume.texels().unwrap();
+        assert_eq!(texels.iter().min(), Some(&0));
+        assert_eq!(texels[texels.len() - 1], 255);
+        assert_eq!(&volume.transfer.data.data()[255 * 4..], &[255, 128, 0, 255]);
+        let bounds = world.get::<LocalBounds>(cloud).unwrap().0;
+        assert_eq!(
+            (bounds.min, bounds.max),
+            (DVec3::splat(-1.0), DVec3::new(1.0, 1.0, 2.0))
+        );
     }
 
     #[test]

@@ -130,6 +130,7 @@ impl SceneModel {
             talk_target,
             camera_position,
             lighting_3d,
+            transparency_3d,
             // Authored state, fingerprinted per segment by `fingerprints`.
             state: _,
             // Derived from the rest.
@@ -164,6 +165,7 @@ impl SceneModel {
         global.add(talk_target);
         global.add(camera_position);
         global.add(lighting_3d);
+        global.add(transparency_3d);
         global
     }
 }

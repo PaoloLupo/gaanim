@@ -1737,6 +1737,71 @@ def validate_morph_target_contract(module: object, scene: object, assets: Path) 
     return failures
 
 
+def validate_transparency_3d_contract(module: object) -> list[str]:
+    """Choose how translucent 3D content blends."""
+    failures: list[str] = []
+    scene = module.Scene(frame=(16, 9))
+    if scene.geometry.transparency_3d("order_independent", layers=6) is not None:
+        failures.append("Geometry.transparency_3d returned a value")
+    scene.geometry.transparency_3d()
+    for operation in (
+        lambda: scene.geometry.transparency_3d("depth_peeling"),
+        lambda: scene.geometry.transparency_3d("order_independent", layers=0),
+        lambda: scene.geometry.transparency_3d("order_independent", layers=17),
+    ):
+        if not raises_error(ValueError, operation):
+            failures.append("a transparency_3d call did not raise ValueError")
+    return failures
+
+
+def validate_spot_light_contract(module: object) -> list[str]:
+    """Aim spot lights and reject cones they cannot shine in."""
+    failures: list[str] = []
+    scene = module.Scene(frame=(16, 9))
+    spot = scene.geometry.light_3d("spot", target=(0, -1, 0), angle=0.4, softness=0.5)
+    if not isinstance(spot.move_to_3d(0, 4, 2), module.Drawable):
+        failures.append("a spot light does not move as a drawable")
+    for operation in (
+        lambda: scene.geometry.light_3d("spot", angle=0.0),
+        lambda: scene.geometry.light_3d("spot", angle=1.5),
+        lambda: scene.geometry.light_3d("spot", softness=1.5),
+        lambda: scene.geometry.light_3d("spot", target=(0, float("nan"), 0)),
+        lambda: scene.geometry.light_3d("lamp"),
+    ):
+        if not raises_error(ValueError, operation):
+            failures.append("a light_3d call did not raise ValueError")
+    return failures
+
+
+def validate_fields_3d_contract(module: object) -> list[str]:
+    """Draw scalar fields as isosurfaces and volumes."""
+    failures: list[str] = []
+    scene = module.Scene(frame=(16, 9))
+    ball = lambda x, y, z: x * x + y * y + z * z  # noqa: E731
+    shell = scene.geometry.isosurface(ball, 0.5, resolution=12)
+    if not isinstance(shell, module.Primitive3D):
+        failures.append("Geometry.isosurface did not return a Primitive3D")
+    values = [[[x + y + z for z in range(4)] for y in range(4)] for x in range(4)]
+    if not isinstance(scene.geometry.isosurface(values, 4.5), module.Primitive3D):
+        failures.append("Geometry.isosurface did not take a 3D array of values")
+    cloud = scene.geometry.volume(ball, resolution=(8, 6, 4), opacity=(0.0, 0.5, 1.0), density=2.0)
+    if not isinstance(cloud, module.Drawable):
+        failures.append("Geometry.volume did not return a Drawable")
+    for operation in (
+        lambda: scene.geometry.isosurface(ball, 5.0, resolution=8),
+        lambda: scene.geometry.isosurface(ball, resolution=1),
+        lambda: scene.geometry.isosurface(ball, x_range=(1.0, -1.0)),
+        lambda: scene.geometry.isosurface([[1.0, 2.0]], 1.5),
+        lambda: scene.geometry.volume(ball, resolution=8, opacity=(1.0,)),
+        lambda: scene.geometry.volume(ball, resolution=8, opacity=(0.0, 2.0)),
+        lambda: scene.geometry.volume(ball, resolution=8, density=-1.0),
+        lambda: scene.geometry.volume(ball, resolution=8, value_range=(1.0, 1.0)),
+    ):
+        if not raises_error(ValueError, operation):
+            failures.append("an isosurface or volume call did not raise ValueError")
+    return failures
+
+
 def validate_in_3d_contract(module: object) -> list[str]:
     """Exercise 2D drawables placed in the 3D world."""
     failures: list[str] = []
@@ -3797,6 +3862,9 @@ def main() -> int:
     missing.extend(validate_mesh_copies_contract(module))
     missing.extend(validate_gltf_contract(module))
     missing.extend(validate_in_3d_contract(module))
+    missing.extend(validate_transparency_3d_contract(module))
+    missing.extend(validate_spot_light_contract(module))
+    missing.extend(validate_fields_3d_contract(module))
     missing.extend(validate_deg_contract(module))
     missing.extend(validate_matrix_contract(module))
     missing.extend(validate_matrix_logical_units(module))

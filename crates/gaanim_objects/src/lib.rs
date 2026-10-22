@@ -3,6 +3,7 @@ pub mod character;
 pub mod earcut;
 pub mod extrude;
 pub mod gltf;
+pub mod isosurface;
 pub mod metaballs;
 pub mod morph3d;
 pub mod offset;

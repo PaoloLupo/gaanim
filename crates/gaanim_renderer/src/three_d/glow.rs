@@ -94,7 +94,7 @@ pub(super) struct GlowPipelines {
 
 /// The vertex buffers of meshes, as [`Pipelines`] binds them: positions,
 /// normals and colors, then each draw's instance.
-fn mesh_attributes() -> ([wgpu::VertexAttribute; 3], [wgpu::VertexAttribute; 8]) {
+pub(super) fn mesh_attributes() -> ([wgpu::VertexAttribute; 3], [wgpu::VertexAttribute; 8]) {
     let mesh = [
         wgpu::VertexAttribute {
             format: wgpu::VertexFormat::Float32x3,
@@ -311,23 +311,7 @@ impl GlowPipelines {
             immediate_size: 0,
         });
         let (mesh_attributes, instance_attributes) = mesh_attributes();
-        let model_attributes = [
-            wgpu::VertexAttribute {
-                format: wgpu::VertexFormat::Float32x2,
-                offset: 0,
-                shader_location: 12,
-            },
-            wgpu::VertexAttribute {
-                format: wgpu::VertexFormat::Uint16x4,
-                offset: 8,
-                shader_location: 13,
-            },
-            wgpu::VertexAttribute {
-                format: wgpu::VertexFormat::Float32x4,
-                offset: 16,
-                shader_location: 14,
-            },
-        ];
+        let model_attributes = model_attributes();
         let buffers = [
             wgpu::VertexBufferLayout {
                 array_stride: MESH_VERTEX_BYTES as u64,
@@ -356,6 +340,28 @@ impl GlowPipelines {
             )
         }));
     }
+}
+
+/// An imported model's vertex buffer, as [`ModelPipelines`] binds it: UVs,
+/// joints and weights.
+pub(super) fn model_attributes() -> [wgpu::VertexAttribute; 3] {
+    [
+        wgpu::VertexAttribute {
+            format: wgpu::VertexFormat::Float32x2,
+            offset: 0,
+            shader_location: 12,
+        },
+        wgpu::VertexAttribute {
+            format: wgpu::VertexFormat::Uint16x4,
+            offset: 8,
+            shader_location: 13,
+        },
+        wgpu::VertexAttribute {
+            format: wgpu::VertexFormat::Float32x4,
+            offset: 16,
+            shader_location: 14,
+        },
+    ]
 }
 
 /// A pipeline drawing silhouettes into the multisampled mask where nothing
