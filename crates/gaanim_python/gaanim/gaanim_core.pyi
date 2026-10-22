@@ -9129,6 +9129,68 @@ class Geometry:
             scene.play([atom_b.animate.move_to_3d(1, 1, 1)])
         """
         ...
+    def points_3d(
+        self,
+        positions: Sequence[tuple[float, float, float]],
+        radius: float = 0.05,
+        *,
+        colors: Optional[Sequence[ColorLike]] = None,
+        segments: int = 12,
+        rings: int = 8,
+        material: Optional[Material3D] = None,
+    ) -> Primitive3D:
+        """Create one drawable with a lit sphere of ``radius`` at each of ``positions``.
+
+        The sphere's mesh uploads once and every point draws in one
+        instanced draw, so a cloud of thousands of points stays a single
+        object that moves, turns and fades as one; ``colors`` gives each
+        point its color, in place of the material's (matte white by
+        default). ``create()`` grows the points in one after another, in the
+        order given, and ``uncreate()`` shrinks them away; ``animate.
+        transform_to`` another cloud of as many points moves each point to
+        the point at its place in the other list, and blends their colors.
+        Positions are in the drawable's own coordinates, so ``move_to_3d``
+        places the cloud's origin. Numpy arrays of shape ``(n, 3)`` work.
+        No positions, non-finite values, a ``colors`` of another length or a
+        non-positive ``radius`` raise ``ValueError``.
+
+        Example:
+            cloud = scene.geometry.points_3d(samples, radius=0.04, colors=[GOLD] * len(samples))
+            scene.play([cloud.animate.create().duration(2)])
+        """
+        ...
+    def instances(
+        self,
+        mesh: Primitive3D,
+        positions: Sequence[tuple[float, float, float]],
+        *,
+        scales: Optional[Sequence[float | tuple[float, float, float]]] = None,
+        rotations: Optional[Sequence[tuple[float, float, float]]] = None,
+        colors: Optional[Sequence[ColorLike]] = None,
+        keep_mesh: bool = False,
+    ) -> Primitive3D:
+        """Create one drawable that draws ``mesh``'s mesh, with its material, at each of ``positions``.
+
+        Each copy is scaled by its entry of ``scales`` (one number, or one
+        per axis), turned by its ``rotations`` entry (radians about x, y and
+        z, as ``rotate_to_3d``) and colored by its ``colors`` entry, in that
+        order, then placed at its position. As ``points_3d``, the mesh
+        uploads once and every copy draws in one instanced draw: voxels,
+        crystal lattices, forests of arrows. ``mesh`` is a template, hidden
+        unless ``keep_mesh``; later changes to it do not reach the copies.
+        ``create()``, ``uncreate()`` and ``animate.transform_to`` work as for
+        ``points_3d``. A ``mesh`` of another scene, or one that is not a
+        solid, ``torus``, ``arrow_3d``, ``tube``, ``mesh`` or ``revolve``
+        (an extrusion, ``flat_3d``, ``line_3d``, a surface or copies
+        themselves), no positions, non-finite values or lists of another
+        length raise ``ValueError``; a scale that is neither a number nor a
+        triple raises ``TypeError``.
+
+        Example:
+            cube = scene.geometry.cube(0.18, material=Material3D.matte(BLUE))
+            voxels = scene.geometry.instances(cube, cells, colors=shades)
+        """
+        ...
     def mesh(
         self,
         vertices: Sequence[tuple[float, float, float]],

@@ -990,6 +990,9 @@ pub struct ObjectSpec {
     pub text_path: Option<super::text_path::TextPathSpec>,
     /// The drawable a `Primitive3D` is extruded from (`SceneModel::extrude`).
     pub extrusion: Option<super::extrude::ExtrusionSpec>,
+    /// Where a `Primitive3D` draws copies of its mesh instead of the mesh
+    /// (`SceneModel::instances`).
+    pub copies: Option<std::sync::Arc<gaanim_scene::MeshCopies>>,
     /// Placed in the 3D world (`DrawableHandle::in_3d`), lit with the
     /// material when one is given.
     pub in_3d: Option<gaanim_scene::InWorld3D>,
@@ -1207,6 +1210,7 @@ impl ObjectSpec {
             parallax_depth: None,
             text_path: None,
             extrusion: None,
+            copies: None,
             in_3d: None,
             exclude_from_parent_draw: false,
             fragment_fills: Vec::new(),
@@ -2812,6 +2816,21 @@ impl Anim {
             SpawnKind::SurfaceMesh { .. } => Some(false),
             _ => None,
         };
+        let copies = |spec: &ObjectSpec| spec.copies.as_ref().map(|copies| copies.positions.len());
+        let source_copies = self
+            .property_spec
+            .as_ref()
+            .and_then(|spec| copies(&spec.lock().expect("object spec poisoned")));
+        let target_copies = copies(&target.spec.lock().expect("object spec poisoned"));
+        match (source_copies, target_copies) {
+            (Some(from), Some(to)) if from != to => {
+                return Some("copies of a mesh transform only into as many copies");
+            }
+            (Some(_), None) | (None, Some(_)) => {
+                return Some("copies of a mesh transform only into other copies");
+            }
+            _ => {}
+        }
         let source = self
             .property_spec
             .as_ref()

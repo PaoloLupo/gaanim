@@ -577,6 +577,66 @@ scene.play([scene.camera.animate.orbit(delta_yaw=1.2, delta_pitch=0.0).duration(
 scene.render()
 ```
 
+== Nubes de puntos y copias de una malla
+
+Para miles de puntos, cubos o flechas iguales no hacen falta miles de
+objetos: `points_3d` e `instances` crean un solo objeto que dibuja la misma
+malla en muchos sitios. La malla se sube una vez a la GPU y todas las copias
+se dibujan juntas, así que una nube de diez mil puntos cuesta casi lo mismo
+que una esfera.
+
+```python
+# show-code: true
+import math
+from gaanim import BLUE, GOLD, Material3D, Scene
+
+scene = Scene(frame=(16, 9))
+n = 1500
+turn = math.pi * (3 - math.sqrt(5))
+ball = []
+for k in range(n):
+    y = 1 - 2 * (k + 0.5) / n
+    r = math.sqrt(1 - y * y)
+    ball.append((2.2 * r * math.cos(k * turn), 2.2 * y, 2.2 * r * math.sin(k * turn)))
+disk = [(2.8 * math.sqrt(k / n) * math.cos(k * turn), 0, 2.8 * math.sqrt(k / n) * math.sin(k * turn)) for k in range(n)]
+cloud = scene.geometry.points_3d(ball, radius=0.04, colors=[GOLD if y > 0 else BLUE for _, y, _ in ball])
+cloud.move_to_3d(-3.5, 0, 0).rotate_to_3d(0.3, 0, 0)
+target = scene.geometry.points_3d(disk, radius=0.04).move_to_3d(-3.5, 0, 0).rotate_to_3d(0.5, 0, 0)
+
+cube = scene.geometry.cube(0.4, material=Material3D.matte(BLUE))
+cells = [(x / 2, y / 2, z / 2) for x in range(-3, 4) for y in range(-3, 4) for z in range(-3, 4)]
+cells.sort(key=lambda p: p[0] ** 2 + p[1] ** 2 + p[2] ** 2)
+voxels = scene.geometry.instances(cube, cells, scales=[0.4 + 0.6 * (y + 1.5) / 3 for _, y, _ in cells])
+voxels.move_to_3d(3.5, 0, 0).rotate_to_3d(0.5, -0.6, 0)
+
+scene.play([cloud.animate.create(), voxels.animate.create()], duration=2)
+scene.play([cloud.animate.transform_to(target), voxels.animate.rotate_by_3d("y", 1.2)], duration=2)
+# output: preview.webp
+scene.render()
+```
+
+- `points_3d(positions, radius)` pone una esfera iluminada en cada punto;
+  `colors` da a cada una su color en lugar del del material.
+- `instances(mesh, positions)` copia la malla de una primitiva (un cubo, una
+  flecha, un toro, un `revolve`) con su material; `scales`, `rotations` y
+  `colors` dan a cada copia su escala, su giro y su color. La primitiva
+  queda oculta como plantilla, salvo con `keep_mesh=True`.
+- Las posiciones están en las coordenadas del objeto: `move_to_3d`,
+  `rotate_to_3d` y `scale` mueven, giran y escalan el conjunto, y la
+  opacidad, el material y el glow son de todas las copias.
+- `create()` hace crecer las copias una tras otra, en el orden de la lista,
+  y `uncreate()` las encoge en el mismo orden. Ordenar las posiciones elige
+  cómo aparecen: arriba, los vóxeles crecen desde el centro.
+- `animate.transform_to(otra)` lleva cada copia a la que ocupa su lugar en
+  la otra lista, con su escala, su giro y su color, mientras el objeto va a
+  donde está `otra`. Las dos necesitan tantas copias; si copian mallas
+  distintas, la malla también se transforma.
+- Las copias proyectan y reciben sombra como cualquier malla. Un objeto de
+  copias translúcido se ordena con los demás como un todo, no copia a copia.
+- Un paquete `.gaanim` guarda cada conjunto de copias una vez y en cada
+  fotograma solo cuánto han crecido; durante una transformación guarda cada
+  fotograma como su cambio respecto al anterior.
+
 == La cámara en perspectiva
 
 - `perspective(fov_y)` activa la proyección en perspectiva; `fov_y` es el

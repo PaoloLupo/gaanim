@@ -928,6 +928,133 @@ impl MeshBlend {
     }
 }
 
+/// Copies of a drawable's mesh, one where each point is: the renderer
+/// uploads the mesh once and draws every copy in one instanced draw, so a
+/// cloud of thousands of points stays one drawable. Each copy is scaled,
+/// turned and placed in the drawable's own coordinates, and colored when
+/// `colors` is set; `reveal` shows them as they grow in, one after another.
+#[derive(Component, Debug, Clone)]
+pub struct MeshInstances {
+    pub copies: Arc<MeshCopies>,
+    /// How far the copies have grown in, from 0 (none) to 1 (all at their
+    /// size): see [`MeshInstances::shown`].
+    pub reveal: f32,
+}
+
+/// Where each copy of a mesh goes (see [`MeshInstances`]).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct MeshCopies {
+    pub positions: Vec<[f32; 3]>,
+    /// Scale of each copy along x, y and z; 1 without.
+    pub scales: Option<Vec<[f32; 3]>>,
+    /// Turn of each copy, a unit quaternion `[x, y, z, w]`; none without.
+    pub rotations: Option<Vec<[f32; 4]>>,
+    /// Color of each copy (linear RGBA), which replaces the material's.
+    pub colors: Option<Vec<[f32; 4]>>,
+}
+
+/// Share of the reveal each copy takes to grow in: copies start one after
+/// another and overlap, so the last one starts at `1 - REVEAL_SPAN`.
+pub const REVEAL_SPAN: f32 = 0.3;
+
+impl MeshInstances {
+    /// `copies`, all shown.
+    pub fn new(copies: MeshCopies) -> Self {
+        Self::new_shared(Arc::new(copies))
+    }
+
+    /// `copies`, all shown, shared with whoever else holds them.
+    pub fn new_shared(copies: Arc<MeshCopies>) -> Self {
+        Self {
+            copies,
+            reveal: 1.0,
+        }
+    }
+
+    /// The size, from 0 to 1, copy `index` of `count` shows at `reveal`: it
+    /// grows in over [`REVEAL_SPAN`] of the reveal, starting where its place
+    /// in the list puts it, eased in and out.
+    pub fn shown(reveal: f32, index: usize, count: usize) -> f32 {
+        if reveal >= 1.0 {
+            return 1.0;
+        }
+        let start = if count > 1 {
+            (1.0 - REVEAL_SPAN) * index as f32 / (count - 1) as f32
+        } else {
+            0.0
+        };
+        let t = ((reveal - start) / REVEAL_SPAN).clamp(0.0, 1.0);
+        t * t * (3.0 - 2.0 * t)
+    }
+
+    /// The matrix that places copy `index` in the drawable's coordinates,
+    /// grown to `size` of its scale.
+    pub fn matrix(&self, index: usize, size: f32) -> gaanim_core::glam::Mat4 {
+        use gaanim_core::glam::{Mat4, Quat, Vec3};
+        let copies = &*self.copies;
+        let scale = copies
+            .scales
+            .as_ref()
+            .map_or(Vec3::ONE, |scales| Vec3::from_array(scales[index]));
+        let rotation = copies
+            .rotations
+            .as_ref()
+            .map_or(Quat::IDENTITY, |rotations| {
+                Quat::from_array(rotations[index]).normalize()
+            });
+        Mat4::from_scale_rotation_translation(
+            scale * size,
+            rotation,
+            Vec3::from_array(copies.positions[index]),
+        )
+    }
+}
+
+impl MeshCopies {
+    /// Whether every list holds one entry per position.
+    pub fn is_consistent(&self) -> bool {
+        let count = self.positions.len();
+        self.scales.as_ref().is_none_or(|v| v.len() == count)
+            && self.rotations.as_ref().is_none_or(|v| v.len() == count)
+            && self.colors.as_ref().is_none_or(|v| v.len() == count)
+    }
+
+    /// The box holding a mesh whose own box is `mesh` at every copy, in the
+    /// drawable's coordinates; `None` without copies.
+    pub fn bounds(
+        &self,
+        mesh: (gaanim_core::glam::Vec3, gaanim_core::glam::Vec3),
+    ) -> Option<(gaanim_core::glam::Vec3, gaanim_core::glam::Vec3)> {
+        use gaanim_core::glam::{Quat, Vec3};
+        let (low, high) = mesh;
+        let corners: [Vec3; 8] = std::array::from_fn(|k| {
+            Vec3::new(
+                if k & 1 == 0 { low.x } else { high.x },
+                if k & 2 == 0 { low.y } else { high.y },
+                if k & 4 == 0 { low.z } else { high.z },
+            )
+        });
+        let mut bounds: Option<(Vec3, Vec3)> = None;
+        for (index, position) in self.positions.iter().enumerate() {
+            let scale = self
+                .scales
+                .as_ref()
+                .map_or(Vec3::ONE, |scales| Vec3::from_array(scales[index]));
+            let rotation = self.rotations.as_ref().map_or(Quat::IDENTITY, |rotations| {
+                Quat::from_array(rotations[index]).normalize()
+            });
+            for corner in corners {
+                let point = Vec3::from_array(*position) + rotation * (corner * scale);
+                bounds = Some(match bounds {
+                    Some((min, max)) => (min.min(point), max.max(point)),
+                    None => (point, point),
+                });
+            }
+        }
+        bounds
+    }
+}
+
 /// A 3D line list (point pairs, or a strip), projected by the renderer.
 #[derive(Component, Debug, Clone, PartialEq)]
 pub struct LineListData {
@@ -962,6 +1089,72 @@ impl LineListData {
             [start as f32, end.clamp(start, 1.0) as f32]
         });
         self
+    }
+}
+
+#[cfg(test)]
+mod copies_tests {
+    use super::*;
+    use gaanim_core::glam::Vec3;
+
+    #[test]
+    fn copies_grow_in_one_after_another() {
+        let count = 11;
+        let sizes = |reveal: f32| -> Vec<f32> {
+            (0..count)
+                .map(|index| MeshInstances::shown(reveal, index, count))
+                .collect()
+        };
+        assert!(sizes(0.0).iter().all(|size| *size == 0.0));
+        assert!(sizes(1.0).iter().all(|size| *size == 1.0));
+        // The first copy is whole once its span has passed, while the last
+        // has not started; in between, earlier copies are larger.
+        let early = sizes(REVEAL_SPAN);
+        assert_eq!((early[0], early[count - 1]), (1.0, 0.0));
+        let middle = sizes(0.5);
+        assert!(middle.windows(2).all(|pair| pair[0] >= pair[1]));
+        assert!(middle.iter().any(|size| 0.0 < *size && *size < 1.0));
+        // The last one starts as late as it can and still ends at 1.
+        assert_eq!(
+            MeshInstances::shown(1.0 - REVEAL_SPAN, count - 1, count),
+            0.0
+        );
+        assert!(MeshInstances::shown(0.99, count - 1, count) > 0.99);
+        // A single copy grows in over the first span.
+        assert_eq!(MeshInstances::shown(REVEAL_SPAN, 0, 1), 1.0);
+    }
+
+    #[test]
+    fn copies_bound_the_mesh_where_each_one_stands() {
+        let unit = (Vec3::splat(-1.0), Vec3::ONE);
+        assert_eq!(MeshCopies::default().bounds(unit), None);
+        let quarter = gaanim_core::glam::Quat::from_rotation_z(std::f32::consts::FRAC_PI_4);
+        let copies = MeshCopies {
+            positions: vec![[0.0; 3], [10.0, 0.0, 0.0]],
+            scales: Some(vec![[1.0; 3], [2.0, 1.0, 1.0]]),
+            rotations: Some(vec![quarter.to_array(), [0.0, 0.0, 0.0, 1.0]]),
+            colors: None,
+        };
+        assert!(copies.is_consistent());
+        let (min, max) = copies.bounds(unit).unwrap();
+        // The first copy turned an eighth reaches out to the square's
+        // diagonal; the second, twice as wide, reaches 12.
+        assert!((min.x + 2_f32.sqrt()).abs() < 1e-5, "{min}");
+        assert!(
+            (max - Vec3::new(12.0, 2_f32.sqrt(), 1.0)).length() < 1e-5,
+            "{max}"
+        );
+        let instances = MeshInstances::new(copies.clone());
+        let placed = instances.matrix(1, 0.5).transform_point3(Vec3::ONE);
+        assert!(
+            (placed - Vec3::new(11.0, 0.5, 0.5)).length() < 1e-6,
+            "{placed}"
+        );
+        let uneven = MeshCopies {
+            colors: Some(vec![[1.0; 4]]),
+            ..copies
+        };
+        assert!(!uneven.is_consistent());
     }
 }
 

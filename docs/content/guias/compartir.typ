@@ -588,14 +588,16 @@ bloque y los segmentos que usa, y descarga los demás bloques con sus
 segmentos a medida que los reproduce. Así, una presentación larga empieza a
 verse sin esperar a descargar los trazados de todas sus diapositivas.
 
-Este es el formato 8. Guarda las mallas y líneas 3D que cambian de un
+Este es el formato 9. Guarda las mallas y líneas 3D que cambian de un
 fotograma a otro (una superficie que se dobla, una curva que se mueve) como el
 cambio de sus vértices respecto de los fotogramas anteriores de su segmento,
 sin perder un bit: en `gallery/catenoid_helicoid` el paquete pasa de 62 a
 30 MB, y a 12 MB con `--web`. Un morph entre mallas 3D (`transform_to`) guarda
 sus dos rejillas una vez y cada fotograma como cuánto avanza entre ellas: el
 paquete de `3d/morph_3d` ocupa 1,9 MB, donde guardar el cambio de cada
-fotograma ocupaba 76. Gaanim sigue leyendo los formatos 5 a 7 (versiones 0.9
-a 0.16), así que los paquetes ya publicados siguen abriéndose. Los grabados con
+fotograma ocupaba 76. Las copias de una malla (`points_3d`, `instances`) se
+guardan una vez por conjunto, y cada fotograma solo cuánto han crecido.
+Gaanim sigue leyendo los formatos 5 a 8 (versiones 0.9 a 0.16 y las de
+desarrollo de la 0.17), así que los paquetes ya publicados siguen abriéndose. Los grabados con
 versiones anteriores a la 0.9 ya no se abren: vuelve a grabarlos desde su
 script.

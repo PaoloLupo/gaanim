@@ -13,7 +13,9 @@ instalar una versión nueva, sigue
 
 = 0.17.0
 
-Sin publicar. Una malla 3D se transforma en otra con `animate.transform_to`.
+Sin publicar. Una malla 3D se transforma en otra con `animate.transform_to`,
+y `points_3d` e `instances` dibujan miles de puntos o copias de una malla
+como un solo objeto.
 
 == Morph entre mallas 3D
 
@@ -39,11 +41,30 @@ Sin publicar. Una malla 3D se transforma en otra con `animate.transform_to`.
   calcula para los materiales que lo dibujan.
 - Nuevo ejemplo, `3d/morph_3d`.
 
+== Nubes de puntos y copias de una malla
+
+- `scene.geometry.points_3d(positions, radius, colors=...)` dibuja una esfera
+  iluminada en cada punto, y `scene.geometry.instances(mesh, positions,
+  scales=..., rotations=..., colors=...)` copia la malla y el material de una
+  primitiva en cada posición, con la escala, el giro y el color de cada
+  copia. Ver
+  #link("/guias/camara-y-3d/#nubes-de-puntos-y-copias-de-una-malla")[Cámara y 3D].
+- La malla se sube una vez y todas las copias se dibujan juntas, así que una
+  nube de miles de puntos es un solo objeto que se mueve, gira, se ilumina y
+  proyecta sombra como cualquier malla.
+- `create()` hace crecer las copias una tras otra y `uncreate()` las encoge;
+  `animate.transform_to` otro objeto de tantas copias lleva cada una a su
+  lugar en el otro.
+- Un paquete `.gaanim` guarda cada conjunto de copias una vez y en cada
+  fotograma solo cuánto han crecido.
+- Nuevo ejemplo, `3d/points_3d`.
+
 == Al actualizar
 
-- Los paquetes `.gaanim` pasan al formato 8, que guarda los morphs 3D. Gaanim
-  sigue abriendo los de formato 5 a 7; un Gaanim anterior no abre los
-  nuevos, así que actualiza los reproductores que los publican.
+- Los paquetes `.gaanim` pasan al formato 9, que guarda los morphs 3D y las
+  copias de mallas. Gaanim sigue abriendo los de formato 5 a 8; un Gaanim
+  anterior no abre los nuevos, así que actualiza los reproductores que los
+  publican.
 - `transform_to` y `replacement_transform_to` entre una malla 3D y un objeto
   que no lo es, o entre una malla con material y otra sin él, lanzan
   `ValueError`. Antes la malla no cambiaba.

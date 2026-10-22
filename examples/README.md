@@ -229,6 +229,7 @@ Primitives, arrows and tubes, extrusion, axonometric drawings and 3D axes.
 | [Transforms 3d](3d/transforms_3d.py) | Turning, moving and scaling drawables in depth with the _3d methods, about their center or a pivot. |
 | [Extrusion](3d/extrusion.py) | Text, equations, SVGs, shapes with holes and groups extruded into lit solids, with depth, bevel, tolerance and materials. |
 | [3D morphs](3d/morph_3d.py) | A mesh morphing into another with transform_to: spheres, tori and planes matched by their texture coordinates, cubes, cylinders and cones by rays from their center, and one mesh morphing through three targets in turn. |
+| [3D point clouds and copies](3d/points_3d.py) | One drawable that draws one mesh at many points: spheres at each point of a cloud, colored or not, voxels and an arrow field copied from a primitive, and clouds and fields moving copy by copy into another set with transform_to. |
 | [Shapes 3d](3d/shapes_3d.py) | Tori, arrows between two points, tubes along open, creased and closed paths, flat sheets of text, equations and shapes, and lit lines between points or the drawables they follow. |
 | [2D drawables in 3D](3d/drawables_in_3d.py) | Text, equations and shapes placed in the 3D world with in_3d(): turned, written, tilted by perspective, hidden by meshes and lit, beside billboard(). |
 | [glTF models](3d/models_3d.py) | A glTF model imported with scene.media.gltf: its rest pose, its animations played one after another with fades, and loops, speeds and reversed plays. |

@@ -99,6 +99,7 @@ pub use visualization::{
 mod canvas_impl;
 mod narration;
 pub use crate::export::{AudioTrack, AudioTrackError};
+pub use crate::mesh_copies::{InstancesError, linear as linear_color};
 pub use canvas_impl::{
     AngleDimensionHandle, AngleDimensionOptions, AssetPreloadError, AssetRootError, AudioClip,
     BooleanError, CameraBindingError, CameraConstraintHandle, CameraStateError, CameraStateHandle,

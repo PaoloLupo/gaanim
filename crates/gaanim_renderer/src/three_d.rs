@@ -37,7 +37,7 @@ use gaanim_core::{kurbo, peniko};
 use gaanim_math::{Camera, GlobalSpatialTransform, Projection};
 use gaanim_scene::{
     AlphaMode, GlobalOpacity, Light3D, LightKind3D, Lighting3D, LineListData, Material3D,
-    MeshTexture, PlaneFillData, TextureWrap, TriangleMeshData,
+    MeshCopies, MeshInstances, MeshTexture, PlaneFillData, TextureWrap, TriangleMeshData,
 };
 use peniko::{Blob, ImageAlphaType, ImageData, ImageFormat};
 use vello::wgpu;
@@ -100,6 +100,9 @@ pub(crate) struct Content<'a> {
     /// The glow of the drawable or of the group that holds it (see
     /// [`glow`]).
     pub glow: Option<Glow>,
+    /// Copies of the mesh drawn instead of it, one at each point (see
+    /// [`gaanim_scene::MeshInstances`]).
+    pub instances: Option<&'a MeshInstances>,
 }
 
 /// Width of 3D lines without a stroke width, as a fraction of the frame's
@@ -893,6 +896,9 @@ struct GpuDraw {
     /// Lines only: the segments drawn, those a reveal shows at least part of;
     /// filled outlines: all of them.
     instances: std::ops::Range<u32>,
+    /// Meshes only: the records of the frame's instances it draws, one, or
+    /// one per copy shown of a mesh drawn at many points.
+    copies: std::ops::Range<u32>,
     /// An opaque mesh whose material draws an outline.
     outlined: bool,
     /// A skinned mesh: where its palette starts in the frame's joints.
@@ -991,6 +997,9 @@ struct Pending {
     sphere: (DVec3, f64),
     /// A mesh's or lines' glow.
     glow: Option<Glow>,
+    /// A mesh drawn at many points: its copies and how far they have grown
+    /// in.
+    copies: Option<(Arc<MeshCopies>, f32)>,
 }
 
 impl Pending {
@@ -1187,11 +1196,26 @@ impl<'a> GpuMeshes<'a> {
             .joints
             .filter(|joints| source.skinned() && !joints.is_empty())
             .cloned();
-        let sphere = match &joints {
+        let mut sphere = match &joints {
             Some(joints) => skinned_sphere(&source, joints),
             None => (source.center, source.radius),
         };
+        // Copies of a mesh reach as far as the sphere about every copy.
+        let copies = content
+            .instances
+            .filter(|_| source.is_mesh() && joints.is_none())
+            .filter(|instances| instances.copies.is_consistent());
+        if let Some(instances) = copies {
+            let (center, radius) = (sphere.0.as_vec3(), sphere.1 as f32);
+            let mesh = (center - radius, center + radius);
+            let Some((min, max)) = instances.copies.bounds(mesh) else {
+                return;
+            };
+            let (min, max) = (min.as_dvec3(), max.as_dvec3());
+            sphere = ((min + max) * 0.5, (max - min).length() * 0.5);
+        }
         self.pending.push(Pending {
+            copies: copies.map(|instances| (Arc::clone(&instances.copies), instances.reveal)),
             class,
             translucent: !fill && (opacity < 0.999 || !opaque_colors),
             joints,
@@ -1310,8 +1334,10 @@ impl<'a> GpuMeshes<'a> {
             let mut draw_uniforms = Vec::with_capacity(members.len() * DRAW_STRIDE);
             let mut instances = Vec::with_capacity(members.len() * INSTANCE_BYTES);
             let mut joints: Vec<u8> = Vec::new();
+            let mut shown = 0_u32;
             for (_, pending) in members {
-                push_instance(&mut instances, pending);
+                let first_copy = shown;
+                shown += push_instance(&mut instances, pending);
                 let line_px = pending.line_width.unwrap_or(line_width) * pixels_per_unit;
                 // The segments shown: all of them, or a reveal's part.
                 let segments = pending.source.count as f32;
@@ -1358,6 +1384,7 @@ impl<'a> GpuMeshes<'a> {
                     translucent: pending.translucent,
                     casts: pending.casts(),
                     instances,
+                    copies: first_copy..shown,
                     outlined: !pending.translucent
                         && !pending.source.outline.is_empty()
                         && pending.material.is_some_and(|material| material.outlined()),
@@ -1759,19 +1786,52 @@ fn frame_uniforms(
     uniforms
 }
 
-/// Append one draw's instance data (see [`INSTANCE_BYTES`]).
-fn push_instance(bytes: &mut Vec<u8>, pending: &Pending) {
-    let start = bytes.len();
-    push_mat4(bytes, pending.model);
-    let normal = pending.model.inverse().transpose();
-    for column in [normal.x_axis, normal.y_axis, normal.z_axis] {
-        push_f32s(
-            bytes,
-            &[column.x as f32, column.y as f32, column.z as f32, 0.0],
-        );
+/// Append one draw's instance data (see [`INSTANCE_BYTES`]): one record,
+/// or one per copy shown of a mesh drawn at many points; returns how many.
+fn push_instance(bytes: &mut Vec<u8>, pending: &Pending) -> u32 {
+    let push = |bytes: &mut Vec<u8>, model: DMat4, base: &[f32; 4]| {
+        let start = bytes.len();
+        push_mat4(bytes, model);
+        let normal = model.inverse().transpose();
+        for column in [normal.x_axis, normal.y_axis, normal.z_axis] {
+            push_f32s(
+                bytes,
+                &[column.x as f32, column.y as f32, column.z as f32, 0.0],
+            );
+        }
+        push_f32s(bytes, base);
+        debug_assert_eq!(bytes.len() - start, INSTANCE_BYTES);
+    };
+    let Some((copies, reveal)) = &pending.copies else {
+        push(bytes, pending.model, &pending.base);
+        return 1;
+    };
+    let count = copies.positions.len();
+    let instances = MeshInstances {
+        copies: Arc::clone(copies),
+        reveal: *reveal,
+    };
+    let mut pushed = 0;
+    for index in 0..count {
+        let size = MeshInstances::shown(*reveal, index, count);
+        if size <= 0.0 {
+            continue;
+        }
+        let model = pending.model * instances.matrix(index, size).as_dmat4();
+        let base = copies
+            .colors
+            .as_ref()
+            .map_or(pending.base, |colors| colors[index]);
+        push(bytes, model, &base);
+        pushed += 1;
     }
-    push_f32s(bytes, &pending.base);
-    debug_assert_eq!(bytes.len() - start, INSTANCE_BYTES);
+    pushed
+}
+
+/// The instance records draws `first..end` of `frame` draw: alike draws
+/// draw as one, and their records follow each other.
+fn copies_of(frame: &GpuMeshFrame, first: usize, end: usize) -> std::ops::Range<u32> {
+    frame.draws[first].copies.start..frame.draws[end - 1].copies.end
 }
 
 /// Whether draws `a` and `b` of a frame draw as one: opaque meshes alike,
@@ -3497,7 +3557,7 @@ impl GpuThreeD {
                     pass.set_bind_group(0, bind_group, &[(first * DRAW_STRIDE) as u32]);
                     pass.set_vertex_buffer(0, uploaded.vertices.slice(..));
                     pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
-                    pass.draw_indexed(0..draw.source.count, 0, first as u32..end as u32);
+                    pass.draw_indexed(0..draw.source.count, 0, copies_of(frame, first, end));
                 }
             }
         }
@@ -3622,7 +3682,7 @@ impl GpuThreeD {
                             pass.draw(0..6, draw.instances.clone());
                         }
                     } else {
-                        pass.draw_indexed(0..draw.source.count, 0, first as u32..end as u32);
+                        pass.draw_indexed(0..draw.source.count, 0, copies_of(frame, first, end));
                     }
                 }
                 if draw.outlined
@@ -3630,7 +3690,7 @@ impl GpuThreeD {
                 {
                     pass.set_pipeline(&pipelines.outline[usize::from(draw.source.closed)]);
                     pass.set_vertex_buffer(2, outline.slice(..));
-                    pass.draw_indexed(0..draw.source.count, 0, first as u32..end as u32);
+                    pass.draw_indexed(0..draw.source.count, 0, copies_of(frame, first, end));
                 }
             };
             if opaque {
@@ -3686,7 +3746,7 @@ impl GpuThreeD {
                 } else if let Some(indices) = &uploaded.indices {
                     pass.set_vertex_buffer(1, instance_buffer.slice(..));
                     pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
-                    pass.draw_indexed(0..draw.source.count, 0, at as u32..at as u32 + 1);
+                    pass.draw_indexed(0..draw.source.count, 0, draw.copies.clone());
                 }
             };
             glow::draw_glows(
@@ -4748,6 +4808,7 @@ mod tests {
             lines: None,
             material: None,
             glow: None,
+            instances: None,
         };
         let mut sources = MeshSources::default();
         let mut meshes =
@@ -4811,6 +4872,7 @@ mod tests {
                 fill: None,
                 joints: None,
                 glow: None,
+                instances: None,
             },
         );
         // The fixed key light casts one map, at full size.
@@ -4883,6 +4945,7 @@ mod tests {
                     fill: None,
                     joints: None,
                     glow: None,
+                    instances: None,
                 },
             );
         }
@@ -4939,6 +5002,7 @@ mod tests {
                     fill: None,
                     joints: None,
                     glow: None,
+                    instances: None,
                 },
             );
         }
@@ -5002,6 +5066,7 @@ mod tests {
                 fill: None,
                 joints: None,
                 glow: None,
+                instances: None,
             },
         );
         let frames: Vec<GpuMeshFrame> = meshes
@@ -5055,6 +5120,7 @@ mod tests {
                     fill: None,
                     joints: None,
                     glow: None,
+                    instances: None,
                 },
             );
         }
@@ -5141,6 +5207,7 @@ mod tests {
                 fill: None,
                 joints: None,
                 glow: None,
+                instances: None,
             },
         );
         assert!(meshes.push_fill(
@@ -5158,6 +5225,7 @@ mod tests {
                 fill: Some(&fill),
                 joints: None,
                 glow: None,
+                instances: None,
             },
         ));
         let illumination = Illumination {
@@ -5232,6 +5300,7 @@ mod tests {
                 fill: None,
                 joints: None,
                 glow: None,
+                instances: None,
             },
         );
         assert!(meshes.push_fill(
@@ -5249,6 +5318,7 @@ mod tests {
                 fill: Some(&fill),
                 joints: None,
                 glow: None,
+                instances: None,
             },
         ));
         let illumination = Illumination {
@@ -5307,6 +5377,7 @@ mod tests {
                     fill: None,
                     joints: None,
                     glow: None,
+                    instances: None,
                 },
             );
         }
@@ -5348,6 +5419,72 @@ mod tests {
         );
     }
 
+    /// A mesh drawn at many points takes one record per copy shown, in one
+    /// draw, each placed, sized and colored by its copy; hidden copies take
+    /// none.
+    #[test]
+    fn copies_of_a_mesh_draw_as_one_with_a_record_each() {
+        let camera = camera(Projection::Orthographic { zoom: 1.0 });
+        let (ndc_to_canvas, line_width) = canvas_projection(&camera).unwrap();
+        let mesh = lit_quad();
+        let opacity = GlobalOpacity(1.0);
+        let transform = placed(2.0, DVec3::new(1.0, 0.0, 0.0));
+        let frame = |reveal: f32| {
+            let instances = MeshInstances {
+                copies: Arc::new(MeshCopies {
+                    positions: vec![[0.0; 3], [1.0, 0.0, 0.0], [0.0, 2.0, 0.0]],
+                    scales: Some(vec![[1.0; 3], [0.5; 3], [1.0; 3]]),
+                    rotations: None,
+                    colors: Some(vec![[1.0, 0.0, 0.0, 1.0]; 3]),
+                }),
+                reveal,
+            };
+            let mut sources = MeshSources::default();
+            let mut meshes =
+                GpuMeshes::new(&mut sources, (1920, 1080), camera.to_vello_transform(), 0).unwrap();
+            meshes.push(
+                0,
+                [(1, 1), (1, 1)],
+                [None, None],
+                &Content {
+                    transform: &transform,
+                    opacity: &opacity,
+                    mesh: Some(&mesh),
+                    lines: None,
+                    material: mesh.material.as_ref(),
+                    line_width: None,
+                    line_range: None,
+                    fill: None,
+                    joints: None,
+                    glow: None,
+                    instances: Some(&instances),
+                },
+            );
+            meshes
+                .finish(&camera, ndc_to_canvas, line_width, &Illumination::default())
+                .remove(0)
+                .1
+        };
+        let shown = frame(1.0);
+        assert_eq!(shown.draws.len(), 1);
+        assert_eq!(shown.draws[0].copies, 0..3);
+        assert_eq!(shown.instances.len(), 3 * INSTANCE_BYTES);
+        let value = |record: usize, at: usize| {
+            let start = record * INSTANCE_BYTES + at * 4;
+            f32::from_le_bytes(shown.instances[start..start + 4].try_into().unwrap())
+        };
+        // The third copy sits 2 units up in the drawable, 4 in the world;
+        // the second is half the size; each takes its own color.
+        assert_eq!([value(2, 12), value(2, 13)], [1.0, 4.0]);
+        assert_eq!(value(1, 0), 1.0);
+        assert_eq!(value(0, 28), 1.0);
+        assert_eq!(value(0, 29), 0.0);
+        // Before they grow in, none draws.
+        let hidden = frame(0.0);
+        assert_eq!(hidden.draws[0].copies, 0..0);
+        assert!(hidden.instances.is_empty());
+    }
+
     #[test]
     fn meshes_alike_share_one_upload_and_draw_as_one() {
         let camera = camera(Projection::Orthographic { zoom: 1.0 });
@@ -5379,6 +5516,7 @@ mod tests {
                     fill: None,
                     joints: None,
                     glow: None,
+                    instances: None,
                 },
             );
         }
@@ -5506,6 +5644,7 @@ mod tests {
                 fill: None,
                 joints: None,
                 glow: None,
+                instances: None,
             },
         );
         let frames: Vec<GpuMeshFrame> = meshes
@@ -5566,6 +5705,7 @@ mod tests {
                 lines: None,
                 material: None,
                 glow: None,
+                instances: None,
             },
         );
         let frames: Vec<GpuMeshFrame> = meshes
@@ -5663,6 +5803,7 @@ mod tests {
                     fill: None,
                     joints: joints.as_ref(),
                     glow: None,
+                    instances: None,
                 },
             );
         }
@@ -5722,6 +5863,7 @@ mod tests {
                     fill: None,
                     joints: None,
                     glow: glow.clone(),
+                    instances: None,
                 },
             );
         }
@@ -5968,6 +6110,7 @@ mod tests {
             fill: None,
             joints: None,
             glow: None,
+            instances: None,
         };
         meshes.push(0, [(2, 1), (2, 1)], [None, None], &card(&front));
         meshes.push(0, [(3, 1), (3, 1)], [None, None], &card(&back));
@@ -5986,6 +6129,7 @@ mod tests {
                 fill: Some(&fill),
                 joints: None,
                 glow: None,
+                instances: None,
             },
         ));
         let frames: Vec<GpuMeshFrame> = meshes
@@ -6075,6 +6219,7 @@ mod tests {
                     fill: Some(&fill),
                     joints: None,
                     glow: None,
+                    instances: None,
                 },
             ));
             let frames: Vec<GpuMeshFrame> = meshes
@@ -6181,6 +6326,7 @@ mod tests {
                     fill: Some(&fill),
                     joints: None,
                     glow: None,
+                    instances: None,
                 },
             ));
             let frames: Vec<GpuMeshFrame> = meshes
@@ -6490,6 +6636,7 @@ mod tests {
                     fill: None,
                     joints: None,
                     glow: None,
+                    instances: None,
                 },
                 false,
             );
@@ -6533,6 +6680,7 @@ mod tests {
                         fill: Some(&fill),
                         joints: None,
                         glow: None,
+                        instances: None,
                     },
                     true,
                 );

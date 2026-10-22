@@ -11862,9 +11862,24 @@ impl SceneModel {
                     .morph_mesh_ids
                     .contains(&spec.id)
                     .then(|| Arc::new(mesh.clone()));
+                // Copies of the mesh bound what the drawable draws.
+                let copies = spec.copies.as_ref().map(|copies| {
+                    let bounds = crate::mesh_copies::copies_bounds(&mesh, copies);
+                    (Arc::clone(copies), bounds)
+                });
                 let mref = builder.spawn_triangle_mesh_data(mesh);
                 if let Some(mesh) = morphed {
                     builder.morph_meshes.insert(mref.id, mesh);
+                }
+                if let Some((copies, bounds)) = copies
+                    && let Some(state) = builder.states.get_mut(mref.id)
+                {
+                    state.bounds = bounds;
+                    builder.commands.entity(state.entity).insert((
+                        gaanim_scene::MeshInstances::new_shared(Arc::clone(&copies)),
+                        gaanim_scene::LocalBounds(bounds),
+                    ));
+                    builder.instanced.insert(mref.id, copies);
                 }
                 // The mesh is centered on its own origin, so moves, pivots
                 // and `create()` behave as for other primitives.
@@ -15418,6 +15433,177 @@ mod tests {
         assert_eq!(at(&mut app, 2.0), 24);
         assert_eq!(at(&mut app, 0.0), 33 * 17);
         assert_eq!(at(&mut app, 2.5), 24);
+    }
+
+    #[test]
+    fn copies_grow_in_and_move_to_another_set_through_seeks() {
+        use bevy::prelude::App;
+        use gaanim_scene::{LocalBounds, Material3D, MeshInstances, TriangleMeshData};
+        let mut canvas = SceneModel::new(1280, 720);
+        let material = Material3D::default();
+        let row = canvas
+            .points_3d(
+                &[[0.0; 3], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]],
+                0.1,
+                (8, 4),
+                None,
+                material,
+            )
+            .unwrap();
+        let column = canvas
+            .points_3d(
+                &[[0.0; 3], [0.0, 1.0, 0.0], [0.0, 2.0, 0.0]],
+                0.1,
+                (8, 4),
+                None,
+                material,
+            )
+            .unwrap();
+        canvas.play(vec![row.animate().create().duration(1.0)]);
+        canvas.play(vec![
+            row.animate().transform_to(&column).unwrap().duration(1.0),
+        ]);
+        canvas.play(vec![row.animate().uncreate().duration(1.0)]);
+        let mut app = App::new();
+        app.add_plugins(bevy::prelude::MinimalPlugins)
+            .add_plugins(gaanim_scene::GaanimScenePlugin)
+            .add_plugins(gaanim_animation::GaanimAnimationPlugin)
+            .add_plugins(gaanim_timeline::GaanimTimelinePlugin)
+            .add_plugins(gaanim_text::GaanimTextPlugin)
+            .add_plugins(gaanim_renderer::GaanimDerivedGeometryPlugin);
+        app.finish();
+        app.cleanup();
+        app.update();
+        crate::runtime::replay_canvas_into(app.world_mut(), canvas);
+        app.update();
+        let row = entity_of(app.world_mut(), &row);
+        let at = |app: &mut App, time: f64| {
+            app.world_mut().resource_mut::<Timeline>().seek_request = Some(time);
+            app.update();
+            let world = app.world();
+            let instances = world.get::<MeshInstances>(row).unwrap();
+            (
+                instances.reveal,
+                instances.copies.positions.clone(),
+                world.get::<LocalBounds>(row).unwrap().0,
+                world.get::<TriangleMeshData>(row).unwrap().vertices.len(),
+            )
+        };
+        let near = |a: DVec3, b: DVec3| a.distance(b) < 1e-6;
+
+        // Hidden before `create()`, then grown in, around the row.
+        let (reveal, positions, bounds, vertices) = at(&mut app, 0.0);
+        assert_eq!((reveal, vertices), (0.0, 9 * 5));
+        assert_eq!(positions[2], [2.0, 0.0, 0.0]);
+        assert!(
+            near(bounds.min, DVec3::splat(-0.1)) && near(bounds.max, DVec3::new(2.1, 0.1, 0.1)),
+            "{bounds:?}"
+        );
+        assert!((at(&mut app, 0.5).0 - 0.5).abs() < 1e-6);
+        assert_eq!(at(&mut app, 1.0).0, 1.0);
+        // Halfway through the transform each copy is halfway to its
+        // place in the column, and the mesh they copy stays.
+        let (reveal, positions, bounds, vertices) = at(&mut app, 1.5);
+        assert_eq!((reveal, vertices), (1.0, 9 * 5));
+        let halfway = DVec3::from(positions[2].map(f64::from));
+        assert!(near(halfway, DVec3::new(1.0, 1.0, 0.0)), "{halfway}");
+        assert!(near(bounds.max, DVec3::new(1.1, 1.1, 0.1)), "{bounds:?}");
+        // Then the column, around the column.
+        let (_, positions, bounds, _) = at(&mut app, 2.0);
+        assert_eq!(positions[2], [0.0, 2.0, 0.0]);
+        assert!(near(bounds.max, DVec3::new(0.1, 2.1, 0.1)), "{bounds:?}");
+        // `uncreate()` shrinks the column's copies away in the same order.
+        assert!((at(&mut app, 2.5).0 - 0.5).abs() < 1e-6);
+        assert_eq!(at(&mut app, 3.0).0, 0.0);
+        // Seeking back shows the row again, partly grown.
+        let (reveal, positions, bounds, _) = at(&mut app, 0.5);
+        assert!((reveal - 0.5).abs() < 1e-6);
+        assert_eq!(positions[2], [2.0, 0.0, 0.0]);
+        assert!(near(bounds.max, DVec3::new(2.1, 0.1, 0.1)), "{bounds:?}");
+    }
+
+    #[test]
+    fn copies_of_a_mesh_check_what_they_copy() {
+        use crate::mesh_copies::InstancesError;
+        use gaanim_scene::{Material3D, MeshCopies};
+        let mut canvas = SceneModel::new(320, 180);
+        let material = Material3D::default();
+        let cube = canvas.cube(1.0, material).unwrap();
+        let at = |positions: Vec<[f32; 3]>| MeshCopies {
+            positions,
+            ..MeshCopies::default()
+        };
+        let error = |canvas: &mut SceneModel, copies: MeshCopies| {
+            canvas.instances(&cube, copies, true).err()
+        };
+        assert_eq!(
+            error(&mut canvas, at(Vec::new())),
+            Some(InstancesError::NoPositions)
+        );
+        let uneven = MeshCopies {
+            scales: Some(vec![[1.0; 3]]),
+            ..at(vec![[0.0; 3]; 2])
+        };
+        assert_eq!(
+            error(&mut canvas, uneven),
+            Some(InstancesError::LengthMismatch)
+        );
+        assert_eq!(
+            error(&mut canvas, at(vec![[f32::NAN, 0.0, 0.0]])),
+            Some(InstancesError::NotFinite)
+        );
+        let unturned = MeshCopies {
+            rotations: Some(vec![[0.0; 4]]),
+            ..at(vec![[0.0; 3]])
+        };
+        assert_eq!(
+            error(&mut canvas, unturned),
+            Some(InstancesError::NotFinite)
+        );
+        // Copies are not copied again, nor are meshes of another scene or
+        // drawables that are not primitives.
+        let copies = canvas
+            .instances(&cube, at(vec![[0.0; 3]; 2]), true)
+            .unwrap();
+        assert_eq!(
+            canvas.instances(&copies, at(vec![[0.0; 3]]), true).err(),
+            Some(InstancesError::NotAPrimitive)
+        );
+        let circle = canvas.circle(1.0);
+        assert_eq!(
+            canvas.instances(&circle, at(vec![[0.0; 3]]), true).err(),
+            Some(InstancesError::NotAPrimitive)
+        );
+        let rod = canvas
+            .line_3d(
+                CanvasEndpoint::Static(DVec3::ZERO),
+                CanvasEndpoint::Static(DVec3::X),
+                0.1,
+                8,
+                true,
+                material,
+            )
+            .unwrap();
+        assert_eq!(
+            canvas.instances(&rod, at(vec![[0.0; 3]]), true).err(),
+            Some(InstancesError::NotAPrimitive)
+        );
+        let mut other = SceneModel::new(320, 180);
+        assert_eq!(
+            other.instances(&cube, at(vec![[0.0; 3]]), true).err(),
+            Some(InstancesError::ForeignPrototype)
+        );
+        // Copies transform only into as many copies.
+        let three = canvas
+            .instances(&cube, at(vec![[0.0; 3]; 3]), true)
+            .unwrap();
+        assert!(copies.animate().transform_to(&three).is_err());
+        assert!(copies.animate().transform_to(&cube).is_err());
+        assert!(cube.animate().transform_to(&copies).is_err());
+        let two = canvas
+            .instances(&cube, at(vec![[1.0; 3]; 2]), false)
+            .unwrap();
+        assert!(copies.animate().transform_to(&two).is_ok());
     }
 
     #[test]

@@ -1404,6 +1404,54 @@ scene.play([atom_b.animate.move_to_3d(1, 1, 1)])
 ]
 
 #api-entry(
+  name: "Geometry.points_3d",
+  kind: "factory",
+  params: (
+    (name: "positions", type: "Sequence[tuple[float, float, float]]", default: none, desc: [Un punto por esfera, en las coordenadas propias del objeto. Sirven arrays de numpy de forma `(n, 3)`.]),
+    (name: "radius", type: "float", default: "0.05", desc: [Radio de cada esfera, en unidades de escena.]),
+    (name: "colors", type: "Sequence[ColorLike] | None", default: "None", desc: [Un color por punto, en lugar del color del material.]),
+    (name: "segments", type: "int", default: "12", desc: [Divisiones de cada esfera alrededor de su eje; al menos 3.]),
+    (name: "rings", type: "int", default: "8", desc: [Divisiones de polo a polo; al menos 2.]),
+    (name: "material", type: "Material3D | None", default: "None", desc: [Material de todas las esferas; sin él, mate blanco.]),
+  ),
+  returns: (type: "Primitive3D", desc: [Un solo objeto que dibuja una esfera iluminada en cada punto.]),
+  desc: [Una nube de puntos 3D: muestras, partículas, estrellas, átomos. La malla de la esfera se sube una vez y todas se dibujan juntas, así que diez mil puntos cuestan casi lo mismo que uno. Es un `Primitive3D` como los demás: `move_to_3d`, `rotate_to_3d` y `scale` mueven, giran y escalan la nube entera, y la opacidad, el material y el glow son de todos los puntos. `create()` hace crecer los puntos uno tras otro, en el orden de `positions`, y `uncreate()` los encoge en el mismo orden; `animate.transform_to` otra nube de tantos puntos lleva cada punto al que ocupa su lugar en la otra lista y mezcla sus colores. Ninguna posición, valores no finitos, `colors` de otra longitud, un `radius` no positivo o muy pocas divisiones lanzan `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>import math
+>>>scene = Scene(frame=(16, 9))
+spiral = [(math.cos(k / 8) * k / 60, k / 120 - 1, math.sin(k / 8) * k / 60) for k in range(240)]
+cloud = scene.geometry.points_3d(spiral, radius=0.05, colors=[GOLD if k % 2 else BLUE for k in range(240)])
+scene.play([cloud.animate.create().duration(2)])
+```
+]
+
+#api-entry(
+  name: "Geometry.instances",
+  kind: "factory",
+  params: (
+    (name: "mesh", type: "Primitive3D", default: none, desc: [La primitiva cuya malla y material se copian: un sólido básico, `torus`, `arrow_3d`, `tube`, `mesh` o `revolve`.]),
+    (name: "positions", type: "Sequence[tuple[float, float, float]]", default: none, desc: [Dónde va cada copia, en las coordenadas propias del objeto.]),
+    (name: "scales", type: "Sequence[float | tuple[float, float, float]] | None", default: "None", desc: [Escala de cada copia: un número, o uno por eje.]),
+    (name: "rotations", type: "Sequence[tuple[float, float, float]] | None", default: "None", desc: [Giro de cada copia en radianes alrededor de x, y y z, como `rotate_to_3d`.]),
+    (name: "colors", type: "Sequence[ColorLike] | None", default: "None", desc: [Color de cada copia, en lugar del color del material.]),
+    (name: "keep_mesh", type: "bool", default: "False", desc: [Deja `mesh` a la vista; sin esto queda oculta, como plantilla.]),
+  ),
+  returns: (type: "Primitive3D", desc: [Un solo objeto que dibuja la malla en cada posición.]),
+  desc: [Copias de una malla en muchos sitios, dibujadas juntas: vóxeles, redes cristalinas, bosques de flechas. Cada copia se escala, se gira y se colorea con su entrada de cada lista, en ese orden, y se coloca en su posición. La malla se copia al crear el objeto: los cambios posteriores a `mesh` no llegan a las copias. `create()`, `uncreate()` y `animate.transform_to` funcionan como en `points_3d`; si las dos copian mallas distintas, la malla también se transforma. Las copias proyectan y reciben sombra como cualquier malla. Una `mesh` de otra escena, que no sea una de esas primitivas (un texto extruido, una lámina de `flat_3d`, una `line_3d`, una superficie u otro objeto de copias), ninguna posición, valores no finitos, un giro nulo o listas de otra longitud lanzan `ValueError`; una escala que no es un número ni un trío, `TypeError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+cube = scene.geometry.cube(0.3, material=Material3D.matte(BLUE))
+cells = [(x * 0.4, y * 0.4, z * 0.4) for x in range(-2, 3) for y in range(-2, 3) for z in range(-2, 3)]
+voxels = scene.geometry.instances(cube, cells, scales=[0.5 + 0.1 * (x + y + z) for x, y, z in cells])
+scene.play([voxels.animate.create().duration(2)])
+```
+]
+
+#api-entry(
   name: "Geometry.mesh",
   kind: "factory",
   params: (

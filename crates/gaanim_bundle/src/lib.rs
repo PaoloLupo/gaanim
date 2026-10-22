@@ -98,9 +98,10 @@ pub const FORMAT: &str = "gaanim-bundle";
 /// every mesh and line list whole, where version 7 stores one that only
 /// moves its vertices as their change from the last of its drawable;
 /// version 7 (Gaanim 0.16) stored each frame of a 3D morph that way too,
-/// where version 8 stores the two meshes a morph blends once and each
-/// frame as how far between them it lies.
-pub const VERSION: u32 = 8;
+/// where version 8 (development builds of Gaanim 0.17) stores the two
+/// meshes a morph blends once and each frame as how far between them it
+/// lies; version 9 adds the copies of meshes drawn at many points.
+pub const VERSION: u32 = 9;
 /// Oldest version this build still reads: bundles published in other pages
 /// keep playing when the hosted players move to a newer version.
 pub const OLDEST_READABLE: u32 = 5;
@@ -2335,6 +2336,7 @@ mod tests {
                 fill: Some(Arc::new(fill.clone())),
                 joints: None,
                 glow: None,
+                instances: None,
                 composition: gaanim_renderer::pipeline::ThreeDComposition {
                     in_views: true,
                     post_exempt: false,
@@ -2397,6 +2399,7 @@ mod tests {
                 fill: None,
                 joints: None,
                 glow,
+                instances: None,
                 composition: gaanim_renderer::pipeline::ThreeDComposition {
                     in_views: true,
                     post_exempt: false,
@@ -2426,6 +2429,88 @@ mod tests {
         for (index, glow) in glows.iter().enumerate() {
             let three_d = bundle.frame(index).unwrap().capture.three_d.unwrap();
             assert_eq!(&three_d.sources[0].glow, glow, "frame {index}");
+        }
+    }
+
+    /// Copies of a mesh come back with every list they carry and how far
+    /// they have grown in, beside a source that draws no copies.
+    #[test]
+    fn copies_of_meshes_round_trip() {
+        let mesh = Arc::new(gaanim_scene::TriangleMeshData {
+            vertices: vec![[0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            indices: vec![0, 1, 2],
+            normals: None,
+            uvs: None,
+            color: None,
+            colors: None,
+            material: Some(gaanim_scene::Material3D::default()),
+            surface: None,
+            blend: None,
+        });
+        let source = |raw: u32, instances: Option<gaanim_scene::MeshInstances>| {
+            gaanim_renderer::pipeline::CapturedThreeDSource {
+                entity: bevy::prelude::Entity::from_raw_u32(raw).unwrap(),
+                transform: gaanim_core::glam::DMat4::IDENTITY,
+                opacity: 1.0,
+                mesh: Some(Arc::clone(&mesh)),
+                lines: None,
+                material: mesh.material,
+                line_width: None,
+                line_range: None,
+                fill: None,
+                joints: None,
+                glow: None,
+                instances,
+                composition: gaanim_renderer::pipeline::ThreeDComposition {
+                    in_views: true,
+                    post_exempt: false,
+                    layer: None,
+                    transition_side: Default::default(),
+                    lineage: Vec::new(),
+                },
+            }
+        };
+        let row = |shift: f32| {
+            Arc::new(gaanim_scene::MeshCopies {
+                positions: (0..50).map(|i| [i as f32 * 0.1, shift, 0.0]).collect(),
+                scales: Some(vec![[0.5, 1.0, 2.0]; 50]),
+                rotations: Some(vec![[0.0, 0.0, 0.6, 0.8]; 50]),
+                colors: Some((0..50).map(|i| [i as f32 / 50.0, 0.5, 0.2, 1.0]).collect()),
+            })
+        };
+        let (still, moved) = (row(0.0), row(0.25));
+        let shown = [
+            (Arc::clone(&still), 0.25),
+            (Arc::clone(&still), 1.0),
+            (Arc::clone(&moved), 1.0),
+            (Arc::clone(&moved), 1.0),
+        ];
+        let mut writer = BundleWriter::new(std::io::Cursor::new(Vec::new()), "test");
+        for (index, (copies, reveal)) in shown.iter().enumerate() {
+            let mut captured = frame(index as f64 / 60.0);
+            let instances = gaanim_scene::MeshInstances {
+                copies: Arc::clone(copies),
+                reveal: *reveal,
+            };
+            captured.capture.three_d = Some(gaanim_renderer::pipeline::CapturedThreeD {
+                sources: vec![source(1, None), source(2, Some(instances))],
+                ..Default::default()
+            });
+            writer.push_frame(&captured, [0; 32]).unwrap();
+        }
+        let scene = SceneData {
+            fps: 60,
+            duration: shown.len() as f64 / 60.0,
+            ..Default::default()
+        };
+        let mut bundle =
+            Bundle::from_bytes(writer.finish(&scene).unwrap().into_inner().into()).unwrap();
+        for (index, (copies, reveal)) in shown.iter().enumerate() {
+            let three_d = bundle.frame(index).unwrap().capture.three_d.unwrap();
+            assert!(three_d.sources[0].instances.is_none(), "frame {index}");
+            let back = three_d.sources[1].instances.as_ref().unwrap();
+            assert_eq!(*back.copies, **copies, "frame {index}");
+            assert_eq!(back.reveal, *reveal);
         }
     }
 
@@ -2484,6 +2569,7 @@ mod tests {
             fill: None,
             joints: Some(Arc::from(vec![palette, [1.0; 16]])),
             glow: None,
+            instances: None,
             composition: gaanim_renderer::pipeline::ThreeDComposition {
                 in_views: true,
                 post_exempt: false,

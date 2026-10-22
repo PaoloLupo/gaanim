@@ -26,10 +26,11 @@ pub use components::{
     GroupMarker, HudOverlay, InWorld3D, LayoutBackdrop, LayoutInspection, LayoutInspectionCell,
     LayoutInspectionFrame, LayoutInspectionKind, LayoutZoneRecord, LayoutZones, Light3D,
     LightKind3D, Lighting3D, LineListData, LineListSource, LocalBounds, Material3D,
-    Material3DError, Mesh3DMarker, MeshBlend, MobjectId, ObjectTag, Opacity, ParallaxLayer, Path2D,
-    PathRevealOrder, PathSource, PlaneClip, PlaneFillData, PlaneGlyph, Presence, RasterImage,
-    RenderLayer, RenderOrder, SegmentContent, ShapeDeform, StepRate, StrokeBrush, TextAdvance,
-    TextBaseline, TriangleMeshData, Visible, WorldBounds, ZLayer, stepped,
+    Material3DError, Mesh3DMarker, MeshBlend, MeshCopies, MeshInstances, MobjectId, ObjectTag,
+    Opacity, ParallaxLayer, Path2D, PathRevealOrder, PathSource, PlaneClip, PlaneFillData,
+    PlaneGlyph, Presence, REVEAL_SPAN, RasterImage, RenderLayer, RenderOrder, SegmentContent,
+    ShapeDeform, StepRate, StrokeBrush, TextAdvance, TextBaseline, TriangleMeshData, Visible,
+    WorldBounds, ZLayer, stepped,
 };
 pub use hierarchy::{GaanimScenePlugin, SceneSet};
 pub use model::{

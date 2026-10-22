@@ -4246,9 +4246,12 @@ type ThreeDData = (
     Option<&'static gaanim_scene::StrokeBrush>,
     Option<Ref<'static, gaanim_scene::LineListSource>>,
     Option<Ref<'static, gaanim_scene::PlaneFillData>>,
-    Option<&'static gaanim_scene::InWorld3D>,
-    Option<&'static gaanim_scene::BillboardPlane>,
-    Option<&'static gaanim_scene::SkinPalette>,
+    (
+        Option<&'static gaanim_scene::InWorld3D>,
+        Option<&'static gaanim_scene::BillboardPlane>,
+        Option<&'static gaanim_scene::SkinPalette>,
+        Option<&'static gaanim_scene::MeshInstances>,
+    ),
 );
 /// 3D primitives, and 2D drawables placed in the 3D world.
 type ThreeDFilter = (
@@ -4309,9 +4312,12 @@ type ThreeDItem<'a> = (
     Option<&'a gaanim_scene::StrokeBrush>,
     Option<Ref<'a, gaanim_scene::LineListSource>>,
     Option<Ref<'a, gaanim_scene::PlaneFillData>>,
-    Option<&'a gaanim_scene::InWorld3D>,
-    Option<&'a gaanim_scene::BillboardPlane>,
-    Option<&'a gaanim_scene::SkinPalette>,
+    (
+        Option<&'a gaanim_scene::InWorld3D>,
+        Option<&'a gaanim_scene::BillboardPlane>,
+        Option<&'a gaanim_scene::SkinPalette>,
+        Option<&'a gaanim_scene::MeshInstances>,
+    ),
 );
 
 fn three_d_source<'a>(
@@ -4328,9 +4334,7 @@ fn three_d_source<'a>(
         stroke,
         source,
         fill,
-        in_world,
-        billboard,
-        palette,
+        (in_world, billboard, palette, instances),
     ): ThreeDItem<'a>,
 ) -> ThreeDSource<'a> {
     // A line revealing part of its source draws the source over that part:
@@ -4363,6 +4367,7 @@ fn three_d_source<'a>(
             joints: palette.map(|palette| &palette.0),
             // Looked up on its ancestors too (see `three_d_elements`).
             glow: None,
+            instances,
         },
         hud,
         exempt,
@@ -4481,6 +4486,8 @@ pub struct CapturedThreeDSource {
     pub joints: Option<Arc<[[f32; 16]]>>,
     /// The glow of the drawable or of the group that holds it.
     pub glow: Option<crate::effects::Glow>,
+    /// Copies of the mesh drawn instead of it, one at each point.
+    pub instances: Option<gaanim_scene::MeshInstances>,
     pub composition: ThreeDComposition,
 }
 
@@ -4551,6 +4558,7 @@ fn captured_gpu_three_d(
                     fill: source.fill.as_deref(),
                     joints: source.joints.as_ref(),
                     glow: source.glow.clone(),
+                    instances: source.instances.as_ref(),
                 },
                 source.composition.clone(),
             )
@@ -4832,6 +4840,7 @@ fn three_d_elements<'a>(
                     }),
                     joints: content.joints.cloned(),
                     glow: content.glow.clone(),
+                    instances: content.instances.cloned(),
                     composition: composition.clone(),
                 },
             )
