@@ -6544,22 +6544,28 @@ class Camera:
         aperture: Optional[float] = None,
         max_blur: Optional[float] = None,
     ) -> Camera:
-        """Set the depth of field of parallax layers at the cursor; returns the camera.
+        """Set the depth of field of parallax layers and 3D content at the cursor; returns the camera.
 
         Each layer created with ``Scene.layer`` blurs by its circle of
         confusion, ``aperture * |1 - focus / depth|`` scene units, at most
         ``max_blur``: layers at the ``focus`` depth stay sharp and the blur
         grows with the distance from it in either direction (a layer at
         ``math.inf`` blurs by ``aperture``). Depths are those of the layers,
-        so ``focus=1`` keeps the scene plane sharp. Omitted values keep
-        their current value; at first focus is 1, aperture 0 (no blur) and
-        max_blur 0.5. Drawables outside layers, and HUD drawables inside
+        so ``focus=1`` keeps the scene plane sharp. 3D content blurs the same
+        way pixel by pixel while the camera stands away from its ``look_at``
+        target: a point's depth is its distance along the view in units of
+        the camera's distance to the target, so ``focus=1`` keeps the
+        target's depth sharp and ``focus=0.5`` what lies halfway to the
+        camera. What lies behind a sharp edge does not spread over it, and
+        translucent content blurs by what lies behind it. Omitted values
+        keep their current value; at first focus is 1, aperture 0 (no blur)
+        and max_blur 0.5. Drawables outside layers, and HUD drawables inside
         them, never blur. A layer is blurred
         as one image, through a shader effect on its root that replaces any
         ``shader_effect`` set on the layer itself; drawn offscreen, a blurred
-        layer costs more. A focus that is not a finite positive depth, or a
-        negative or non-finite ``aperture`` or ``max_blur``, raise
-        ``ValueError``.
+        layer costs more, and so does a blurred 3D image. A focus that is not
+        a finite positive depth, or a negative or non-finite ``aperture`` or
+        ``max_blur``, raise ``ValueError``.
 
         Example:
             scene.camera.depth_of_field(focus=1.0, aperture=0.12)
@@ -7187,7 +7193,7 @@ class CameraAnimation:
         aperture: Optional[float] = None,
         max_blur: Optional[float] = None,
     ) -> Anim:
-        """Animate the depth of field of parallax layers; see ``Camera.depth_of_field``.
+        """Animate the depth of field of parallax layers and 3D content; see ``Camera.depth_of_field``.
 
         The focus moves in inverse depth, so a rack focus passes evenly
         through near and far layers; aperture and max_blur change linearly.
@@ -9365,6 +9371,87 @@ class Geometry:
             )
         """
         ...
+    def isosurface(
+        self,
+        field: Callable[[float, float, float], float] | Any,
+        level: float = 0.0,
+        *,
+        x_range: tuple[float, float] = (-1.0, 1.0),
+        y_range: tuple[float, float] = (-1.0, 1.0),
+        z_range: tuple[float, float] = (-1.0, 1.0),
+        resolution: int | tuple[int, int, int] = 48,
+        vectorized: bool = False,
+        material: Optional[Material3D] = None,
+    ) -> Primitive3D:
+        """Create the lit surface where a scalar field equals ``level``.
+
+        ``field(x, y, z)`` is sampled on a grid of ``resolution`` points on
+        each side (one count, or one per axis) over the box of ``x_range``,
+        ``y_range`` and ``z_range``; ``vectorized=True`` calls it once with
+        numpy arrays of every point, and needs numpy. ``field`` may instead
+        be a 3D array of
+        values indexed ``[x][y][z]``, spread over the same box, whose shape
+        sets the resolution. The surface is smooth at any grid (surface
+        nets: one vertex per crossed cell, normals from the field's
+        gradient) and faces out, toward the side of the level most of the
+        box's walls lie on: ``x*x + y*y + z*z`` at ``1`` and a density's
+        blob both face out. Where the box cuts it open it is lit on both
+        sides. Its origin is the field's: ``move_to_3d`` moves the
+        field's origin. It is a ``Primitive3D``: its material animates, and
+        ``animate.transform_to`` morphs it into another isosurface. A NaN
+        value counts as below the level. Non-finite or empty ranges, fewer
+        than 2 or more than 128³ points, a 3D array of another rank or a
+        level the field never crosses in the box raise ``ValueError``.
+
+        Example:
+            shell = scene.geometry.isosurface(
+                lambda x, y, z: x * x + y * y + z * z, 1.0,
+                x_range=(-1.5, 1.5), y_range=(-1.5, 1.5), z_range=(-1.5, 1.5),
+                material=Material3D.matte(BLUE),
+            )
+        """
+        ...
+    def volume(
+        self,
+        field: Callable[[float, float, float], float] | Any,
+        *,
+        x_range: tuple[float, float] = (-1.0, 1.0),
+        y_range: tuple[float, float] = (-1.0, 1.0),
+        z_range: tuple[float, float] = (-1.0, 1.0),
+        resolution: int | tuple[int, int, int] = 48,
+        vectorized: bool = False,
+        color_map: Optional[ColorMapLike] = None,
+        value_range: Optional[tuple[float, float]] = None,
+        opacity: Sequence[float] = (0.0, 1.0),
+        density: float = 4.0,
+    ) -> Drawable:
+        """Draw a scalar field as a cloud that glows and absorbs light.
+
+        The field is sampled as in ``isosurface``. Each value, placed in
+        ``value_range`` (by default from the lowest to the highest value),
+        glows in ``color_map``'s color for it (``"viridis"`` by default) and
+        is as opaque as ``opacity`` says: its values spread evenly from the
+        low end of the range to the high one, with straight lines between
+        them, so ``(0, 1)`` hides the low values and ``(0, 0, 1)`` all but
+        the top half. A value of full opacity absorbs ``density`` of the
+        light behind it per scene unit. Each pixel marches its ray through
+        the box from the eye up to what is opaque, so a solid inside the
+        cloud shows through the part in front of it. A volume draws after
+        the opaque content and before the translucent content. It draws
+        nothing outside its box; its origin is the field's, and it moves,
+        turns, scales and fades as a drawable. A NaN value is empty. The
+        errors of ``isosurface``, ``opacity`` with fewer than two values or
+        one outside 0 to 1, a negative or non-finite ``density`` or a
+        ``value_range`` that is not two different finite values raise
+        ``ValueError``.
+
+        Example:
+            cloud = scene.geometry.volume(
+                lambda x, y, z: math.exp(-4 * (x * x + y * y + z * z)),
+                color_map="magma", opacity=(0.0, 0.2, 1.0), density=6.0,
+            )
+        """
+        ...
     def revolve(
         self,
         profile: Sequence[tuple[float, float]],
@@ -9409,12 +9496,38 @@ class Geometry:
             scene.geometry.lighting_3d("studio", intensity=1.2)
         """
         ...
+    def transparency_3d(self, mode: Literal["sorted", "order_independent"] = "sorted", *, layers: int = 4) -> None:
+        """Choose how translucent 3D content blends with what lies behind it.
+
+        ``"sorted"`` (the default) draws each translucent drawable as one
+        layer, its nearest surface, and blends the drawables from back to
+        front by their middles: a drawable fades as a whole, without showing
+        its own far side, but two that cross blend in one order on both
+        sides of where they cross. ``"order_independent"`` blends every
+        translucent surface in its depth order at each pixel, up to
+        ``layers`` surfaces deep (1 to 16): drawables that cross, a
+        translucent sphere in a translucent box and the folds of one
+        surface blend in the order they lie, and an open or two-sided mesh
+        shows its far side through its near one. Each layer draws the
+        translucent content once more, so a deeper stack costs more; what
+        lies past the last layer is left out. Outlines filled in the 3D
+        world (``in_3d``, billboards) still blend from back to front after
+        the surfaces, and blurred drawables apart. A ``layers`` outside 1
+        to 16 or another ``mode`` raises ``ValueError``.
+
+        Example:
+            scene.geometry.transparency_3d("order_independent", layers=6)
+        """
+        ...
     def light_3d(
         self,
-        kind: Literal["point", "directional"] = "point",
+        kind: Literal["point", "directional", "spot"] = "point",
         *,
         color: Optional[ColorLike] = None,
         intensity: float = 1.0,
+        target: tuple[float, float, float] = (0.0, 0.0, 0.0),
+        angle: float = 0.5,
+        softness: float = 0.25,
     ) -> Drawable:
         """Create a light for lit 3D primitives at the origin and return it.
 
@@ -9422,19 +9535,27 @@ class Geometry:
         and ``animate``, groups and ``follow`` move it. A ``"point"`` light
         shines from its position in every direction; a ``"directional"`` one
         shines along parallel rays from the direction of its position seen
-        from the origin, as the sun does. While the scene shows lights they
+        from the origin, as the sun does; a ``"spot"`` one shines from its
+        position toward the world point ``target``, in a cone ``angle``
+        radians wide on each side of that line (at most 1.4), fading out over
+        the outer ``softness`` of the angle (0 for a hard edge, 1 for a fade
+        from the middle). Moving a spot keeps it aimed at ``target``, so it
+        sweeps the cone across the scene. While the scene shows lights they
         replace the fixed key light of ``lighting_3d``, whose sky and ground
         light stays, and each shines in ``color`` (white by default) at
         ``intensity``, dimmed by the light's opacity: ``fade_in`` and
         ``fade_out`` switch it on and off. With ``lighting_3d("none")`` only
         the lights light the scene. The first four lights a scene shows cast
-        shadows (see ``lighting_3d``). Surfaces, 3D plots and lines are unlit.
-        A negative or non-finite ``intensity`` or another ``kind`` raises
-        ``ValueError``.
+        shadows (see ``lighting_3d``): a spot casts them within its cone.
+        Surfaces, 3D plots and lines are unlit. A negative or non-finite
+        ``intensity``, another ``kind``, a non-finite ``target``, an
+        ``angle`` outside (0, 1.4] or a ``softness`` outside 0 to 1 raise
+        ``ValueError``. ``target``, ``angle`` and ``softness`` apply to spots.
 
         Example:
             lamp = scene.geometry.light_3d(color=GOLD, intensity=1.5).move_to_3d(3, 2, 4)
             scene.play([lamp.animate.move_to_3d(-3, 2, 4).duration(2.0)])
+            spot = scene.geometry.light_3d("spot", target=(0, 0, 0), angle=0.3).move_to_3d(0, 4, 2)
         """
         ...
     def rect(self, width: float, height: float) -> Drawable:

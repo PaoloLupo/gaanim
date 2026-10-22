@@ -1496,8 +1496,34 @@ fn write_three_d(
         .enumerate()
         .filter_map(|(index, source)| source.morph.as_ref().map(|weights| (index, weights)))
         .collect();
+    // Then how translucent content blends (format 12): the surfaces each
+    // pixel blends in depth order, 0 when drawables blend as layers.
+    let peeled = three_d.transparency.layers;
+    // Then the cones of spot lights (format 12): by light, its direction and
+    // the cosines of its cone's edges.
+    let spots: Vec<(usize, &gaanim_renderer::three_d::Spot)> = three_d
+        .lights
+        .iter()
+        .enumerate()
+        .filter_map(|(index, light)| light.spot.as_ref().map(|spot| (index, spot)))
+        .collect();
+    // Last, the depth of field that blurs the content (format 12): its
+    // focus, aperture and largest blur, when it blurs.
+    let depth_of_field = three_d.depth_of_field;
+    // Then the volumes (format 12): by source, its values and the colors of
+    // its values in the images table, its grid, its box and its density.
+    let volumes: Vec<(usize, &gaanim_scene::VolumeData)> = three_d
+        .sources
+        .iter()
+        .enumerate()
+        .filter_map(|(index, source)| source.volume.as_deref().map(|volume| (index, volume)))
+        .collect();
     // Each section is written when it or a later one holds something.
-    let after_blurs = !blurs.is_empty() || !morphs.is_empty();
+    let after_depth_of_field = !volumes.is_empty();
+    let after_spots = depth_of_field.aperture > 0.0 || after_depth_of_field;
+    let after_transparency = !spots.is_empty() || after_spots;
+    let after_morphs = peeled > 0 || after_transparency;
+    let after_blurs = !blurs.is_empty() || !morphs.is_empty() || after_morphs;
     let after_images = !images.is_empty() || !shadows.is_empty() || after_blurs;
     let later = !palettes.is_empty()
         || !glows.is_empty()
@@ -1695,7 +1721,7 @@ fn write_three_d(
             w.f64(sigma);
         }
     }
-    if !morphs.is_empty() {
+    if !morphs.is_empty() || after_morphs {
         w.len(morphs.len());
         for (index, weights) in morphs {
             w.len(index);
@@ -1703,6 +1729,40 @@ fn write_three_d(
             for weight in weights.iter() {
                 w.f32(*weight);
             }
+        }
+    }
+    if after_morphs {
+        w.u8(peeled);
+    }
+    if after_transparency {
+        w.len(spots.len());
+        for (index, spot) in spots {
+            w.len(index);
+            for value in spot.direction.to_array() {
+                w.f64(value);
+            }
+            w.f32(spot.cos_inner);
+            w.f32(spot.cos_outer);
+        }
+    }
+    if after_spots {
+        w.f64(depth_of_field.focus);
+        w.f64(depth_of_field.aperture);
+        w.f64(depth_of_field.max_blur);
+    }
+    if after_depth_of_field {
+        w.len(volumes.len());
+        for (index, volume) in volumes {
+            w.len(index);
+            w.var(u64::from(tables.image(&volume.values)));
+            for side in volume.size {
+                w.var(u64::from(side));
+            }
+            for value in volume.min.into_iter().chain(volume.max) {
+                w.f32(value);
+            }
+            w.var(u64::from(tables.image(&volume.transfer)));
+            w.f32(volume.density);
         }
     }
 }
@@ -1730,6 +1790,7 @@ fn read_three_d(
             position: DVec3::new(r.f64()?, r.f64()?, r.f64()?),
             directional: r.bool()?,
             color: [r.f32()?, r.f32()?, r.f32()?],
+            spot: None,
         });
     }
     let opacity_fallback = r.rect()?;
@@ -1771,6 +1832,7 @@ fn read_three_d(
             shadow: None,
             blur: None,
             instances: None,
+            volume: None,
             composition: ThreeDComposition {
                 in_views,
                 post_exempt,
@@ -2022,6 +2084,55 @@ fn read_three_d(
                 .morph = Some(weights.into());
         }
     }
+    let mut transparency = gaanim_scene::Transparency3D::default();
+    if !r.is_empty() {
+        transparency.layers = r.u8()?.min(gaanim_scene::Transparency3D::MAX_LAYERS);
+    }
+    if !r.is_empty() {
+        for _ in 0..r.len()? {
+            let index = r.len()?;
+            let direction = DVec3::new(r.f64()?, r.f64()?, r.f64()?);
+            let spot = gaanim_renderer::three_d::Spot {
+                direction,
+                cos_inner: r.f32()?,
+                cos_outer: r.f32()?,
+            };
+            lights
+                .get_mut(index)
+                .ok_or_else(|| corrupt("the cone of no light"))?
+                .spot = Some(spot);
+        }
+    }
+    // Without one, nothing blurs: the aperture is 0.
+    let mut depth_of_field = gaanim_scene::DepthOfField::default();
+    if !r.is_empty() {
+        depth_of_field = gaanim_scene::DepthOfField {
+            focus: r.f64()?,
+            aperture: r.f64()?,
+            max_blur: r.f64()?,
+        };
+    }
+    if !r.is_empty() {
+        for _ in 0..r.len()? {
+            let index = r.len()?;
+            let values = tables.image(r.u32()?)?;
+            let size = [r.u32()?, r.u32()?, r.u32()?];
+            let min = [r.f32()?, r.f32()?, r.f32()?];
+            let max = [r.f32()?, r.f32()?, r.f32()?];
+            let volume = gaanim_scene::VolumeData {
+                values,
+                size,
+                min,
+                max,
+                transfer: tables.image(r.u32()?)?,
+                density: r.f32()?,
+            };
+            sources
+                .get_mut(index)
+                .ok_or_else(|| corrupt("a volume of no 3D source"))?
+                .volume = Some(Arc::new(volume));
+        }
+    }
     for (index, glyphs) in fills {
         sources[index].fill = Some(Arc::new(gaanim_scene::PlaneFillData { glyphs }));
     }
@@ -2029,6 +2140,8 @@ fn read_three_d(
         CapturedThreeD {
             lighting,
             lights,
+            transparency,
+            depth_of_field,
             opacity_fallback,
             sources,
         },
@@ -2244,7 +2357,7 @@ pub(crate) fn write_camera(w: &mut Writer, camera: &gaanim_math::Camera) {
             w.f64(zoom);
         }
         // A shifted lens adds its shift: a centered one is written as
-        // before version 12.
+        // before version 13.
         gaanim_math::Projection::Perspective { fov_y, near, far } => {
             let shifted = camera.lens_shift != gaanim_core::glam::DVec2::ZERO;
             w.u8(if shifted { 2 } else { 1 });

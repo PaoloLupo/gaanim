@@ -16,10 +16,13 @@ instalar una versión nueva, sigue
 Sin publicar. Una malla 3D se transforma en otra con `animate.transform_to`,
 `points_3d` e `instances` dibujan miles de puntos o copias de una malla
 como un solo objeto, las imágenes, las escenas Lottie, las sombras y los
-desenfoques también viven en el mundo 3D, y los modelos glTF traen sus
-morph targets y sus mapas de normales. La cámara 3D puede dejar su objetivo
-a un lado del encuadre y moverse con parámetros, y los rótulos 3D se
-colocan en pantalla sobre su punto.
+desenfoques también viven en el mundo 3D, los modelos glTF traen sus
+morph targets y sus mapas de normales, el contenido 3D translúcido puede
+mezclarse en el orden en que está en cada píxel, hay focos, la
+profundidad de campo de la cámara desenfoca también el contenido 3D, y los
+campos escalares se dibujan como isosuperficies y volúmenes. La cámara 3D
+puede dejar su objetivo a un lado del encuadre y moverse con parámetros, y
+los rótulos 3D se colocan en pantalla sobre su punto.
 
 == Morph entre mallas 3D
 
@@ -104,6 +107,53 @@ colocan en pantalla sobre su punto.
 - Nuevos ejemplos, `3d/morph_targets_3d` y `3d/normal_maps_3d`, con sus
   modelos generados por `tools/generate_gltf_samples.py`.
 
+== Transparencia independiente del orden
+
+- `scene.geometry.transparency_3d("order_independent", layers=4)` mezcla
+  cada superficie 3D translúcida en el orden en que está en cada píxel,
+  hasta `layers` superficies de fondo. Dos paneles que se cruzan muestran
+  el más cercano encima a cada lado del cruce, una bola que atraviesa un
+  panel deja ver dónde lo perfora, y las conchas anidadas, los nudos y las
+  superficies que se pliegan se ven en su orden. Ver
+  #link("/referencia/geometria/#api-geometry-transparency-3d")[Geometría].
+- Por defecto (`"sorted"`) nada cambia: cada objeto translúcido sigue
+  siendo una capa y los objetos se mezclan de atrás hacia delante.
+- Cada capa dibuja otra vez el contenido translúcido; las escenas sin
+  `transparency_3d` no hacen nada nuevo.
+- Nuevo ejemplo, `3d/transparency_3d`.
+
+== Focos y profundidad de campo en 3D
+
+- `light_3d("spot", target=(x, y, z), angle=0.5, softness=0.25)` crea un
+  foco: alumbra desde su posición hacia `target` en un cono de `angle`
+  radianes a cada lado, que se apaga en la parte exterior `softness` del
+  ángulo, y proyecta sombra dentro de su cono. Al moverlo sigue apuntando a
+  `target`, así que barre la escena. Ver
+  #link("/referencia/geometria/#api-geometry-light-3d")[Geometría].
+- `scene.camera.depth_of_field(...)` y `animate.focus_to(...)` desenfocan
+  ahora también el contenido 3D, píxel a píxel según su profundidad,
+  mientras la cámara está apartada de su objetivo de `look_at`: `focus=1`
+  deja nítido el objetivo. Lo que queda detrás de un borde nítido no se
+  extiende sobre él. Ver
+  #link("/referencia/scene/#profundidad-campo")[Escena].
+- Nuevos ejemplos, `3d/spot_lights_3d` y `3d/depth_of_field_3d`.
+
+== Isosuperficies y volúmenes
+
+- `scene.geometry.isosurface(campo, nivel, ...)` dibuja la superficie
+  iluminada donde un campo escalar vale `nivel`, suave a cualquier
+  resolución y con normales del gradiente del campo; se transforma en otra
+  isosuperficie con `transform_to`. Ver
+  #link("/referencia/geometria/#api-geometry-isosurface")[Geometría].
+- `scene.geometry.volume(campo, ...)` dibuja el campo entero como una nube
+  que brilla con los colores de un mapa de colores y absorbe la luz, hasta
+  lo opaco que haya dentro. Ver
+  #link("/referencia/geometria/#api-geometry-volume")[Geometría].
+- El campo puede ser una función de x, y, z (o una que reciba arrays de
+  numpy) o un array 3D de valores.
+- El paquete `.gaanim` guarda cada volumen una vez, en su tabla de imágenes.
+- Nuevo ejemplo, `3d/fields_3d`.
+
 == Encuadrar el 3D junto a un panel
 
 - `scene.camera.screen_offset(x, y)` y `animate.screen_offset(x, y)`
@@ -153,12 +203,18 @@ colocan en pantalla sobre su punto.
 
 == Al actualizar
 
-- Los paquetes `.gaanim` pasan al formato 12, que guarda los morphs 3D, las
+- Los paquetes `.gaanim` pasan al formato 13, que guarda los morphs 3D, las
   copias de mallas, las imágenes de los objetos en el mundo 3D, la sombra y
   el desenfoque de los objetos 3D, los morph targets y mapas de normales de
-  los modelos glTF y el desplazamiento de la lente de la cámara. Gaanim
-  sigue abriendo los de formato 5 a 11; un Gaanim anterior no abre los
-  nuevos, así que actualiza los reproductores que los publican.
+  los modelos glTF, cómo se mezcla el contenido 3D translúcido, los conos de
+  los focos, la profundidad de campo del contenido 3D, los volúmenes y el
+  desplazamiento de la lente de la cámara. Gaanim sigue abriendo los de
+  formato 5 a 12; un Gaanim anterior no abre los nuevos, así que actualiza
+  los reproductores que los publican.
+- Una escena que desenfoca sus capas de parallax con
+  `camera.depth_of_field` mientras una cámara 3D está apartada de su
+  objetivo desenfoca ahora también su contenido 3D, que antes quedaba
+  nítido.
 - Un modelo glTF con morph targets o mapas de normales se ve ahora como en
   Blender: antes se dibujaba con la malla de reposo y las normales de sus
   vértices.

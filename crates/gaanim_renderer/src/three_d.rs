@@ -37,7 +37,8 @@ use gaanim_core::{kurbo, peniko};
 use gaanim_math::{Camera, GlobalSpatialTransform, Projection};
 use gaanim_scene::{
     AlphaMode, GlobalOpacity, Light3D, LightKind3D, Lighting3D, LineListData, Material3D,
-    MeshCopies, MeshInstances, MeshTexture, PlaneFillData, TextureWrap, TriangleMeshData,
+    MeshCopies, MeshInstances, MeshTexture, PlaneFillData, TextureWrap, Transparency3D,
+    TriangleMeshData,
 };
 use peniko::{Blob, ImageAlphaType, ImageData, ImageFormat};
 use vello::wgpu;
@@ -45,15 +46,45 @@ use wgpu::util::DeviceExt;
 
 use crate::effects::{DropShadow, GaussianBlur, Glow};
 
+mod focus;
 mod glow;
+mod peel;
+mod volume;
 
 /// A light as shading uses it: where it is in the world and its linear
-/// color, scaled by its intensity and its entity's opacity.
+/// color, scaled by its intensity and its entity's opacity, and a spot
+/// light's cone.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Light {
     pub position: DVec3,
     pub directional: bool,
     pub color: [f32; 3],
+    pub spot: Option<Spot>,
+}
+
+/// The cone a spot light shines in: its direction, a unit vector, and the
+/// cosines of the angles from it within which it shines fully and beyond
+/// which it gives no light.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Spot {
+    pub direction: DVec3,
+    pub cos_inner: f32,
+    pub cos_outer: f32,
+}
+
+impl Spot {
+    /// The cone `cone` gives a spot at `position`; `None` when it aims at
+    /// itself.
+    fn new(cone: &gaanim_scene::SpotCone, position: DVec3) -> Option<Self> {
+        let direction = (cone.target - position).try_normalize()?;
+        let outer = cone.angle.clamp(1e-3, gaanim_scene::SpotCone::MAX_ANGLE);
+        let inner = outer * (1.0 - cone.softness.clamp(0.0, 1.0));
+        Some(Self {
+            direction,
+            cos_inner: inner.cos(),
+            cos_outer: outer.cos(),
+        })
+    }
 }
 
 impl Light {
@@ -63,20 +94,28 @@ impl Light {
         let strength = light.intensity.max(0.0) * opacity.clamp(0.0, 1.0);
         let [r, g, b, a] = to_linear(light.color);
         let color = [r, g, b].map(|channel| channel * a * strength);
+        let spot = match &light.kind {
+            LightKind3D::Spot(cone) => Some(Spot::new(cone, position)?),
+            _ => None,
+        };
         (strength > 0.0 && position.is_finite()).then_some(Self {
             position,
             directional: light.kind == LightKind3D::Directional,
             color,
+            spot,
         })
     }
 }
 
 /// How lit 3D content is lit in a frame: the scene's [`Lighting3D`] and the
-/// lights it shows.
+/// lights it shows; how its translucent content blends; and the camera's
+/// depth of field, which blurs it by depth (see [`focus`]).
 #[derive(Debug, Clone, Default)]
 pub struct Illumination {
     pub lighting: Lighting3D,
     pub lights: Vec<Light>,
+    pub transparency: Transparency3D,
+    pub depth_of_field: gaanim_scene::DepthOfField,
 }
 
 /// One drawable's 3D content, as the ECS holds it.
@@ -110,6 +149,8 @@ pub(crate) struct Content<'a> {
     /// The weights of an imported mesh's morph targets (see
     /// [`gaanim_scene::MorphWeights`]).
     pub morph: Option<&'a Arc<[f32]>>,
+    /// A scalar field drawn as a cloud (see [`volume`]).
+    pub volume: Option<&'a gaanim_scene::VolumeData>,
 }
 
 /// Width of 3D lines without a stroke width, as a fraction of the frame's
@@ -166,7 +207,7 @@ const CASTER_BYTES: usize = 64;
 /// normal matrix and its linear base color (`VertexIn` in [`SHADER`]).
 const INSTANCE_BYTES: usize = 128;
 /// Bytes of the frame uniforms (`Frame` in [`SHADER`]).
-const FRAME_BYTES: usize = 2336;
+const FRAME_BYTES: usize = 2592;
 /// Bytes of one draw's uniforms (`Draw` in [`SHADER`]), and their stride in
 /// the draw buffer, the minimum uniform offset alignment.
 const DRAW_BYTES: usize = 240;
@@ -241,6 +282,16 @@ pub struct MeshSource {
     /// An imported model's primitive: its texture, alpha and skin, drawn by
     /// pipelines of their own ([`ModelPipelines`]).
     model: Option<ModelBuffers>,
+    /// A volume: `vertices` hold its box, and this its field (see
+    /// [`volume`]).
+    volume: Option<VolumeSource>,
+}
+
+/// A volume's field, and a digest of what its march reads, computed once
+/// from its bytes.
+struct VolumeSource {
+    data: gaanim_scene::VolumeData,
+    digest: u64,
 }
 
 /// What an imported model's primitive adds to its vertices (see
@@ -312,6 +363,7 @@ enum Kind {
     OutlinedMesh,
     Lines,
     Fill,
+    Volume,
 }
 
 impl MeshSource {
@@ -344,12 +396,16 @@ impl MeshSource {
                 key.hash(&mut hasher);
             }
         }
+        if let Some(volume) = &self.volume {
+            volume.digest.hash(&mut hasher);
+        }
         hasher.finish()
     }
 
-    /// Whether it is a triangle mesh, neither lines nor filled outlines.
+    /// Whether it is a triangle mesh, neither lines, filled outlines nor a
+    /// volume.
     fn is_mesh(&self) -> bool {
-        !self.lines && self.fill.is_none()
+        !self.lines && self.fill.is_none() && self.volume.is_none()
     }
 
     /// Whether its vertices move with a skin's joints.
@@ -370,6 +426,11 @@ impl MeshSource {
             && match (&self.fill, &other.fill) {
                 (None, None) => true,
                 (Some(a), Some(b)) => a.curves == b.curves && a.bands == b.bands,
+                _ => false,
+            }
+            && match (&self.volume, &other.volume) {
+                (None, None) => true,
+                (Some(a), Some(b)) => a.digest == b.digest && a.data == b.data,
                 _ => false,
             }
             && match (&self.model, &other.model) {
@@ -634,6 +695,7 @@ impl MeshSource {
             digest: 0,
             fill: None,
             model,
+            volume: None,
             indices,
             lines: false,
             has_colors: colors.is_some(),
@@ -662,12 +724,65 @@ impl MeshSource {
             outline: Vec::new(),
             digest: 0,
             model: None,
+            volume: None,
             fill: Some(FillBuffers {
                 curves: built.curves,
                 bands: built.bands,
                 paints: built.paints,
                 ramps: built.ramps,
                 runs: built.runs,
+            }),
+        })
+    }
+
+    /// The box of `volume`, whose far faces its march draws from (see
+    /// [`volume`]); `None` when its values do not fill its grid.
+    fn volume(volume: &gaanim_scene::VolumeData) -> Option<Self> {
+        volume.texels()?;
+        let low = DVec3::from(volume.min.map(f64::from));
+        let high = DVec3::from(volume.max.map(f64::from));
+        let corners: Vec<DVec3> = (0..8)
+            .map(|corner| {
+                DVec3::new(
+                    if corner & 1 == 0 { low.x } else { high.x },
+                    if corner & 2 == 0 { low.y } else { high.y },
+                    if corner & 4 == 0 { low.z } else { high.z },
+                )
+            })
+            .collect();
+        let mut vertices = Vec::with_capacity(8 * MESH_VERTEX_BYTES);
+        for corner in &corners {
+            push_f32s(&mut vertices, &corner.as_vec3().to_array());
+            push_f32s(&mut vertices, &[0.0; 7]);
+        }
+        // Two triangles a face, wound to face out.
+        let indices = vec![
+            0, 2, 1, 1, 2, 3, // -z
+            4, 5, 6, 5, 7, 6, // +z
+            0, 1, 4, 1, 5, 4, // -y
+            2, 6, 3, 3, 6, 7, // +y
+            0, 4, 2, 2, 4, 6, // -x
+            1, 3, 5, 3, 7, 5, // +x
+        ];
+        let (center, radius) = bounding_sphere(&corners);
+        Some(Self {
+            vertices,
+            count: indices.len() as u32,
+            indices,
+            lines: false,
+            has_colors: false,
+            opaque_colors: true,
+            center,
+            radius,
+            closed: true,
+            sheet: false,
+            outline: Vec::new(),
+            digest: 0,
+            fill: None,
+            model: None,
+            volume: Some(VolumeSource {
+                data: volume.clone(),
+                digest: volume_digest(volume),
             }),
         })
     }
@@ -723,6 +838,7 @@ impl MeshSource {
             digest: 0,
             fill: None,
             model: None,
+            volume: None,
             has_colors: colors.is_some(),
             opaque_colors: colors.is_none_or(|colors| colors.iter().all(|c| c[3] >= 0.999)),
             center,
@@ -1069,6 +1185,12 @@ pub struct GpuMeshFrame {
     /// most, aligned for the dynamic offsets that bind them, and between
     /// them the morph targets and weights of the morphed draws.
     joints: Arc<[u8]>,
+    /// The translucent surfaces each pixel blends in depth order (see
+    /// [`peel`]), 0 when translucent draws blend as layers from back to
+    /// front.
+    peel: u8,
+    /// How the image blurs by depth, when it is out of focus.
+    focus: Option<focus::FocusDraw>,
     digest: u64,
 }
 
@@ -1111,6 +1233,9 @@ impl GpuMeshFrame {
                     update(&model.geometry_digest.to_le_bytes());
                 }
             }
+            if let Some(volume) = &draw.source.volume {
+                update(&volume.digest.to_le_bytes());
+            }
             if let Some(fill) = &draw.source.fill {
                 update(&fill.curves);
                 update(&fill.bands);
@@ -1125,6 +1250,12 @@ impl GpuMeshFrame {
             }
         }
         update(&self.joints);
+        update(&[self.peel]);
+        if let Some(focus) = &self.focus {
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            focus.hash(&mut hasher);
+            update(&hasher.finish().to_le_bytes());
+        }
     }
 }
 
@@ -1312,6 +1443,36 @@ impl<'a> GpuMeshes<'a> {
         true
     }
 
+    /// Take the volume of a drawable into the image of `class`, keyed as
+    /// [`Self::push`] keys meshes; returns whether the GPU took it.
+    pub(crate) fn push_volume(
+        &mut self,
+        class: usize,
+        (key, revision): (u64, u32),
+        keep: Option<Keep>,
+        content: &Content<'_>,
+    ) -> bool {
+        let Some(volume) = content.volume else {
+            return false;
+        };
+        let Some(source) = self.sources.get(key, Kind::Volume, revision, keep, || {
+            MeshSource::volume(volume)
+        }) else {
+            return false;
+        };
+        let opacity = content.opacity.0.clamp(0.0, 1.0);
+        self.add(
+            class,
+            source,
+            content,
+            opacity,
+            peniko::Color::WHITE,
+            None,
+            None,
+        );
+        true
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn add(
         &mut self,
@@ -1391,7 +1552,8 @@ impl<'a> GpuMeshes<'a> {
         self.pending.push(Pending {
             copies: copies.map(|instances| (Arc::clone(&instances.copies), instances.reveal)),
             class,
-            translucent: !fill && (opacity < 0.999 || !opaque_colors),
+            // A volume blends over what is opaque, as translucent content.
+            translucent: source.volume.is_some() || (!fill && (opacity < 0.999 || !opaque_colors)),
             joints,
             morph,
             sphere,
@@ -1445,6 +1607,26 @@ impl<'a> GpuMeshes<'a> {
             .collect();
         // Pixels of the image per scene unit, which line widths scale by.
         let pixels_per_unit = self.placement.determinant().abs().sqrt();
+        // How far along the view the content lies, which bounds its blur.
+        let forward = camera.rotation * DVec3::NEG_Z;
+        let depths = self
+            .pending
+            .iter()
+            .map(|pending| {
+                let (center, radius) = world_sphere(pending);
+                let distance = forward.dot(center - camera.position);
+                (distance - radius, distance + radius)
+            })
+            .filter(|(near, far)| near.is_finite() && far.is_finite())
+            .reduce(|(a, b), (c, d)| (a.min(c), b.max(d)));
+        let focus = depths.and_then(|depths| {
+            focus::FocusDraw::new(
+                &illumination.depth_of_field,
+                camera,
+                pixels_per_unit,
+                depths,
+            )
+        });
 
         // Opaque draws first, near ones first so that the depth test skips
         // what they hide; translucent ones after them, from back to front.
@@ -1602,6 +1784,8 @@ impl<'a> GpuMeshes<'a> {
             draw_uniforms.hash(&mut hasher);
             instances.hash(&mut hasher);
             joints.hash(&mut hasher);
+            illumination.transparency.layers.hash(&mut hasher);
+            focus.hash(&mut hasher);
             for draw in &draws {
                 (Arc::as_ptr(&draw.source) as usize).hash(&mut hasher);
                 draw.culled.hash(&mut hasher);
@@ -1626,12 +1810,33 @@ impl<'a> GpuMeshes<'a> {
                     shadow_size: shadows.size,
                     shadow_layers: Arc::clone(&shadow_layers),
                     joints: joints.into(),
+                    peel: illumination.transparency.layers,
+                    focus,
                     digest: hasher.finish(),
                 },
             ));
         }
         frames
     }
+}
+
+/// What a volume's march reads of it, hashed from its bytes, so that the
+/// same field hashes alike in a recording and in its playback.
+fn volume_digest(volume: &gaanim_scene::VolumeData) -> u64 {
+    let mut digest = fnv(FNV_START, volume.values.data.data());
+    digest = fnv(digest, volume.transfer.data.data());
+    for value in volume.size {
+        digest = fnv(digest, &value.to_le_bytes());
+    }
+    for value in volume
+        .min
+        .into_iter()
+        .chain(volume.max)
+        .chain([volume.density])
+    {
+        digest = fnv(digest, &value.to_le_bytes());
+    }
+    digest
 }
 
 /// Maps a `width` x `height` image's pixels to its NDC.
@@ -1764,40 +1969,61 @@ fn shadows(illumination: &Illumination, pending: &[Pending]) -> Shadows {
     if !(radius.is_finite() && radius > 1e-9) {
         return shadows;
     }
-    let casters: Vec<(Option<usize>, DVec3, bool)> = if illumination.lights.is_empty() {
+    let key = Light {
+        position: KEY_LIGHT,
+        directional: true,
+        color: [1.0; 3],
+        spot: None,
+    };
+    let casters: Vec<(Option<usize>, Light)> = if illumination.lights.is_empty() {
         let lit = lighting.enabled && lighting.intensity > 0.0;
-        lit.then_some((None, KEY_LIGHT, true)).into_iter().collect()
+        lit.then_some((None, key)).into_iter().collect()
     } else {
         illumination
             .lights
             .iter()
             .take(MAX_SHADOW_LIGHTS)
             .enumerate()
-            .map(|(index, light)| (Some(index), light.position, light.directional))
+            .map(|(index, light)| (Some(index), *light))
             .collect()
     };
+    // A cube of six around a point light, one map for the others.
     let layers: usize = casters
         .iter()
-        .map(|(.., directional)| if *directional { 1 } else { 6 })
+        .map(|(_, light)| {
+            if light.directional || light.spot.is_some() {
+                1
+            } else {
+                6
+            }
+        })
         .sum();
     shadows.size = match layers {
         1 => SHADOW_SIZE,
         ..=12 => SHADOW_SIZE_SHARED,
         _ => SHADOW_SIZE_MANY,
     };
-    for (light, position, directional) in casters {
+    for (index, light) in casters {
         let first = shadows.layers.len();
-        if directional {
-            match directional_shadow(position, center, radius, shadows.size) {
+        if light.directional {
+            match directional_shadow(light.position, center, radius, shadows.size) {
                 Some(layer) => shadows.layers.push(layer),
                 None => continue,
             }
+        } else if let Some(spot) = &light.spot {
+            shadows.layers.push(spot_shadow(
+                light.position,
+                spot,
+                center,
+                radius,
+                shadows.size,
+            ));
         } else {
             shadows
                 .layers
-                .extend(point_shadows(position, center, radius, shadows.size));
+                .extend(point_shadows(light.position, center, radius, shadows.size));
         }
-        match light {
+        match index {
             None => shadows.key = Some(first),
             Some(index) => shadows.lights[index] = Some(first),
         }
@@ -1862,6 +2088,29 @@ fn point_shadows(position: DVec3, center: DVec3, radius: f64, size: u32) -> [Sha
         near,
         far,
     })
+}
+
+/// The shadow map of a spot light at `position` over the sphere at `center`
+/// with `radius`, `size` texels on a side: a perspective view along its
+/// direction, a little wider than its cone.
+fn spot_shadow(position: DVec3, spot: &Spot, center: DVec3, radius: f64, size: u32) -> ShadowLayer {
+    let distance = position.distance(center);
+    let near = ((distance - radius) * 0.5).max(radius * 1e-3).max(1e-4);
+    let far = (distance + radius) * 1.01;
+    let half = (f64::from(spot.cos_outer).acos() * 1.05 + 0.02).min(1.5);
+    let projection = directx::perspective(2.0 * half, 1.0, near, far);
+    let up = if spot.direction.cross(DVec3::Y).length_squared() > 1e-6 {
+        DVec3::Y
+    } else {
+        DVec3::Z
+    };
+    ShadowLayer {
+        view_proj: projection * view::look_at_mat4(position, position + spot.direction, up),
+        perspective: true,
+        texel: 2.0 * half.tan() / f64::from(size),
+        near,
+        far,
+    }
 }
 
 /// The frame uniforms: `camera`, the map `ndc_map` from its NDC to the
@@ -1962,8 +2211,23 @@ fn frame_uniforms(
                         layer(shadows.lights[index]),
                     ],
                 );
+                // A spot light's direction and cone; none for the others.
+                let (direction, cos_outer, cos_inner) =
+                    light.spot.map_or((DVec3::ZERO, 0.0, 0.0), |spot| {
+                        (spot.direction, spot.cos_outer, spot.cos_inner)
+                    });
+                push_f32s(
+                    &mut uniforms,
+                    &[
+                        direction.x as f32,
+                        direction.y as f32,
+                        direction.z as f32,
+                        cos_outer,
+                    ],
+                );
+                push_f32s(&mut uniforms, &[cos_inner, 0.0, 0.0, 0.0]);
             }
-            None => push_f32s(&mut uniforms, &[0.0; 8]),
+            None => push_f32s(&mut uniforms, &[0.0; 16]),
         }
     }
     for index in 0..MAX_SHADOW_LAYERS {
@@ -2096,11 +2360,24 @@ fn push_draw_uniforms(
             f32::from(u8::from(pending.source.has_colors)),
         ],
     );
-    push_f32s(bytes, &[(line_px * 0.5) as f32, shown[0], shown[1], 0.0]);
-    let outline = pending
-        .material
-        .map_or([0.0; 4], |material| to_linear(material.outline));
-    push_f32s(bytes, &outline);
+    match pending.source.volume.as_ref().map(|volume| &volume.data) {
+        // A volume's box, the absorption of its opaque values and the steps
+        // of its march (`VOLUME_SHADER` in [`volume`]).
+        Some(volume) => {
+            let [x, y, z] = volume.min;
+            push_f32s(bytes, &[x, y, z, volume.density.max(0.0)]);
+            let [x, y, z] = volume.max;
+            let side = volume.size.into_iter().max().unwrap_or(2) as f32;
+            push_f32s(bytes, &[x, y, z, (side * 2.0).clamp(32.0, 256.0)]);
+        }
+        None => {
+            push_f32s(bytes, &[(line_px * 0.5) as f32, shown[0], shown[1], 0.0]);
+            let outline = pending
+                .material
+                .map_or([0.0; 4], |material| to_linear(material.outline));
+            push_f32s(bytes, &outline);
+        }
+    }
     let open = f32::from(u8::from(!pending.source.closed));
     let sheet = f32::from(u8::from(pending.source.sheet));
     push_f32s(bytes, &[outline_px as f32, open, sheet, 0.0]);
@@ -2224,7 +2501,12 @@ impl Scratch {
         Self {
             size,
             color: texture("gaanim-3d-color", COLOR_FORMAT, attachment),
-            layer: texture("gaanim-3d-layer-depth", DEPTH_FORMAT, attachment),
+            // Peels read the layer's depth (see `peel`).
+            layer: texture(
+                "gaanim-3d-layer-depth",
+                DEPTH_FORMAT,
+                attachment | wgpu::TextureUsages::TEXTURE_BINDING,
+            ),
             depth,
             depth_group,
         }
@@ -3473,6 +3755,8 @@ struct Uploaded {
     fill: Option<Vec<(std::ops::Range<u32>, wgpu::BindGroup)>>,
     /// An imported model's UVs, joints and weights, and its texture.
     model: Option<(wgpu::Buffer, wgpu::BindGroup)>,
+    /// A volume's field and the colors of its values.
+    volume: Option<wgpu::BindGroup>,
 }
 
 /// Draws [`GpuMeshFrame`]s on the device of a Vello renderer.
@@ -3485,6 +3769,16 @@ pub struct GpuThreeD {
     /// Built the first time a frame draws a glow, and its textures.
     glow: Option<glow::GlowPipelines>,
     glow_targets: Option<glow::GlowTargets>,
+    /// Built the first time a frame peels its translucent surfaces, and the
+    /// textures they peel into, which bind the scratch targets.
+    peel: Option<peel::PeelPipelines>,
+    peel_targets: Option<peel::PeelTargets>,
+    /// Built the first time a frame draws a volume.
+    volumes: Option<volume::VolumePipelines>,
+    /// Built the first time a frame is out of focus, and the textures it
+    /// blurs in.
+    focus: Option<focus::FocusPipelines>,
+    focus_targets: Option<focus::FocusTargets>,
     uploads: HashMap<usize, Uploaded>,
     /// Models' and filled outlines' textures by the id of their pixels and
     /// whether they are read as they are (normal maps), and their samplers.
@@ -3597,19 +3891,19 @@ impl GpuThreeD {
             target.drawn = Some(frame.digest);
             renderer.mark_override_image_dirty(&target.image);
             changed = true;
-            let target_view = target.resolved_view.clone();
-            self.draw(device, queue, frame, &target_view);
+            let resolved = (target.resolved.clone(), target.resolved_view.clone());
+            self.draw(device, queue, frame, (&resolved.0, &resolved.1));
         }
         changed
     }
 
-    /// Draw `frame` and resolve it into `target`.
+    /// Draw `frame` and resolve it into `target`, a view of `resolved`.
     fn draw(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         frame: &GpuMeshFrame,
-        target: &wgpu::TextureView,
+        (resolved, target): (&wgpu::Texture, &wgpu::TextureView),
     ) {
         let pipelines = self.pipelines.get_or_insert_with(|| Pipelines::new(device));
         let size = (frame.image.width, frame.image.height);
@@ -3619,6 +3913,7 @@ impl GpuThreeD {
             .is_none_or(|scratch| scratch.size != size)
         {
             self.scratch = Some(Scratch::new(device, pipelines, size));
+            self.peel_targets = None;
         }
         let scratch = self.scratch.as_ref().expect("scratch targets are set");
         let draws_models = frame.draws.iter().any(|draw| draw.source.model.is_some());
@@ -3626,6 +3921,42 @@ impl GpuThreeD {
             self.models = Some(ModelPipelines::new(device, queue, pipelines));
         }
         let models = self.models.as_ref().filter(|_| draws_models);
+        // Translucent draws peel when the frame peels (see `peel`), but for
+        // filled outlines, which blend from back to front after the peeled
+        // layers, and blurred ones, which `glow::draw_soft` draws.
+        let peels = |draw: &GpuDraw| {
+            frame.peel > 0
+                && draw.translucent
+                && draw.source.fill.is_none()
+                && draw.source.volume.is_none()
+        };
+        let draws_volumes = frame.draws.iter().any(|draw| draw.source.volume.is_some());
+        let peeled = frame
+            .draws
+            .iter()
+            .any(|draw| peels(draw) && draw.blur.is_none());
+        if peeled {
+            let peel = self
+                .peel
+                .get_or_insert_with(|| peel::PeelPipelines::new(device, pipelines));
+            if let Some(models) = models
+                && frame
+                    .draws
+                    .iter()
+                    .any(|draw| peels(draw) && draw.source.model.is_some())
+            {
+                peel.add_models(device, pipelines, models);
+            }
+            if self.peel_targets.is_none() {
+                self.peel_targets = Some(peel::PeelTargets::new(
+                    device,
+                    peel,
+                    size,
+                    &scratch.depth,
+                    &scratch.layer,
+                ));
+            }
+        }
         let glows = frame
             .draws
             .iter()
@@ -3662,6 +3993,10 @@ impl GpuThreeD {
                 self.glow_targets = Some(glow::GlowTargets::new(device, size));
             }
         }
+        if self.volumes.is_none() && frame.draws.iter().any(|draw| draw.source.volume.is_some()) {
+            self.volumes = Some(volume::VolumePipelines::new(device, pipelines));
+        }
+        let volumes = self.volumes.as_ref();
         let textures = &mut self.textures;
         let samplers = &mut self.samplers;
         let white = self
@@ -3823,6 +4158,12 @@ impl GpuThreeD {
                             .map(|(range, brush)| (range.clone(), group(brush.as_ref())))
                             .collect()
                     }),
+                    volume: draw
+                        .source
+                        .volume
+                        .as_ref()
+                        .zip(volumes)
+                        .and_then(|(volume, volumes)| volumes.upload(device, queue, &volume.data)),
                     _source: Arc::clone(&draw.source),
                 });
         }
@@ -4137,16 +4478,17 @@ impl GpuThreeD {
                     pass.draw_indexed(0..draw.source.count, 0, copies_of(frame, first, end));
                 }
             };
-        let translucent = frame.draws.iter().filter(|draw| draw.translucent).count();
-        // The opaque draws, alike meshes as one, then one pass per
-        // translucent drawable with a layer depth of its own; the last pass
-        // resolves.
-        let mut next = 0;
-        let mut passes_left = 1 + translucent;
-        while passes_left > 0 {
-            passes_left -= 1;
-            let opaque = passes_left == translucent;
-            let last = passes_left == 0;
+        // The translucent draws that blend as layers from back to front: all
+        // of them, or those that do not peel, but for volumes.
+        let sorted: Vec<usize> = (0..frame.draws.len())
+            .filter(|&index| {
+                let draw = &frame.draws[index];
+                draw.translucent && !peels(draw) && draw.source.volume.is_none()
+            })
+            .collect();
+        // Begins a pass over the color: the opaque draws' with their depth, or
+        // a translucent layer's with a depth of its own; the last resolves.
+        let begin = |encoder: &mut wgpu::CommandEncoder, opaque: bool, last: bool| {
             #[cfg(test)]
             let timestamp_writes =
                 self.timing
@@ -4158,18 +4500,77 @@ impl GpuThreeD {
                     });
             #[cfg(not(test))]
             let timestamp_writes = None;
+            encoder
+                .begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("gaanim-3d"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &scratch.color,
+                        depth_slice: None,
+                        resolve_target: last.then_some(target),
+                        ops: wgpu::Operations {
+                            load: if opaque {
+                                wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT)
+                            } else {
+                                wgpu::LoadOp::Load
+                            },
+                            store: if last {
+                                wgpu::StoreOp::Discard
+                            } else {
+                                wgpu::StoreOp::Store
+                            },
+                        },
+                    })],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: if opaque {
+                            &scratch.depth
+                        } else {
+                            &scratch.layer
+                        },
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(0.0),
+                            // The translucent layers read the opaque depth,
+                            // the glows test their silhouettes against it and
+                            // the depth of field blurs by it.
+                            store: if opaque && (!last || glows || frame.focus.is_some()) {
+                                wgpu::StoreOp::Store
+                            } else {
+                                wgpu::StoreOp::Discard
+                            },
+                        }),
+                        stencil_ops: None,
+                    }),
+                    timestamp_writes,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                })
+                .forget_lifetime()
+        };
+        // The opaque draws, alike meshes as one; then the volumes; then the
+        // peeled layers; then one pass per translucent drawable that blends
+        // as a layer, with a layer depth of its own.
+        {
+            let last = sorted.is_empty() && !peeled && !draws_volumes;
+            let mut pass = begin(&mut encoder, true, last);
+            let mut next = 0;
+            while next < frame.draws.len() && !frame.draws[next].translucent {
+                let first = next;
+                next += 1;
+                while next < frame.draws.len() && draw_alike(frame, first, next) {
+                    next += 1;
+                }
+                draw_one(&mut pass, first, next, false);
+            }
+        }
+        if draws_volumes && let Some(volumes) = self.volumes.as_ref() {
+            let last = sorted.is_empty() && !peeled;
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("gaanim-3d"),
+                label: Some("gaanim-3d-volumes"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &scratch.color,
                     depth_slice: None,
                     resolve_target: last.then_some(target),
                     ops: wgpu::Operations {
-                        load: if opaque {
-                            wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT)
-                        } else {
-                            wgpu::LoadOp::Load
-                        },
+                        load: wgpu::LoadOp::Load,
                         store: if last {
                             wgpu::StoreOp::Discard
                         } else {
@@ -4177,41 +4578,101 @@ impl GpuThreeD {
                         },
                     },
                 })],
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: if opaque {
-                        &scratch.depth
-                    } else {
-                        &scratch.layer
-                    },
-                    depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(0.0),
-                        // The translucent layers read the opaque depth, and
-                        // the glows test their silhouettes against it.
-                        store: if opaque && (!last || glows) {
-                            wgpu::StoreOp::Store
-                        } else {
-                            wgpu::StoreOp::Discard
-                        },
-                    }),
-                    stencil_ops: None,
-                }),
-                timestamp_writes,
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            if opaque {
-                while next < frame.draws.len() && !frame.draws[next].translucent {
-                    let first = next;
-                    next += 1;
-                    while next < frame.draws.len() && draw_alike(frame, first, next) {
-                        next += 1;
-                    }
-                    draw_one(&mut pass, first, next, false);
-                }
-            } else if next < frame.draws.len() {
-                draw_one(&mut pass, next, next + 1, false);
-                next += 1;
+            pass.set_pipeline(volumes.pipeline());
+            pass.set_bind_group(1, &scratch.depth_group, &[]);
+            pass.set_vertex_buffer(1, instance_buffer.slice(..));
+            // From back to front, as the translucent draws are ordered.
+            for (index, draw) in frame.draws.iter().enumerate() {
+                let Some(uploaded) = self.uploads.get(&(Arc::as_ptr(&draw.source) as usize)) else {
+                    continue;
+                };
+                let (Some(group), Some(indices)) = (&uploaded.volume, &uploaded.indices) else {
+                    continue;
+                };
+                pass.set_bind_group(0, bind_group, &[(index * DRAW_STRIDE) as u32]);
+                pass.set_bind_group(2, group, &[]);
+                pass.set_vertex_buffer(0, uploaded.vertices.slice(..));
+                pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
+                pass.draw_indexed(0..draw.source.count, 0, draw.copies.clone());
             }
+        }
+        if peeled
+            && let (Some(peel), Some(peel_targets)) =
+                (self.peel.as_ref(), self.peel_targets.as_ref())
+        {
+            // Draws the peeled draws with the peel's pipelines, `group` (or
+            // the shadow maps, which shade their color) bound to group 1.
+            let draw_peel = |pass: &mut wgpu::RenderPass<'_>,
+                             which: peel::Peel,
+                             group: Option<&wgpu::BindGroup>| {
+                for (index, draw) in frame.draws.iter().enumerate() {
+                    if !peels(draw) || draw.blur.is_some() {
+                        continue;
+                    }
+                    let Some(uploaded) = self.uploads.get(&(Arc::as_ptr(&draw.source) as usize))
+                    else {
+                        continue;
+                    };
+                    let pipeline = match (&uploaded.model, models, joints_group) {
+                        (Some((vertices, texture)), Some(_), Some(joints)) => {
+                            let Some(pipeline) = peel.model(draw.culled, which) else {
+                                continue;
+                            };
+                            pass.set_bind_group(2, texture, &[]);
+                            pass.set_bind_group(3, joints, &[draw.joints.unwrap_or(0)]);
+                            pass.set_vertex_buffer(2, vertices.slice(..));
+                            pipeline
+                        }
+                        (Some(_), ..) => continue,
+                        _ if draw.source.lines => peel.lines(which),
+                        _ => peel.mesh(draw.culled, which),
+                    };
+                    pass.set_pipeline(pipeline);
+                    pass.set_bind_group(0, bind_group, &[(index * DRAW_STRIDE) as u32]);
+                    pass.set_bind_group(1, group.unwrap_or(&shadow_maps.group), &[]);
+                    pass.set_vertex_buffer(0, uploaded.vertices.slice(..));
+                    if draw.source.lines {
+                        if !draw.instances.is_empty() {
+                            pass.draw(0..6, draw.instances.clone());
+                        }
+                    } else if let Some(indices) = &uploaded.indices {
+                        pass.set_vertex_buffer(1, instance_buffer.slice(..));
+                        pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
+                        pass.draw_indexed(0..draw.source.count, 0, draw.copies.clone());
+                    }
+                }
+            };
+            let last = sorted.is_empty();
+            #[cfg(test)]
+            let timestamp_writes = self.timing.as_ref().filter(|_| last).map(|query_set| {
+                wgpu::RenderPassTimestampWrites {
+                    query_set,
+                    beginning_of_pass_write_index: None,
+                    end_of_pass_write_index: Some(1),
+                }
+            });
+            #[cfg(not(test))]
+            let timestamp_writes = None;
+            peel::draw_peeled(
+                &mut encoder,
+                peel,
+                peel_targets,
+                frame.peel,
+                &scratch.color,
+                &scratch.layer,
+                last.then_some(target),
+                timestamp_writes,
+                &draw_peel,
+            );
+        }
+        for (position, &index) in sorted.iter().enumerate() {
+            let mut pass = begin(&mut encoder, false, position + 1 == sorted.len());
+            draw_one(&mut pass, index, index + 1, false);
         }
         if glows
             && let (Some(glow), Some(targets)) = (self.glow.as_ref(), self.glow_targets.as_mut())
@@ -4280,6 +4741,33 @@ impl GpuThreeD {
                 &|pass: &mut wgpu::RenderPass<'_>, first, end| draw_one(pass, first, end, true),
             );
         }
+        // Last, the image blurs by depth, glows and all.
+        if let Some(focus) = &frame.focus {
+            let pipelines = self
+                .focus
+                .get_or_insert_with(|| focus::FocusPipelines::new(device));
+            if self
+                .focus_targets
+                .as_ref()
+                .is_none_or(|targets| targets.size() != (frame.image.width, frame.image.height))
+            {
+                self.focus_targets = Some(focus::FocusTargets::new(
+                    device,
+                    (frame.image.width, frame.image.height),
+                ));
+            }
+            let targets = self.focus_targets.as_ref().expect("focus targets are set");
+            focus::draw_focus(
+                device,
+                &mut encoder,
+                pipelines,
+                targets,
+                focus,
+                resolved,
+                target,
+                &scratch.depth,
+            );
+        }
         queue.submit(Some(encoder.finish()));
     }
 }
@@ -4291,6 +4779,15 @@ struct Light {
     position: vec4<f32>,
     // Linear color, and its shadow's first layer plus one (0 for none).
     color: vec4<f32>,
+    // A spot light's direction, the way it shines, and the cosine of its
+    // cone's edge; zero for other lights.
+    spot: vec4<f32>,
+    // The cosine of the angle within which a spot light shines fully.
+    cone: vec4<f32>,
+}
+
+fn is_spot(light: Light) -> bool {
+    return dot(light.spot.xyz, light.spot.xyz) > 0.5;
 }
 
 // A shadow map layer: its view-projection, the size of its texels (in scene
@@ -4520,16 +5017,19 @@ fn shadowed(light: Light, point: vec3<f32>, normal: vec3<f32>, pixel: vec2<f32>)
     var layer = u32(light.color.w - 0.5);
     var toward = light.position.xyz;
     if light.position.w < 0.5 {
-        // A point light's cube face: the one its ray to the point leaves by.
         let ray = point - light.position.xyz;
-        let size = abs(ray);
-        var face = select(5u, 4u, ray.z > 0.0);
-        if size.x >= size.y && size.x >= size.z {
-            face = select(1u, 0u, ray.x > 0.0);
-        } else if size.y >= size.z {
-            face = select(3u, 2u, ray.y > 0.0);
+        // A point light's cube face: the one its ray to the point leaves by;
+        // a spot light's one map.
+        if !is_spot(light) {
+            let size = abs(ray);
+            var face = select(5u, 4u, ray.z > 0.0);
+            if size.x >= size.y && size.x >= size.z {
+                face = select(1u, 0u, ray.x > 0.0);
+            } else if size.y >= size.z {
+                face = select(3u, 2u, ray.y > 0.0);
+            }
+            layer += face;
         }
-        layer += face;
         toward = -ray;
     }
     let shadow = frame.shadows[layer];
@@ -4628,7 +5128,12 @@ fn shade(
     var keyed = vec3<f32>(0.0);
     var highlight = vec3<f32>(0.0);
     for (var i = 0u; i < count; i = i + 1u) {
-        var light = Light(vec4<f32>(KEY_LIGHT, 1.0), vec4<f32>(1.0, 1.0, 1.0, frame.params.z));
+        var light = Light(
+            vec4<f32>(KEY_LIGHT, 1.0),
+            vec4<f32>(1.0, 1.0, 1.0, frame.params.z),
+            vec4<f32>(0.0),
+            vec4<f32>(0.0),
+        );
         if !fixed {
             light = frame.lights[i];
         }
@@ -4644,6 +5149,10 @@ fn shade(
         let key = max((dot(normal, toward_light) + KEY_WRAP) / (1.0 + KEY_WRAP), 0.0);
         let half = normalize_or_zero(toward_light + viewer);
         let shine = pow(max(dot(normal, half), 0.0), shininess) * polish * min(key, 1.0);
+        // A spot light fades out toward the edge of its cone.
+        if is_spot(light) {
+            lit *= smoothstep(light.spot.w, light.cone.x, dot(-toward_light, light.spot.xyz));
+        }
         keyed += KEY_STRENGTH * key * light.color.rgb * lit;
         highlight += shine * light.color.rgb * lit;
     }
@@ -5446,6 +5955,7 @@ mod tests {
             blur: None,
             instances: None,
             morph: None,
+            volume: None,
         };
         let mut sources = MeshSources::default();
         let mut meshes =
@@ -5513,6 +6023,7 @@ mod tests {
                 blur: None,
                 instances: None,
                 morph: None,
+                volume: None,
             },
         );
         // The fixed key light casts one map, at full size.
@@ -5534,6 +6045,7 @@ mod tests {
             position,
             directional,
             color: [1.0; 3],
+            spot: None,
         };
         illumination.lights = vec![
             light(DVec3::new(0.0, 0.0, 3.0), false),
@@ -5589,6 +6101,7 @@ mod tests {
                     blur: None,
                     instances: None,
                     morph: None,
+                    volume: None,
                 },
             );
         }
@@ -5649,6 +6162,7 @@ mod tests {
                     blur: None,
                     instances: None,
                     morph: None,
+                    volume: None,
                 },
             );
         }
@@ -5716,6 +6230,7 @@ mod tests {
                 blur: None,
                 instances: None,
                 morph: None,
+                volume: None,
             },
         );
         let frames: Vec<GpuMeshFrame> = meshes
@@ -5773,6 +6288,7 @@ mod tests {
                     blur: None,
                     instances: None,
                     morph: None,
+                    volume: None,
                 },
             );
         }
@@ -5782,7 +6298,9 @@ mod tests {
                 position: DVec3::new(1.0, 0.0, 1.0),
                 directional: true,
                 color: [1.0; 3],
+                spot: None,
             }],
+            ..Default::default()
         };
         let frames: Vec<GpuMeshFrame> = meshes
             .finish(&camera, ndc_to_canvas, line_width, &illumination)
@@ -5864,6 +6382,7 @@ mod tests {
                 blur: None,
                 instances: None,
                 morph: None,
+                volume: None,
             },
         );
         assert!(meshes.push_fill(
@@ -5885,6 +6404,7 @@ mod tests {
                 blur: None,
                 instances: None,
                 morph: None,
+                volume: None,
             },
         ));
         let illumination = Illumination {
@@ -5893,7 +6413,9 @@ mod tests {
                 position: DVec3::new(1.0, 0.0, 1.0),
                 directional: true,
                 color: [1.0; 3],
+                spot: None,
             }],
+            ..Default::default()
         };
         let frames: Vec<GpuMeshFrame> = meshes
             .finish(&camera, ndc_to_canvas, line_width, &illumination)
@@ -5964,6 +6486,7 @@ mod tests {
                 blur: None,
                 instances: None,
                 morph: None,
+                volume: None,
             },
         );
         assert!(meshes.push_fill(
@@ -5985,11 +6508,13 @@ mod tests {
                 blur: None,
                 instances: None,
                 morph: None,
+                volume: None,
             },
         ));
         let illumination = Illumination {
             lighting: Lighting3D::default(),
             lights: Vec::new(),
+            ..Default::default()
         };
         let frames: Vec<GpuMeshFrame> = meshes
             .finish(&camera, ndc_to_canvas, line_width, &illumination)
@@ -6047,12 +6572,14 @@ mod tests {
                     blur: None,
                     instances: None,
                     morph: None,
+                    volume: None,
                 },
             );
         }
         let illumination = Illumination {
             lighting: Lighting3D::default(),
             lights,
+            ..Default::default()
         };
         let frames: Vec<GpuMeshFrame> = meshes
             .finish(&camera, ndc_to_canvas, line_width, &illumination)
@@ -6076,6 +6603,7 @@ mod tests {
             position: DVec3::new(1.5, 0.0, 3.0),
             directional: false,
             color: [1.0; 3],
+            spot: None,
         }]) else {
             return;
         };
@@ -6130,6 +6658,7 @@ mod tests {
                     blur: None,
                     instances: Some(&instances),
                     morph: None,
+                    volume: None,
                 },
             );
             meshes
@@ -6192,6 +6721,7 @@ mod tests {
                     blur: None,
                     instances: None,
                     morph: None,
+                    volume: None,
                 },
             );
         }
@@ -6323,6 +6853,7 @@ mod tests {
                 blur: None,
                 instances: None,
                 morph: None,
+                volume: None,
             },
         );
         let frames: Vec<GpuMeshFrame> = meshes
@@ -6387,6 +6918,7 @@ mod tests {
                 blur: None,
                 instances: None,
                 morph: None,
+                volume: None,
             },
         );
         let frames: Vec<GpuMeshFrame> = meshes
@@ -6506,6 +7038,7 @@ mod tests {
                     blur: None,
                     instances: None,
                     morph: morph.as_ref(),
+                    volume: None,
                 },
             );
         }
@@ -6590,6 +7123,7 @@ mod tests {
                     blur: *blur,
                     instances: None,
                     morph: None,
+                    volume: None,
                 },
             );
         }
@@ -6605,6 +7139,346 @@ mod tests {
         let target = gpu.target(64, 64);
         gpu.render(&scene, &target);
         Some((gpu.read(&target), three_d.glow.is_some()))
+    }
+
+    /// The RGBA pixels of `meshes`, each placed by its matrix and at its
+    /// opacity, drawn as [`draw_meshes`] draws them with translucent
+    /// content blending as `transparency` says, and whether the peel
+    /// pipelines were built.
+    fn draw_translucent(
+        meshes: &[(TriangleMeshData, DMat4, f32)],
+        transparency: Transparency3D,
+    ) -> Option<(Vec<u8>, bool)> {
+        let illumination = Illumination {
+            transparency,
+            ..Default::default()
+        };
+        let (pixels, three_d) = draw_illuminated(meshes, &illumination)?;
+        Some((pixels, three_d.peel.is_some()))
+    }
+
+    /// The RGBA pixels of `meshes`, each placed by its matrix and at its
+    /// opacity, drawn as [`draw_meshes`] draws them under `illumination`,
+    /// and what drew them.
+    fn draw_illuminated(
+        meshes: &[(TriangleMeshData, DMat4, f32)],
+        illumination: &Illumination,
+    ) -> Option<(Vec<u8>, GpuThreeD)> {
+        let mut gpu = crate::background::test_gpu::test_gpu()?;
+        let mut camera = Camera::ortho_2d_frame(4.0, 4.0, 64, 64);
+        camera.position = DVec3::new(0.0, 0.0, 10.0);
+        let (ndc_to_canvas, line_width) = canvas_projection(&camera).unwrap();
+        let placement = camera.to_vello_transform();
+        let placed: Vec<(GlobalSpatialTransform, GlobalOpacity)> = meshes
+            .iter()
+            .map(|(_, matrix, opacity)| {
+                let transform = GlobalSpatialTransform {
+                    mat4: *matrix,
+                    ..Default::default()
+                };
+                (transform, GlobalOpacity(*opacity))
+            })
+            .collect();
+        let mut sources = MeshSources::default();
+        let mut pending = GpuMeshes::new(&mut sources, (64, 64), placement, 0).unwrap();
+        for (index, ((mesh, _, _), (transform, opacity))) in meshes.iter().zip(&placed).enumerate()
+        {
+            let key = index as u64 + 1;
+            pending.push(
+                0,
+                [(key, 1), (key, 1)],
+                [None, None],
+                &Content {
+                    transform,
+                    opacity,
+                    mesh: Some(mesh),
+                    lines: None,
+                    material: mesh.material.as_ref(),
+                    line_width: None,
+                    line_range: None,
+                    fill: None,
+                    joints: None,
+                    glow: None,
+                    shadow: None,
+                    blur: None,
+                    instances: None,
+                    morph: None,
+                    volume: None,
+                },
+            );
+        }
+        let frames: Vec<GpuMeshFrame> = pending
+            .finish(&camera, ndc_to_canvas, line_width, illumination)
+            .into_iter()
+            .map(|(_, frame)| frame)
+            .collect();
+        let mut scene = vello::Scene::new();
+        scene.append(&frames[0].scene(), Some(placement));
+        let mut three_d = GpuThreeD::default();
+        three_d.prepare(&gpu.device, &gpu.queue, &mut gpu.renderer, &frames);
+        let target = gpu.target(64, 64);
+        gpu.render(&scene, &target);
+        Some((gpu.read(&target), three_d))
+    }
+
+    /// A volume filled with one value that the transfer gives full red at
+    /// full opacity, from -1 to 1 on each axis, absorbing `density` per
+    /// unit.
+    fn red_volume(density: f32) -> gaanim_scene::VolumeData {
+        let transfer: Vec<u8> = [255, 0, 0, 255].repeat(256);
+        gaanim_scene::VolumeData {
+            values: gaanim_scene::VolumeData::pack(&[255; 8]),
+            size: [2, 2, 2],
+            min: [-1.0; 3],
+            max: [1.0; 3],
+            transfer: ImageData {
+                data: Blob::from(transfer),
+                format: ImageFormat::Rgba8,
+                alpha_type: ImageAlphaType::Alpha,
+                width: 256,
+                height: 1,
+            },
+            density,
+        }
+    }
+
+    /// The RGBA pixels of `volume`, and of a white quad through its middle
+    /// when `quad`, drawn as [`draw_meshes`] draws them.
+    fn draw_volume(volume: &gaanim_scene::VolumeData, quad_inside: bool) -> Option<Vec<u8>> {
+        let mut gpu = crate::background::test_gpu::test_gpu()?;
+        let mut camera = Camera::ortho_2d_frame(4.0, 4.0, 64, 64);
+        camera.position = DVec3::new(0.0, 0.0, 10.0);
+        let (ndc_to_canvas, line_width) = canvas_projection(&camera).unwrap();
+        let placement = camera.to_vello_transform();
+        let transform = GlobalSpatialTransform::default();
+        let opacity = GlobalOpacity(1.0);
+        let white = quad(peniko::Color::WHITE);
+        let mut sources = MeshSources::default();
+        let mut pending = GpuMeshes::new(&mut sources, (64, 64), placement, 0).unwrap();
+        let content = |mesh, volume| Content {
+            transform: &transform,
+            opacity: &opacity,
+            mesh,
+            lines: None,
+            material: None,
+            line_width: None,
+            line_range: None,
+            fill: None,
+            joints: None,
+            glow: None,
+            shadow: None,
+            blur: None,
+            instances: None,
+            morph: None,
+            volume,
+        };
+        assert!(pending.push_volume(0, (1, 1), None, &content(None, Some(volume))));
+        if quad_inside {
+            pending.push(
+                0,
+                [(2, 1), (2, 1)],
+                [None, None],
+                &content(Some(&white), None),
+            );
+        }
+        let frames: Vec<GpuMeshFrame> = pending
+            .finish(&camera, ndc_to_canvas, line_width, &Illumination::default())
+            .into_iter()
+            .map(|(_, frame)| frame)
+            .collect();
+        let mut scene = vello::Scene::new();
+        scene.append(&frames[0].scene(), Some(placement));
+        let mut three_d = GpuThreeD::default();
+        three_d.prepare(&gpu.device, &gpu.queue, &mut gpu.renderer, &frames);
+        let target = gpu.target(64, 64);
+        gpu.render(&scene, &target);
+        Some(gpu.read(&target))
+    }
+
+    /// A volume absorbs by its depth through it, and stops at what is
+    /// opaque inside it: a quad through its middle shows through the half
+    /// in front of it.
+    #[test]
+    fn a_volume_absorbs_by_its_depth_and_stops_at_what_is_opaque() {
+        let volume = red_volume(1.0);
+        let Some(alone) = draw_volume(&volume, false) else {
+            return;
+        };
+        // Two units deep: 1 - e^-2 of red.
+        let middle = pixel(&alone, 32, 32);
+        let expected = (1.0 - (-2.0_f32).exp()) * 255.0;
+        assert!((f32::from(middle[3]) - expected).abs() < 6.0, "{middle:?}");
+        assert!(middle[1] < 4 && middle[2] < 4, "{middle:?}");
+        // Beyond the box, nothing.
+        assert_eq!(pixel(&alone, 4, 4)[3], 0);
+        // One unit in front of the quad: 1 - e^-1 of red over white.
+        let over = pixel(&draw_volume(&volume, true).unwrap(), 32, 32);
+        let white = (-1.0_f32).exp() * 255.0;
+        assert_eq!(over[3], 255);
+        assert!(over[0] > 250, "{over:?}");
+        assert!((f32::from(over[1]) - white).abs() < 8.0, "{over:?}");
+    }
+
+    /// A white quad in focus on the left and one farther away on the right:
+    /// out of focus, the far one's edge spreads over several pixels while
+    /// the near one's stays sharp, and in focus both are sharp.
+    #[test]
+    fn the_depth_of_field_blurs_what_lies_away_from_the_focus() {
+        let white = quad(peniko::Color::WHITE);
+        // 16 pixels per unit; the camera stands 10 units in front of its
+        // target, so the far quad lies at 1.5 times its distance.
+        let near = DMat4::from_translation(DVec3::new(-1.0, 0.0, 0.0))
+            * DMat4::from_scale(DVec3::splat(0.5));
+        let far = DMat4::from_translation(DVec3::new(1.0, 0.0, -5.0))
+            * DMat4::from_scale(DVec3::splat(0.5));
+        let meshes = [(white.clone(), near, 1.0), (white, far, 1.0)];
+        let blurred = Illumination {
+            depth_of_field: gaanim_scene::DepthOfField {
+                focus: 1.0,
+                aperture: 1.0,
+                max_blur: 1.0,
+            },
+            ..Default::default()
+        };
+        let Some((sharp, three_d)) = draw_illuminated(&meshes, &Illumination::default()) else {
+            return;
+        };
+        assert!(three_d.focus.is_none(), "a frame in focus builds no blur");
+        let (out, three_d) = draw_illuminated(&meshes, &blurred).unwrap();
+        assert!(three_d.focus.is_some());
+        // The near quad spans pixels 8 to 24 across, the far one 40 to 56.
+        let alpha = |pixels: &[u8], x| pixel(pixels, x, 32)[3];
+        assert_eq!((alpha(&sharp, 23), alpha(&sharp, 25)), (255, 0));
+        assert_eq!((alpha(&sharp, 40), alpha(&sharp, 38)), (255, 0));
+        assert_eq!(alpha(&out, 23), 255, "in focus");
+        assert!(alpha(&out, 25) <= 2, "in focus: {}", alpha(&out, 25));
+        // A third of a unit of blur: 5 pixels of sigma.
+        let (inside, edge, outside) = (alpha(&out, 48), alpha(&out, 40), alpha(&out, 36));
+        assert!(inside > 150, "{inside}");
+        assert!((40..200).contains(&edge), "{edge}");
+        assert!((5..130).contains(&outside), "{outside}");
+    }
+
+    /// A spot light lights the floor within its cone and leaves the rest
+    /// to the sky and ground light, where a point light at its place lights
+    /// all of it.
+    #[test]
+    fn a_spot_light_lights_only_within_its_cone() {
+        let position = DVec3::new(-0.6, 0.6, 3.0);
+        let target = DVec3::new(-0.6, 0.6, 0.0);
+        let cone = gaanim_scene::SpotCone {
+            target,
+            angle: 0.25,
+            softness: 0.2,
+        };
+        let spot = Light {
+            position,
+            directional: false,
+            color: [1.0; 3],
+            spot: Spot::new(&cone, position),
+        };
+        assert!(spot.spot.is_some());
+        let point = Light { spot: None, ..spot };
+        let Some(spotted) = floor_and_card(vec![spot]) else {
+            return;
+        };
+        let lit = floor_and_card(vec![point]).unwrap();
+        // At 16 pixels per unit: the cone's middle at (-0.6, 0.6), and the
+        // floor well outside it at (0.75, -0.75).
+        let (within, beyond) = (spotted[22 * 64 + 22], spotted[44 * 64 + 44]);
+        assert!(
+            u16::from(beyond) + 40 < u16::from(within),
+            "within {within}, beyond {beyond}"
+        );
+        assert!(
+            lit[44 * 64 + 44] > beyond + 40,
+            "{} {beyond}",
+            lit[44 * 64 + 44]
+        );
+        assert!(within.abs_diff(lit[22 * 64 + 22]) < 4);
+        // A spot that aims at itself gives no light.
+        let aimless = gaanim_scene::SpotCone {
+            target: position,
+            ..cone
+        };
+        assert!(Spot::new(&aimless, position).is_none());
+    }
+
+    /// Two translucent quads that cross, red nearer on the left and blue on
+    /// the right: peeled, each half shows the nearer one over the other;
+    /// sorted as layers, one lies over the other on both halves.
+    #[test]
+    fn peeled_translucent_drawables_blend_in_the_order_they_lie_where_they_cross() {
+        let red = quad(peniko::Color::new([1.0, 0.0, 0.0, 1.0]));
+        let blue = quad(peniko::Color::new([0.0, 0.0, 1.0, 1.0]));
+        let crossing = |angle: f64| DMat4::from_rotation_y(angle);
+        let meshes = [(red, crossing(0.5), 0.5), (blue, crossing(-0.5), 0.5)];
+        let Some((sorted, built)) = draw_translucent(&meshes, Transparency3D::default()) else {
+            return;
+        };
+        assert!(!built, "a frame that does not peel builds no peel pipeline");
+        let (peeled, built) = draw_translucent(&meshes, Transparency3D { layers: 4 }).unwrap();
+        assert!(built);
+        let (left, right) = (pixel(&peeled, 24, 32), pixel(&peeled, 40, 32));
+        assert!(
+            left[0] > left[2] + 40,
+            "red lies nearer on the left: {left:?}"
+        );
+        assert!(
+            right[2] > right[0] + 40,
+            "blue lies nearer on the right: {right:?}"
+        );
+        assert_eq!(left[3], right[3]);
+        let (left, right) = (pixel(&sorted, 24, 32), pixel(&sorted, 40, 32));
+        assert_eq!(
+            left[0] > left[2],
+            right[0] > right[2],
+            "sorted, one quad lies over the other on both halves: {left:?} {right:?}"
+        );
+    }
+
+    /// One translucent drawable folded over itself shows its far fold
+    /// through its near one when peeled, and only its nearest surface when
+    /// it blends as a layer; one layer peels only the nearest.
+    #[test]
+    fn peeled_layers_show_the_folds_of_one_translucent_drawable() {
+        let mut folded = quad(peniko::Color::WHITE);
+        folded.vertices = vec![
+            [-1.0, -1.0, 0.5],
+            [1.0, -1.0, 0.5],
+            [1.0, 1.0, 0.5],
+            [-1.0, 1.0, 0.5],
+            [-1.0, -1.0, -0.5],
+            [1.0, -1.0, -0.5],
+            [1.0, 1.0, -0.5],
+            [-1.0, 1.0, -0.5],
+        ];
+        folded.indices = vec![0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7];
+        folded.color = None;
+        let (red, blue) = ([1.0, 0.0, 0.0, 1.0], [0.0, 0.0, 1.0, 1.0]);
+        folded.colors = Some(vec![red, red, red, red, blue, blue, blue, blue]);
+        let meshes = [(folded, DMat4::IDENTITY, 0.5)];
+        let Some((sorted, _)) = draw_translucent(&meshes, Transparency3D::default()) else {
+            return;
+        };
+        let (peeled, _) = draw_translucent(&meshes, Transparency3D { layers: 4 }).unwrap();
+        let (nearest, _) = draw_translucent(&meshes, Transparency3D { layers: 1 }).unwrap();
+        let (sorted, peeled, nearest) = (
+            pixel(&sorted, 32, 32),
+            pixel(&peeled, 32, 32),
+            pixel(&nearest, 32, 32),
+        );
+        assert!(
+            sorted[2] < 4,
+            "a layer shows its nearest surface: {sorted:?}"
+        );
+        assert!(peeled[2] > 40 && peeled[0] > peeled[2], "{peeled:?}");
+        assert!(peeled[3] > sorted[3], "{peeled:?} {sorted:?}");
+        // The peeled layer passes through 8 bits once more.
+        assert!(
+            nearest.iter().zip(sorted).all(|(a, b)| a.abs_diff(b) <= 2),
+            "{nearest:?} {sorted:?}"
+        );
     }
 
     fn red_glow() -> Option<Glow> {
@@ -6763,6 +7637,7 @@ mod tests {
                     blur: None,
                     instances: None,
                     morph: None,
+                    volume: None,
                 },
             ));
             let frames: Vec<GpuMeshFrame> = meshes
@@ -7078,6 +7953,7 @@ mod tests {
             blur: None,
             instances: None,
             morph: None,
+            volume: None,
         };
         meshes.push(0, [(2, 1), (2, 1)], [None, None], &card(&front));
         meshes.push(0, [(3, 1), (3, 1)], [None, None], &card(&back));
@@ -7100,6 +7976,7 @@ mod tests {
                 blur: None,
                 instances: None,
                 morph: None,
+                volume: None,
             },
         ));
         let frames: Vec<GpuMeshFrame> = meshes
@@ -7194,6 +8071,7 @@ mod tests {
                     blur: None,
                     instances: None,
                     morph: None,
+                    volume: None,
                 },
             ));
             let frames: Vec<GpuMeshFrame> = meshes
@@ -7305,6 +8183,7 @@ mod tests {
                     blur: None,
                     instances: None,
                     morph: None,
+                    volume: None,
                 },
             ));
             let frames: Vec<GpuMeshFrame> = meshes
@@ -7422,6 +8301,7 @@ mod tests {
                 blur: None,
                 instances: None,
                 morph: None,
+                volume: None,
             },
         ));
         let frames: Vec<GpuMeshFrame> = meshes
@@ -7494,7 +8374,7 @@ mod tests {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         frame: &GpuMeshFrame,
-        view: &wgpu::TextureView,
+        view: (&wgpu::Texture, &wgpu::TextureView),
     ) -> f64 {
         const ROUNDS: u64 = 100;
         let buffer = |size, usage| {
@@ -7726,6 +8606,7 @@ mod tests {
                     blur: None,
                     instances: None,
                     morph: None,
+                    volume: None,
                 },
                 false,
             );
@@ -7737,9 +8618,10 @@ mod tests {
                 })),
                 ..Default::default()
             };
-            let view = Target::new(&device, &empty.image).resolved_view;
-            let base_gpu = gpu_ms(&mut three_d, &device, &queue, &empty, &view);
-            let base_3d = per_frame(&device, || three_d.draw(&device, &queue, &empty, &view));
+            let target = Target::new(&device, &empty.image);
+            let view = (&target.resolved, &target.resolved_view);
+            let base_gpu = gpu_ms(&mut three_d, &device, &queue, &empty, view);
+            let base_3d = per_frame(&device, || three_d.draw(&device, &queue, &empty, view));
             let base_vello = vello_ms(&vello::Scene::new(), &mut renderer);
             println!(
                 "empty frame: 3D pass {base_gpu:.3} ms on the GPU, {base_3d:.3} ms wall; Vello {base_vello:.3} ms wall"
@@ -7773,12 +8655,13 @@ mod tests {
                         blur: None,
                         instances: None,
                         morph: None,
+                        volume: None,
                     },
                     true,
                 );
-                let gpu = gpu_ms(&mut three_d, &device, &queue, &frame, &view) - base_gpu;
+                let gpu = gpu_ms(&mut three_d, &device, &queue, &frame, view) - base_gpu;
                 let wall =
-                    per_frame(&device, || three_d.draw(&device, &queue, &frame, &view)) - base_3d;
+                    per_frame(&device, || three_d.draw(&device, &queue, &frame, view)) - base_3d;
                 let mut scene = vello::Scene::new();
                 for glyph in &fill.glyphs {
                     scene.fill(

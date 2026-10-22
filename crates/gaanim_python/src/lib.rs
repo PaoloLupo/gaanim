@@ -31,6 +31,7 @@ mod composition;
 mod custom;
 mod easing;
 mod falloff;
+mod field;
 mod live;
 mod magic_move;
 mod motion;

@@ -104,8 +104,10 @@ pub const FORMAT: &str = "gaanim-bundle";
 /// 10 the images that fill outlines in the 3D world and the shadows and
 /// blurs of 3D content, version 11 normal maps and morph targets on
 /// imported models' meshes and the weights of those targets each frame,
-/// and version 12 the lens shift of a perspective camera.
-pub const VERSION: u32 = 12;
+/// version 12 how translucent 3D content blends, the cones of spot lights,
+/// the depth of field that blurs 3D content and volumes, and version 13 the
+/// lens shift of a perspective camera.
+pub const VERSION: u32 = 13;
 /// Oldest version this build still reads: bundles published in other pages
 /// keep playing when the hosted players move to a newer version.
 pub const OLDEST_READABLE: u32 = 5;
@@ -2357,6 +2359,7 @@ mod tests {
                 shadow: None,
                 blur: None,
                 instances: None,
+                volume: None,
                 composition: gaanim_renderer::pipeline::ThreeDComposition {
                     in_views: true,
                     post_exempt: false,
@@ -2445,6 +2448,7 @@ mod tests {
                 shadow,
                 blur,
                 instances: None,
+                volume: None,
                 composition: gaanim_renderer::pipeline::ThreeDComposition {
                     in_views: true,
                     post_exempt: false,
@@ -2488,6 +2492,88 @@ mod tests {
 
     /// Copies of a mesh come back with every list they carry and how far
     /// they have grown in, beside a source that draws no copies.
+    /// A volume's field and the colors of its values go to the images
+    /// table once, and come back with its grid, box and density.
+    #[test]
+    fn volumes_round_trip() {
+        let texels: Vec<u8> = (0..60).map(|value| (value * 4) as u8).collect();
+        let transfer: Vec<u8> = (0..1024).map(|value| (value % 251) as u8).collect();
+        let volume = Arc::new(gaanim_scene::VolumeData {
+            values: gaanim_scene::VolumeData::pack(&texels),
+            size: [5, 4, 3],
+            min: [-1.0, -2.0, -0.5],
+            max: [1.0, 2.0, 0.5],
+            transfer: gaanim_core::peniko::ImageData {
+                data: gaanim_core::peniko::Blob::from(transfer.clone()),
+                format: gaanim_core::peniko::ImageFormat::Rgba8,
+                alpha_type: gaanim_core::peniko::ImageAlphaType::Alpha,
+                width: 256,
+                height: 1,
+            },
+            density: 3.5,
+        });
+        let source = gaanim_renderer::pipeline::CapturedThreeDSource {
+            entity: bevy::prelude::Entity::from_raw_u32(1).unwrap(),
+            transform: gaanim_core::glam::DMat4::IDENTITY,
+            opacity: 0.75,
+            mesh: None,
+            lines: None,
+            material: None,
+            line_width: None,
+            line_range: None,
+            fill: None,
+            joints: None,
+            morph: None,
+            glow: None,
+            shadow: None,
+            blur: None,
+            instances: None,
+            volume: Some(Arc::clone(&volume)),
+            composition: gaanim_renderer::pipeline::ThreeDComposition {
+                in_views: true,
+                post_exempt: false,
+                layer: None,
+                transition_side: Default::default(),
+                lineage: Vec::new(),
+            },
+        };
+        let mut writer = BundleWriter::new(std::io::Cursor::new(Vec::new()), "test");
+        for index in 0..2 {
+            let mut captured = frame(index as f64 / 60.0);
+            captured.capture.three_d = Some(gaanim_renderer::pipeline::CapturedThreeD {
+                sources: vec![source.clone()],
+                ..Default::default()
+            });
+            writer.push_frame(&captured, [0; 32]).unwrap();
+        }
+        let scene = SceneData {
+            fps: 60,
+            duration: 2.0 / 60.0,
+            ..Default::default()
+        };
+        let mut bundle =
+            Bundle::from_bytes(writer.finish(&scene).unwrap().into_inner().into()).unwrap();
+        // The field and its colors, stored once for both frames.
+        let images: u32 = bundle
+            .manifest
+            .table_segments
+            .iter()
+            .map(|segment| segment.counts.images)
+            .sum();
+        assert_eq!(images, 2);
+        for index in 0..2 {
+            let three_d = bundle.frame(index).unwrap().capture.three_d.unwrap();
+            let back = three_d.sources[0].volume.as_deref().unwrap();
+            assert_eq!(back.texels(), Some(&texels[..]));
+            assert_eq!(back.transfer.data.data(), &transfer[..]);
+            assert_eq!(
+                (back.size, back.min, back.max, back.density),
+                (volume.size, volume.min, volume.max, volume.density)
+            );
+            assert_eq!(three_d.sources[0].opacity, 0.75);
+        }
+    }
+
     #[test]
     fn copies_of_meshes_round_trip() {
         let mesh = Arc::new(gaanim_scene::TriangleMeshData {
@@ -2518,6 +2604,7 @@ mod tests {
                 shadow: None,
                 blur: None,
                 instances,
+                volume: None,
                 composition: gaanim_renderer::pipeline::ThreeDComposition {
                     in_views: true,
                     post_exempt: false,
@@ -2573,7 +2660,9 @@ mod tests {
 
     /// An imported model's mesh comes back with its texture, normal map,
     /// alpha mode, sides, skin weights and morph targets, stored once, and
-    /// each frame with the palette of its joints and its targets' weights.
+    /// each frame with the palette of its joints and its targets' weights,
+    /// how its translucent content blends, its lights' cones and its depth
+    /// of field.
     #[test]
     fn imported_meshes_and_their_palettes_and_weights_round_trip() {
         use gaanim_core::peniko::{Blob, ImageAlphaType, ImageData, ImageFormat};
@@ -2661,6 +2750,7 @@ mod tests {
                 shadow: None,
                 blur: None,
                 instances: None,
+                volume: None,
                 composition: gaanim_renderer::pipeline::ThreeDComposition {
                     in_views: true,
                     post_exempt: false,
@@ -2673,11 +2763,35 @@ mod tests {
         let identity = gaanim_core::glam::Mat4::IDENTITY.to_cols_array();
         let moved =
             gaanim_core::glam::Mat4::from_translation(gaanim_core::glam::Vec3::X).to_cols_array();
+        let light = |spot: bool| gaanim_renderer::three_d::Light {
+            position: gaanim_core::glam::DVec3::new(0.0, 4.0, 2.0),
+            directional: false,
+            color: [1.0, 0.5, 0.25],
+            spot: spot.then_some(gaanim_renderer::three_d::Spot {
+                direction: gaanim_core::glam::DVec3::NEG_Y,
+                cos_inner: 0.95,
+                cos_outer: 0.9,
+            }),
+        };
+        let focused = gaanim_scene::DepthOfField {
+            focus: 0.8,
+            aperture: 0.2,
+            max_blur: 0.3,
+        };
         let mut writer = BundleWriter::new(std::io::Cursor::new(Vec::new()), "test");
         for (index, palette) in [identity, moved].into_iter().enumerate() {
             let mut captured = frame(index as f64 / 60.0);
+            // The first frame peels its translucent surfaces, under a spot
+            // light and out of focus; the second blends them as layers,
+            // under a point light and in focus.
+            let first = index == 0;
             captured.capture.three_d = Some(gaanim_renderer::pipeline::CapturedThreeD {
                 sources: vec![source(palette, &weights[index])],
+                transparency: gaanim_scene::Transparency3D {
+                    layers: if first { 5 } else { 0 },
+                },
+                lights: vec![light(first)],
+                depth_of_field: if first { focused } else { Default::default() },
                 ..Default::default()
             });
             writer.push_frame(&captured, [0; 32]).unwrap();
@@ -2693,6 +2807,14 @@ mod tests {
         for (index, palette) in [identity, moved].into_iter().enumerate() {
             let decoded = bundle.frame(index).unwrap();
             let three_d = decoded.capture.three_d.unwrap();
+            let first = index == 0;
+            assert_eq!(three_d.transparency.layers, if first { 5 } else { 0 });
+            assert_eq!(three_d.lights, [light(first)]);
+            let in_focus = gaanim_scene::DepthOfField::default();
+            assert_eq!(
+                three_d.depth_of_field,
+                if first { focused } else { in_focus }
+            );
             let back = &three_d.sources[0];
             let back_mesh = back.mesh.as_deref().unwrap();
             assert_eq!(back_mesh.vertices, mesh.vertices, "frame {index}");
