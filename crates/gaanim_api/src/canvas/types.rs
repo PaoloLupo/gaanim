@@ -349,6 +349,13 @@ pub enum ImageOptionsError {
 
 impl ImageOptions {
     pub(crate) fn media_frame(self, view: ImageView) -> gaanim_scene::MediaFrame {
+        // With both sizes the destination is that frame, as `frame()` keeps it,
+        // so a later crop fits its region to the frame rather than to the
+        // `contain`-fitted size of the whole source.
+        let (width, height) = match (self.width, self.height) {
+            (Some(width), Some(height)) => (width, height),
+            _ => (view.display_width, view.display_height),
+        };
         gaanim_scene::MediaFrame {
             crop: gaanim_core::kurbo::Rect::new(
                 view.source_x,
@@ -356,8 +363,8 @@ impl ImageOptions {
                 view.source_x + view.source_width,
                 view.source_y + view.source_height,
             ),
-            width: view.display_width,
-            height: view.display_height,
+            width,
+            height,
             fit: self.fit,
             quality: self.quality,
             // A `cover` frame crops the overflow evenly, as `frame()` does.
@@ -3477,6 +3484,30 @@ mod tests {
         assert_eq!(visible, gaanim_core::kurbo::Rect::new(-1.5, -1.5, 1.5, 1.5));
         let center = transform * gaanim_core::kurbo::Point::new(300.0, 150.0);
         assert!(center.x.abs() < 1e-9 && center.y.abs() < 1e-9, "{center:?}");
+    }
+
+    /// `image(path, width=, height=, fit="contain")` keeps the requested frame,
+    /// as `image(path).frame(width, height, fit="contain")` does, so a crop
+    /// fits its region to the frame instead of staying at the whole source's
+    /// scale.
+    #[test]
+    fn contain_options_keep_the_requested_frame_for_crops() {
+        let options = ImageOptions {
+            width: Some(7.0),
+            height: Some(4.0),
+            fit: ImageFit::Contain,
+            crop: None,
+            quality: ImageQuality::Medium,
+        };
+        let frame = options.media_frame(options.resolve(1654, 2339).unwrap());
+        assert_eq!((frame.width, frame.height), (7.0, 4.0));
+        let region = gaanim_scene::MediaFrame {
+            crop: gaanim_core::kurbo::Rect::new(132.0, 234.0, 1522.0, 1029.0),
+            ..frame
+        };
+        let (visible, _) = region.geometry();
+        assert_eq!(visible.height(), 4.0);
+        assert!((visible.width() - 4.0 * 1390.0 / 795.0).abs() < 1e-9);
     }
 
     #[test]
