@@ -2364,10 +2364,16 @@ fn outermost_layout_source(
 ) -> ObjectId {
     let mut current = source;
     let mut visited = HashSet::from([source]);
+    // A spec names the box that owns the object by the end of the script:
+    // until that box's snapshot holds it, the object is a box of its own.
     while let Some(owner) = object_specs
         .get(&current)
         .and_then(|spec| spec.layout_owner)
-        .filter(|owner| snapshots.contains_key(owner))
+        .filter(|owner| {
+            snapshots
+                .get(owner)
+                .is_some_and(|snapshot| snapshot.members.iter().any(|member| member.id == current))
+        })
     {
         assert!(
             visited.insert(owner),
@@ -5774,6 +5780,18 @@ impl SceneModel {
                         }
                     }
 
+                    // A box entering now takes its size at once, as it takes
+                    // its place: only the others resize, from what they were.
+                    let entering_now = |id: gaanim_layout::LayoutId| {
+                        let mut current = Some(id);
+                        while let Some(id) = current {
+                            if tree.source_by_id.get(&id) == entering.as_ref() {
+                                return true;
+                            }
+                            current = tree.parent_by_id.get(&id).copied();
+                        }
+                        false
+                    };
                     let mut targets = Vec::new();
                     let mut cover_clips = Vec::new();
                     for (layout_id, member) in &materialized_by_id {
@@ -5824,7 +5842,11 @@ impl SceneModel {
                                 .insert(LocalBounds(local_bounds));
                             Self::place_layout_member(builder, entity, target);
                             let time = builder.current_time;
-                            let span = duration.unwrap_or(0.0);
+                            let span = if entering_now(*layout_id) {
+                                0.0
+                            } else {
+                                duration.unwrap_or(0.0)
+                            };
                             builder.commands.queue(move |world: &mut World| {
                                 gaanim_animation::updaters::record_layout_bounds(
                                     world,
@@ -5992,6 +6014,43 @@ impl SceneModel {
                                 let mut inspection = gaanim_scene::LayoutInspection::default();
                                 inspection.record(time, frame);
                                 entity.insert(inspection);
+                            }
+                        });
+                    }
+                    // A text replaced by its rewrapped copy draws clipped as it
+                    // did: the copy takes the clip its leaves had, given to it
+                    // or to a box before this one adopted it.
+                    for (old, new, ..) in &text_crossfades {
+                        let placed = |id: ObjectId| {
+                            let state = builder.states.get(id)?;
+                            Some((state.entity, builder.get_world_transform(id).to_affine_2d()))
+                        };
+                        let old: Vec<_> = Self::visual_leaf_ids(builder, *old)
+                            .into_iter()
+                            .filter_map(placed)
+                            .collect();
+                        let new: Vec<_> = Self::visual_leaf_ids(builder, *new)
+                            .into_iter()
+                            .filter_map(placed)
+                            .collect();
+                        builder.commands.queue(move |world: &mut World| {
+                            let Some((clip, old_world)) =
+                                old.iter().find_map(|(entity, world_of)| {
+                                    world
+                                        .get::<gaanim_renderer::effects::ClipMask>(*entity)
+                                        .map(|clip| (clip.clone(), *world_of))
+                                })
+                            else {
+                                return;
+                            };
+                            for (entity, new_world) in new {
+                                // A clip with sources finds its path again
+                                // every frame; one without stays in place.
+                                let mut clip = clip.clone();
+                                clip.path.apply_affine(new_world.inverse() * old_world);
+                                if let Ok(mut entity) = world.get_entity_mut(entity) {
+                                    entity.insert(clip);
+                                }
                             }
                         });
                     }
@@ -25102,6 +25161,138 @@ mod tests {
         assert!(
             (child_top - next_top).abs() < 1e-6,
             "{child_top} {next_top}"
+        );
+    }
+
+    /// A box, a box that draws only its background and a loose text,
+    /// each clipped before a column adopts it, still draw clipped: the
+    /// background, and the copy the column rewraps a text into.
+    #[test]
+    fn a_drawable_clipped_before_a_box_adopts_it_keeps_its_clip() {
+        use bevy::prelude::App;
+        let clipped = PenikoColor::from_rgb8(120, 60, 230);
+        let mut canvas = SceneModel::new(640, 360);
+        let member = |handle: &crate::canvas::DrawableHandle| crate::canvas::LayoutMemberSpec {
+            id: handle.id,
+            style: gaanim_layout::LayoutItemStyle::default(),
+        };
+        let column = |width, height| crate::canvas::LayoutSpec {
+            kind: gaanim_layout::LayoutNodeKind::Column { wrap: false },
+            style: gaanim_layout::LayoutStyle {
+                gap: DVec2::splat(20.0),
+                width,
+                height,
+                ..Default::default()
+            },
+            within: LayoutWithin::Intrinsic,
+        };
+        let content = || column(Default::default(), Default::default());
+        // Each column exists before what it adopts.
+        for kind in 0..3 {
+            let first = canvas.rect(80.0, 30.0);
+            let outer = canvas.group(&[&first]);
+            canvas.reflow_layout(&outer, vec![member(&first)], content(), 1, None, None, None);
+            let item = match kind {
+                0 => {
+                    let empty = canvas.group(&[]);
+                    canvas
+                        .decorate_layout(&empty, Some(Brush::Solid(clipped)), None, 0.0)
+                        .unwrap();
+                    let size = column(
+                        gaanim_layout::SizeRule::Fixed(80.0),
+                        gaanim_layout::SizeRule::Fixed(40.0),
+                    );
+                    canvas.reflow_layout(&empty, Vec::new(), size, 1, None, None, None);
+                    empty
+                }
+                1 => {
+                    let label = canvas.text("boxed").fill(clipped);
+                    let boxed = canvas.group(&[&label]);
+                    canvas.reflow_layout(
+                        &boxed,
+                        vec![member(&label)],
+                        content(),
+                        1,
+                        None,
+                        None,
+                        None,
+                    );
+                    boxed
+                }
+                _ => canvas.text("loose").fill(clipped),
+            };
+            // As `box.add` does: the column owns it by the end of the script.
+            item.claim_layout(&outer).unwrap();
+            let mask = canvas.rect(400.0, 100.0);
+            let item = item.clip(&mask, gaanim_core::peniko::Fill::NonZero);
+            canvas.set_group_members(&outer, &[&first, &item]);
+            canvas.reflow_layout(
+                &outer,
+                vec![member(&first), member(&item)],
+                content(),
+                2,
+                None,
+                Some(&item),
+                None,
+            );
+        }
+        canvas.wait(0.5);
+
+        let mut app = App::new();
+        app.add_plugins(bevy::prelude::MinimalPlugins)
+            .add_plugins(gaanim_scene::GaanimScenePlugin)
+            .add_plugins(gaanim_animation::GaanimAnimationPlugin)
+            .add_plugins(gaanim_timeline::GaanimTimelinePlugin)
+            .add_plugins(gaanim_text::GaanimTextPlugin)
+            .add_plugins(gaanim_renderer::GaanimDerivedGeometryPlugin);
+        app.finish();
+        app.cleanup();
+        app.update();
+        crate::runtime::replay_canvas_into(app.world_mut(), canvas);
+        app.update();
+        app.world_mut().resource_mut::<Timeline>().seek_request = Some(0.25);
+        app.update();
+        let world = app.world_mut();
+        let shown = |world: &World, entity| {
+            let mut current = Some(entity);
+            let mut opacity = 1.0;
+            while let Some(entity) = current {
+                opacity *= world
+                    .get::<gaanim_scene::Opacity>(entity)
+                    .map_or(1.0, |opacity| opacity.0);
+                current = world.get::<ChildOf>(entity).map(ChildOf::parent);
+            }
+            opacity > 0.0
+        };
+        let mut leaves = world.query_filtered::<(
+            Entity,
+            &FillBrush,
+            Option<&gaanim_renderer::effects::ClipMask>,
+        ), (
+            With<gaanim_scene::Path2D>,
+            Without<gaanim_scene::GroupMarker>,
+        )>();
+        let leaves: Vec<(Entity, bool)> = leaves
+            .iter(world)
+            .filter(
+                |(_, fill, _)| matches!(&fill.0, Some(Brush::Solid(color)) if *color == clipped),
+            )
+            .map(|(entity, _, clip)| (entity, clip.is_some()))
+            .collect();
+        let drawn: Vec<(Entity, bool)> = leaves
+            .into_iter()
+            .filter(|(entity, _)| shown(world, *entity))
+            .collect();
+        // The background and the glyphs of both texts.
+        assert!(drawn.len() >= 3, "{drawn:?}");
+        let unclipped: Vec<Entity> = drawn
+            .iter()
+            .filter(|(_, clip)| !clip)
+            .map(|(entity, _)| *entity)
+            .collect();
+        assert!(
+            unclipped.is_empty(),
+            "unclipped: {unclipped:?} of {drawn:?}"
         );
     }
 
