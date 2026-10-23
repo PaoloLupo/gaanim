@@ -160,6 +160,7 @@ Drawing attention: indications, highlights and hand-drawn notes.
 | [Indications](emphasis/indications.py) | Indicate, wiggle, blink, passing flashes, broadcast ripples, flashing frames and underlines, and the emphasis of one word inside a text. |
 | [Highlights](emphasis/highlights.py) | Live surrounding frames that follow and retarget, color-cycling boundaries, highlighter marker bands and spotlights that dim everything else. |
 | [Hand drawn](emphasis/hand_drawn.py) | Hand-drawn underlines, boxes, circles, strikes and brackets with every roughness, pass count, seed and style, marks that follow moving targets, and chalk shapes. |
+| [Pointer](emphasis/pointer.py) | A mouse pointer for software demonstrations: its arrow, hand and text styles, moves to objects straight or along an arc, clicks and drags. |
 
 ## Effects
 
