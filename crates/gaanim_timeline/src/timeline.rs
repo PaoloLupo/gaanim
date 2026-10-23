@@ -122,6 +122,12 @@ fn changed_parts(entity: EntityRef<'_>, last: Tick, this: Tick) -> RestoredParts
     {
         return RestoredParts::ALL;
     }
+    // `update_media_frames` derives an image's clip path and bounds from its
+    // media frame, and only when the frame changes. While the frame is the
+    // seek's, they follow it through the replay: put back alone, they would
+    // keep the keyframe's crop under a frame that no longer changes.
+    let follows_media_frame = entity.contains::<gaanim_scene::MediaFrame>()
+        && !changed::<gaanim_scene::MediaFrame>(entity, last, this);
     let mut parts = RestoredParts::NONE;
     for (changed, part) in [
         (
@@ -152,9 +158,12 @@ fn changed_parts(entity: EntityRef<'_>, last: Tick, this: Tick) -> RestoredParts
             changed::<gaanim_scene::ObjectTag>(entity, last, this),
             RestoredParts::TAG,
         ),
-        (changed::<Path2D>(entity, last, this), RestoredParts::PATH),
         (
-            changed::<gaanim_scene::PathSource>(entity, last, this),
+            changed::<Path2D>(entity, last, this) && !follows_media_frame,
+            RestoredParts::PATH,
+        ),
+        (
+            changed::<gaanim_scene::PathSource>(entity, last, this) && !follows_media_frame,
             RestoredParts::PATH_SOURCE,
         ),
         (
@@ -198,7 +207,7 @@ fn changed_parts(entity: EntityRef<'_>, last: Tick, this: Tick) -> RestoredParts
             RestoredParts::MATERIAL_3D,
         ),
         (
-            changed::<gaanim_scene::LocalBounds>(entity, last, this),
+            changed::<gaanim_scene::LocalBounds>(entity, last, this) && !follows_media_frame,
             RestoredParts::BOUNDS,
         ),
     ] {
@@ -6621,6 +6630,96 @@ mod tests {
                 *world.get::<MediaFrame>(entity).unwrap(),
                 expected,
                 "time {time}"
+            );
+        }
+    }
+
+    /// Playback seeks forward from the previous frame and restores what
+    /// other systems wrote since; an image's clip path, which follows its
+    /// media frame, keeps the crop the replay leaves after the crop ends,
+    /// as a seek to the same instant does.
+    #[test]
+    fn forward_replay_keeps_an_image_path_on_its_finished_crop() {
+        use gaanim_scene::{ImageFit, MediaFrame, RasterImage};
+        let from = MediaFrame {
+            crop: gaanim_core::kurbo::Rect::new(0.0, 0.0, 1654.0, 2339.0),
+            width: 7.8,
+            height: 3.8,
+            fit: ImageFit::Contain,
+            quality: gaanim_core::peniko::ImageQuality::Medium,
+            alignment: 0.5,
+        };
+        let to = MediaFrame {
+            crop: gaanim_core::kurbo::Rect::new(132.0, 164.0, 1522.0, 866.0),
+            ..from
+        };
+        let fixture = || {
+            let mut world = World::new();
+            let empty = Arc::new(BezPath::new());
+            let image = world
+                .spawn((
+                    MobjectId(ObjectId::from_raw(1)),
+                    SpatialTransform::default(),
+                    Opacity(1.0),
+                    from,
+                    RasterImage::none(),
+                    Path2D(Arc::clone(&empty)),
+                    PathSource(empty),
+                    gaanim_scene::LocalBounds::default(),
+                ))
+                .id();
+            // A reactive signal disables the whole-world replay shortcut, so
+            // every seek goes through the keyframe restore.
+            world.spawn((
+                MobjectId(ObjectId::from_raw(2)),
+                SpatialTransform::default(),
+                Opacity(1.0),
+                gaanim_animation::FloatSignal::new(0.0),
+            ));
+            let mut frames = bevy::ecs::schedule::Schedule::default();
+            frames.add_systems(gaanim_scene::media_frame::update_media_frames);
+            frames.run(&mut world);
+            let mut timeline = Timeline::default();
+            let track = timeline.add_track("crop", 0);
+            timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
+            timeline.add_clip(
+                track,
+                0.0,
+                0.6,
+                ClipPayload::Animation(AnimationSpec {
+                    target: ObjectId::from_raw(1),
+                    lens: PropertyLensSpec::MediaFrame { from, to },
+                    rate_func: RateFunc::Linear,
+                    delay: 0.0,
+                    label: None,
+                }),
+            );
+            (world, timeline, frames, image)
+        };
+        let (mut world, mut timeline, mut frames, image) = fixture();
+        let (mut reference_world, mut reference, mut reference_frames, reference_image) = fixture();
+        for step in 0..=36 {
+            let time = f64::from(step) / 30.0;
+            timeline.seek(&mut world, time);
+            frames.run(&mut world);
+            reference.replay_baseline = None;
+            reference.seek(&mut reference_world, time);
+            reference_frames.run(&mut reference_world);
+            let (clip, transform) = world.get::<MediaFrame>(image).unwrap().geometry();
+            assert_eq!(
+                world.get::<Path2D>(image).unwrap().0.elements(),
+                gaanim_core::kurbo::Shape::to_path(&clip, 0.1).elements(),
+                "path at t={time}"
+            );
+            assert_eq!(
+                world.get::<RasterImage>(image).unwrap().local_transform,
+                transform,
+                "image at t={time}"
+            );
+            assert_eq!(
+                world.get::<Path2D>(image),
+                reference_world.get::<Path2D>(reference_image),
+                "path against a seek at t={time}"
             );
         }
     }
