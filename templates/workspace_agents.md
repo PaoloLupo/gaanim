@@ -45,3 +45,35 @@ changing scenes; do not rely on memory.
   member: `gaanim export .`, or `gaanim export . -o renders/{member}.mp4`.
 - Put code more than one member uses in `src/`, and assets more than one
   member uses in `assets/`.
+
+## Look at the result
+
+`gaanim check .` only proves that the scripts run, and the preview opens a
+window you cannot see. Before calling a member done, capture its frames and
+look at them:
+
+- With `scene.stop()` (talks): `gaanim --diff --example talks/<name>
+  --capture-stops --capture-only --current snapshots/<name>` writes
+  `stop_0001.png`, one image per stop.
+- Without stops (videos): end the member's script with
+
+  ```python
+  import os
+
+  if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
+      scene.snapshots(snapshots, [1.0, 3.5, scene.cursor])
+  else:
+      scene.render()
+  ```
+
+  choosing the seconds where each step has finished (`scene.cursor` is the
+  last frame), then run `gaanim --diff --example videos/<name> --capture-only
+  --current snapshots/<name>` for `seek_*.png`. `manifest.json` there lists
+  the time of each image.
+- Open every PNG as an image and compare it with what was asked: layout,
+  overlaps, clipped or unreadable text, colors, what is visible when. Fix
+  the script and capture again until it matches.
+- `snapshots/` is gitignored. Do not pass `--bless` unless the user asks: it
+  replaces the approved images in `tests/visual/`.
+- If the `gaanim` executable is unavailable or you cannot read images, say
+  that the result was not checked visually.
