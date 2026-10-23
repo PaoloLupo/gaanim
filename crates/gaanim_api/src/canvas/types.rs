@@ -859,12 +859,14 @@ pub enum LayoutOp {
 }
 
 /// Containing block used by a root layout.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum LayoutWithin {
     #[default]
     Intrinsic,
     Safe,
     Frame,
+    /// A rectangle of the scene, in scene units, fixed when the box is built.
+    Region(Bounds3D),
 }
 
 /// Complete rule set for one persistent Layout v2 container.

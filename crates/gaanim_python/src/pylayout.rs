@@ -790,7 +790,7 @@ fn apply_container(
         }
     }
     if let Some(value) = prop(props, "within")? {
-        spec.within = parse_within(Some(&value.extract::<String>()?))?;
+        spec.within = parse_within(&value)?;
     }
     Ok(())
 }
@@ -2699,15 +2699,28 @@ pub(crate) fn parse_fit(value: &str) -> PyResult<FitMode> {
     }
 }
 
-fn parse_within(value: Option<&str>) -> PyResult<LayoutWithin> {
-    match value {
-        None => Ok(LayoutWithin::Intrinsic),
-        Some("safe") => Ok(LayoutWithin::Safe),
-        Some("frame") => Ok(LayoutWithin::Frame),
-        Some(_) => Err(pyo3::exceptions::PyValueError::new_err(
-            "within must be None, 'safe', or 'frame'",
-        )),
+/// `within` of a root box: `"safe"`, `"frame"`, a `Zone` or a `Drawable`
+/// (the region they cover when the box is built).
+fn parse_within(value: &Bound<'_, PyAny>) -> PyResult<LayoutWithin> {
+    if value.is_none() {
+        return Ok(LayoutWithin::Intrinsic);
     }
+    if let Ok(name) = value.extract::<String>() {
+        return match name.as_str() {
+            "safe" => Ok(LayoutWithin::Safe),
+            "frame" => Ok(LayoutWithin::Frame),
+            _ => Err(pyo3::exceptions::PyValueError::new_err(
+                "within must be None, 'safe', 'frame', a Zone or a Drawable",
+            )),
+        };
+    }
+    crate::pyzones::target_bounds(value)
+        .map(LayoutWithin::Region)
+        .map_err(|_| {
+            pyo3::exceptions::PyTypeError::new_err(
+                "within must be None, 'safe', 'frame', a Zone or a Drawable",
+            )
+        })
 }
 
 fn finite_non_negative(value: f64, name: &str) -> PyResult<()> {

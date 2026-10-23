@@ -5171,6 +5171,7 @@ impl SceneModel {
                         LayoutWithin::Safe => frame_bounds,
                         LayoutWithin::Frame => raw_frame_bounds,
                         LayoutWithin::Intrinsic => frame_bounds,
+                        LayoutWithin::Region(region) => region,
                     };
                     let font_registry = builder.font_registry;
                     let solve = |tree: &CompiledLayoutTree| {

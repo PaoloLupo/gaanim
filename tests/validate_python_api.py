@@ -3474,6 +3474,26 @@ def validate_layout_box_contract(module):
     body = zones["body"]
     if not (zones["top"].bottom > body.top and body.width > 0):
         failures.append("zones did not divide the safe area in order")
+    # A root box takes a zone or an object as its region; Zone.crop moves edges to scene coordinates.
+    safe = L.safe
+    index = safe.crop(top=0.95, right=-1.5)
+    if (index.top, index.right, index.left, index.bottom) != (0.95, -1.5, safe.left, safe.bottom):
+        failures.append("Zone.crop did not move only the edges it was given")
+    inside = L.column(L.box("uno"), L.box("dos"), within=index, width="fill", height="fill", justify="start")
+    region = inside.bounds()
+    if not (abs(region.right - index.right) < 1e-6 and abs(region.top - index.top) < 1e-6 and abs(region.left - index.left) < 1e-6):
+        failures.append(f"a root box did not fill the zone it was given: {region}")
+    frame_box = scene.geometry.rect(4, 2).move_to(3, -1)
+    over_object = L.row(L.box("x"), within=frame_box, width="fill", height="fill")
+    if abs(over_object.bounds().x - 3) > 1e-6:
+        failures.append("a root box did not take the region of an object")
+    for description, operation in (
+        ("an unknown within name", lambda: L.box(within="page")),
+        ("a number as within", lambda: L.box(within=3)),
+        ("a non-finite crop edge", lambda: safe.crop(top=float("nan"))),
+    ):
+        if not raises_error((ValueError, TypeError), operation):
+            failures.append(f"{description} was accepted")
     part = zones[1:]
     if not isinstance(part, module.ZoneSet) or len(part) != 1 or part.names != ["body"]:
         failures.append("a ZoneSet slice is not a ZoneSet of those zones")
