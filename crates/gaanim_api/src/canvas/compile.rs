@@ -25026,6 +25026,109 @@ mod tests {
         assert!(sheared(&corners, 0.0), "before {corners:?}");
     }
 
+    /// Each copy of a mesh drawn at many points moves by the field at its
+    /// place in the world, whatever its scale and turn, and the mesh they
+    /// share keeps its shape.
+    #[test]
+    fn a_deformed_set_of_copies_moves_each_copy_by_the_field_at_its_place() {
+        use bevy::prelude::App;
+        use gaanim_scene::{MeshCopies, MeshInstances, TriangleMeshData};
+        let mut canvas = SceneModel::new(640, 360);
+        let material = gaanim_scene::Material3D::default();
+        let cube = canvas.cube(1.0, material).unwrap();
+        let quarter_turn = gaanim_core::glam::Quat::from_rotation_x(std::f32::consts::FRAC_PI_2);
+        let copies = canvas
+            .instances(
+                &cube,
+                MeshCopies {
+                    positions: vec![[-3.0, 0.0, 0.0], [-1.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
+                    scales: Some(vec![[0.25; 3], [0.25, 0.25, 1.0], [0.5; 3]]),
+                    rotations: Some(vec![
+                        [0.0, 0.0, 0.0, 1.0],
+                        [0.0, 0.0, 0.0, 1.0],
+                        quarter_turn.to_array(),
+                    ]),
+                    colors: None,
+                },
+                false,
+            )
+            .unwrap()
+            .move_to_3d(0.0, 2.0, 0.0);
+        canvas.wait(0.5);
+        // Up by 1, and by half of x more: a lattice reads it exactly.
+        let field = |p: DVec3| DVec3::new(0.0, 0.0, 1.0 + 0.5 * p.x);
+        let grid = copies
+            .deform_grid(
+                Some(crate::canvas::DeformSamples::Counts([3, 3, 3])),
+                Some(Bounds3D::new(DVec3::splat(-5.0), DVec3::splat(5.0))),
+            )
+            .unwrap();
+        let values = grid.points().into_iter().map(field).collect();
+        let anim = copies.animate().deform(Some(values)).unwrap().duration(1.0);
+        canvas.play(vec![anim]);
+        canvas.wait(0.5);
+
+        let mut app = App::new();
+        app.add_plugins(bevy::prelude::MinimalPlugins)
+            .add_plugins(gaanim_scene::GaanimScenePlugin)
+            .add_plugins(gaanim_animation::GaanimAnimationPlugin)
+            .add_plugins(gaanim_timeline::GaanimTimelinePlugin)
+            .add_plugins(gaanim_text::GaanimTextPlugin)
+            .add_plugins(gaanim_renderer::GaanimDerivedGeometryPlugin);
+        app.finish();
+        app.cleanup();
+        app.update();
+        crate::runtime::replay_canvas_into(app.world_mut(), canvas);
+        app.update();
+        app.world_mut().resource_mut::<Timeline>().keyframes.clear();
+        gaanim_timeline::capture_reload_keyframe(app.world_mut());
+        let copies = entity_of(app.world_mut(), &copies);
+        let authored = app
+            .world()
+            .get::<TriangleMeshData>(copies)
+            .unwrap()
+            .vertices
+            .clone();
+        let at = |app: &mut App, time: f64| {
+            app.world_mut().resource_mut::<Timeline>().seek_request = Some(time);
+            app.update();
+            let world = app.world();
+            let global = world
+                .get::<gaanim_math::GlobalSpatialTransform>(copies)
+                .unwrap()
+                .mat4;
+            let places: Vec<DVec3> = world
+                .get::<MeshInstances>(copies)
+                .unwrap()
+                .copies
+                .positions
+                .iter()
+                .map(|place| global.transform_point3(DVec3::from_array(place.map(f64::from))))
+                .collect();
+            let mesh = world
+                .get::<TriangleMeshData>(copies)
+                .unwrap()
+                .vertices
+                .clone();
+            (places, mesh)
+        };
+        let close = |places: &[DVec3], lifts: [f64; 3]| {
+            places
+                .iter()
+                .zip([-3.0, -1.0, 1.0])
+                .zip(lifts)
+                .all(|((place, x), lift)| place.distance(DVec3::new(x, 2.0, lift)) < 1e-5)
+        };
+        let (places, mesh) = at(&mut app, 1.5);
+        assert!(close(&places, [-0.5, 0.5, 1.5]), "{places:?}");
+        assert_eq!(mesh, authored);
+        let (places, _) = at(&mut app, 1.0);
+        assert!(close(&places, [-0.25, 0.25, 0.75]), "halfway {places:?}");
+        let (places, mesh) = at(&mut app, 0.25);
+        assert!(close(&places, [0.0; 3]), "before {places:?}");
+        assert_eq!(mesh, authored);
+    }
+
     /// A column 300 high whose two 80 × 30 children are centered, where an
     /// 80 × 50 child unfolds at `index` at 0.5 s and folds out at 1.5 s, each
     /// over 1 s: the app and the entities of the first of the two others and

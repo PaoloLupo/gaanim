@@ -4557,8 +4557,11 @@ class Drawable:
         the parameter sways the model). ``None`` puts the shape back.
         Each member takes it the way it is drawn: the vertices of meshes
         (primitives, ``mesh``, extrusions, subdivided ``plane`` walls) and
-        of 3D line lists move one by one, so a wall bends; a ``line_3d``
-        whose ends follow other objects follows them; and any other member
+        of 3D line lists move one by one, so a wall bends; each copy of
+        ``instances`` or ``points_3d`` moves as a whole by the displacement
+        at its place, whatever its scale and turn, and keeps the shape of
+        the mesh the copies share; a ``line_3d`` whose ends follow other
+        objects follows them; and any other member
         (a point, a text, a billboard, a 2D drawable in the 3D world) moves
         as a whole by the displacement at its origin. A group passes it to
         its members at any depth. The authored values never change, and a
