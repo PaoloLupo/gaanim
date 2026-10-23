@@ -164,6 +164,7 @@ from .gaanim_core import (
     Typography,
     LayoutBuilder,
     MediaLibrary,
+    UI,
     Visualization,
     SlideKit,
     Mechanics,
@@ -201,6 +202,8 @@ from .templates import (
 )
 from .animation_types import AnimationChannel, CustomAnimationValues, Playable, ScalarSource
 from .questions import Question, QuestionError, load_questions
+from .pointer import Pointer, PointerAnimator
+from .timeline import Timeline, TimelineEvent
 from .matrix import (
     Matrix,
     MatrixAlgebraError,
@@ -243,6 +246,7 @@ __all__ = [
     "Typography",
     "LayoutBuilder",
     "MediaLibrary",
+    "UI",
     "Visualization",
     "SlideKit",
     "Mechanics",
@@ -261,6 +265,11 @@ __all__ = [
     "label",
     "magic_move",
     "Matrix",
+    "Pointer",
+    "PointerAnimator",
+
+    "Timeline",
+    "TimelineEvent",
     "MatrixEntry",
     "MatrixSelection",
     "MatrixSelectionAnimation",

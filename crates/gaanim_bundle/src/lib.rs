@@ -106,9 +106,10 @@ pub const FORMAT: &str = "gaanim-bundle";
 /// imported models' meshes and the weights of those targets each frame,
 /// version 12 how translucent 3D content blends, the cones of spot lights,
 /// the depth of field that blurs 3D content and volumes, version 13 the
-/// lens shift of a perspective camera, and version 14 the camera the
-/// outgoing segment of a transition keeps.
-pub const VERSION: u32 = 14;
+/// lens shift of a perspective camera, version 14 the camera the
+/// outgoing segment of a transition keeps, and version 15 whether the
+/// world's up axis is z, which the fixed key light and the sky follow.
+pub const VERSION: u32 = 15;
 /// Oldest version this build still reads: bundles published in other pages
 /// keep playing when the hosted players move to a newer version.
 pub const OLDEST_READABLE: u32 = 5;

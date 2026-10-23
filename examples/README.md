@@ -160,6 +160,7 @@ Drawing attention: indications, highlights and hand-drawn notes.
 | [Indications](emphasis/indications.py) | Indicate, wiggle, blink, passing flashes, broadcast ripples, flashing frames and underlines, and the emphasis of one word inside a text. |
 | [Highlights](emphasis/highlights.py) | Live surrounding frames that follow and retarget, color-cycling boundaries, highlighter marker bands and spotlights that dim everything else. |
 | [Hand drawn](emphasis/hand_drawn.py) | Hand-drawn underlines, boxes, circles, strikes and brackets with every roughness, pass count, seed and style, marks that follow moving targets, and chalk shapes. |
+| [Pointer](emphasis/pointer.py) | A mouse pointer for software demonstrations: its arrow, hand and text styles, moves to objects straight or along an arc, clicks and drags. |
 
 ## Effects
 
@@ -239,6 +240,7 @@ Primitives, arrows and tubes, extrusion, axonometric drawings and 3D axes.
 | [Glow on 3D content](3d/glow_3d.py) | A halo around what the camera sees of a sphere, a 3D line and a walking glTF model, grown and faded with animate.glow, and hidden where a solid in front covers it. |
 | [Shadows and blurs on 3D content](3d/soft_effects_3d.py) | Drop shadows cast by a sphere and by a text placed in 3D, a blurred cube that the timeline sharpens, and a blurred ring that a sharp solid in front of it hides. |
 | [Order-independent transparency](3d/transparency_3d.py) | Translucent panels that cross, a ball passing through a panel, nested shells, a ring in a box, a knot and a Möbius strip, each surface blended in the order it lies at each pixel. |
+| [Z up](3d/z_up.py) | A world with z up and the plan in x/y, as engineering models are written: orbits about z, upright columns, and plans and walls laid on the planes of the model with in_3d(plane=, origin=). |
 | [Spot lights](3d/spot_lights_3d.py) | Cones of light of three widths and three softnesses over a cube, a sphere and a cone, and a spot that sweeps across the stage while the shadows turn away from it. |
 | [Depth of field in 3D](3d/depth_of_field_3d.py) | A row of solids going away from the camera, blurred by their distance from the focus as it racks from the nearest to the farthest, as the aperture opens and as the blur is capped. |
 | [Isosurfaces and volumes](3d/fields_3d.py) | The surface of three balls of charge, a gyroid the box cuts open, one level of a field morphing into another, and a field drawn whole as a glowing cloud, alone and with a solid ring passing through it. |
@@ -263,6 +265,7 @@ Axes, plots, charts, vector fields and live readouts.
 | [Chart encodings](visualization/chart_encodings.py) | Color, size, opacity and label channels, scales, categorical palettes, legends and color bars, and explicit axes. |
 | [Chart transitions](visualization/chart_transitions.py) | Charts that morph between specs by key or index, change mark family or data, grow from 2D into 3D, and pies that share out their slices anew. |
 | [Bar race](visualization/bar_race.py) | Ranked bars that grow, overtake each other and leave the top, with value formats, colors and a rolling ticker. |
+| [Timeline](visualization/timeline.py) | Timelines whose labelled events stack in lanes that do not overlap: sides chosen automatically, scale breaks, labels that grow left near the end and reserved spans. |
 | [Vector fields](visualization/vector_fields.py) | Vector fields as arrows and streamlines with their options, flowing highlights, particles, advection and color maps. |
 | [Readouts](visualization/readouts.py) | Rolling counters in every format and mode, live readouts of parameters, functions and time, progress rings and countdowns. |
 

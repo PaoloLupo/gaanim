@@ -99,6 +99,10 @@ pub(crate) struct CanvasState {
     pub(crate) live_zones: Vec<super::live::LiveZoneRecord>,
     /// Draw layers named with `SceneModel::z_layers`.
     pub(crate) z_layers: Option<ZLayers>,
+    /// The wipe that unfolds a box child into its slot and folds it out, by
+    /// child: one clip a child keeps, whose edge every later fold moves, and
+    /// whether that edge is closed.
+    pub(crate) fold_wipes: HashMap<ObjectId, (crate::canvas::Parameter, bool)>,
     /// What each deformed drawable is deformed by, as authored so far.
     pub(crate) deforms: HashMap<ObjectId, crate::canvas::deform::DeformState>,
 }
@@ -156,6 +160,7 @@ impl CanvasState {
             stop_gates: Vec::new(),
             live_zones: Vec::new(),
             z_layers: None,
+            fold_wipes: HashMap::new(),
             deforms: HashMap::new(),
         }
     }
@@ -809,6 +814,11 @@ pub(crate) enum Op {
         duration: Option<f64>,
         entering: Option<ObjectId>,
         leaving: Option<ObjectId>,
+        /// `entering` unfolds into its slot and `leaving` folds out of it,
+        /// clipped by a wipe the canvas launched at the same instant, instead
+        /// of fading: each moves with the sibling before it, so its content
+        /// stays on the edge it enters from.
+        fold: bool,
         /// `false` only records the snapshot: an enclosing box's transition,
         /// which resolves the whole tree, follows at the same instant.
         resolve: bool,

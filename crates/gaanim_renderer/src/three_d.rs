@@ -242,8 +242,11 @@ const SHADOW_SIZE_MANY: u32 = 512;
 /// (`shadowed` in [`SHADER`]).
 const SHADOW_CONTACT: f32 = 1.0;
 /// Where the fixed key light of [`Lighting3D`] shines from (`KEY_LIGHT` in
-/// [`SHADER`]).
+/// [`SHADER`]): above and to the left, toward the viewer.
 const KEY_LIGHT: DVec3 = DVec3::new(-3.0, 6.0, 4.0);
+/// [`KEY_LIGHT`] in a world whose up axis is z (`KEY_LIGHT_Z_UP` in
+/// [`SHADER`]): the same light, turned a quarter about x.
+const KEY_LIGHT_Z_UP: DVec3 = DVec3::new(-3.0, -4.0, 6.0);
 const SAMPLES: u32 = 4;
 const COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
@@ -1981,7 +1984,11 @@ fn shadows(illumination: &Illumination, pending: &[Pending]) -> Shadows {
         return shadows;
     }
     let key = Light {
-        position: KEY_LIGHT,
+        position: if lighting.z_up {
+            KEY_LIGHT_Z_UP
+        } else {
+            KEY_LIGHT
+        },
         directional: true,
         color: [1.0; 3],
         spot: None,
@@ -2184,7 +2191,7 @@ fn frame_uniforms(
             f32::from(u8::from(lights.is_empty())),
             lights.len() as f32,
             layer(shadows.key),
-            0.0,
+            f32::from(u8::from(lighting.z_up)),
         ],
     );
     push_f32s(
@@ -4819,8 +4826,9 @@ struct Frame {
     eye: vec4<f32>,
     // View direction, and the scene's light intensity.
     forward: vec4<f32>,
-    // 1 when the fixed key light shines, the count of lights, and the
-    // first layer of the key light's shadow plus one (0 for none).
+    // 1 when the fixed key light shines, the count of lights, the first
+    // layer of the key light's shadow plus one (0 for none), and 1 when the
+    // world's up axis is z rather than y.
     params: vec4<f32>,
     // 1 over the texels on a side of a shadow map, and the radius of the
     // edge of shadows in texels where an object touches what it shadows.
@@ -4912,6 +4920,7 @@ struct VertexOut {
 }
 
 const KEY_LIGHT = vec3<f32>(-3.0, 6.0, 4.0);
+const KEY_LIGHT_Z_UP = vec3<f32>(-3.0, -4.0, 6.0);
 const KEY_WRAP: f32 = 0.35;
 const KEY_STRENGTH: f32 = 0.62;
 const SKY: f32 = 0.5;
@@ -5131,7 +5140,8 @@ fn shade(
     let gloss = 1.0 - clamp(draw.material.x, 0.0, 1.0);
     let polish = gloss * gloss;
     let intensity = frame.forward.w;
-    let facing_up = 0.5 + 0.5 * normal.y;
+    let z_up = frame.params.w > 0.5;
+    let facing_up = 0.5 + 0.5 * select(normal.y, normal.z, z_up);
     let sky = GROUND + (SKY - GROUND) * facing_up;
     let shininess = 8.0 + 248.0 * polish;
     let fixed = frame.params.x > 0.5;
@@ -5140,7 +5150,7 @@ fn shade(
     var highlight = vec3<f32>(0.0);
     for (var i = 0u; i < count; i = i + 1u) {
         var light = Light(
-            vec4<f32>(KEY_LIGHT, 1.0),
+            vec4<f32>(select(KEY_LIGHT, KEY_LIGHT_Z_UP, z_up), 1.0),
             vec4<f32>(1.0, 1.0, 1.0, frame.params.z),
             vec4<f32>(0.0),
             vec4<f32>(0.0),

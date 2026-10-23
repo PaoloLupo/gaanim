@@ -588,7 +588,7 @@ bloque y los segmentos que usa, y descarga los demás bloques con sus
 segmentos a medida que los reproduce. Así, una presentación larga empieza a
 verse sin esperar a descargar los trazados de todas sus diapositivas.
 
-Este es el formato 14. Guarda las mallas y líneas 3D que cambian de un
+Este es el formato 15. Guarda las mallas y líneas 3D que cambian de un
 fotograma a otro (una superficie que se dobla, una curva que se mueve) como el
 cambio de sus vértices respecto de los fotogramas anteriores de su segmento,
 sin perder un bit: en `gallery/catenoid_helicoid` el paquete pasa de 62 a

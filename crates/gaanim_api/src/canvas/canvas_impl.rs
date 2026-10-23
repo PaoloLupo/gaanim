@@ -2434,6 +2434,10 @@ pub struct SceneModel {
     /// Seconds the whole talk is planned to last when presenting.
     pub talk_target: Option<f64>,
     pub(crate) camera_position: gaanim_core::glam::DVec3,
+    /// The world's up axis, `DVec3::Y` (the default) or `DVec3::Z`: the 3D
+    /// camera's default up and orbits, the axis of cylinders, cones, tori
+    /// and planes, and where the fixed key light shines from.
+    pub world_up: gaanim_core::glam::DVec3,
     pub(crate) lighting_3d: gaanim_scene::Lighting3D,
     pub(crate) transparency_3d: gaanim_scene::Transparency3D,
     pub(crate) state: SharedCanvasState,
@@ -2489,6 +2493,7 @@ impl SceneModel {
             branding: None,
             talk_target: None,
             camera_position: gaanim_core::glam::DVec3::ZERO,
+            world_up: gaanim_core::glam::DVec3::Y,
             lighting_3d: gaanim_scene::Lighting3D::default(),
             transparency_3d: gaanim_scene::Transparency3D::default(),
             state: Arc::new(Authored::new(CanvasState::new())),
@@ -4245,9 +4250,8 @@ impl SceneModel {
         caps: bool,
         material: gaanim_scene::Material3D,
     ) -> Result<DrawableHandle, primitives3d::Primitive3DError> {
-        Ok(self.spawn(SpawnKind::Primitive3D(primitives3d::cylinder(
-            radius, height, segments, caps, material,
-        )?)))
+        let mesh = primitives3d::cylinder(radius, height, segments, caps, material)?;
+        Ok(self.spawn(SpawnKind::Primitive3D(self.along_world_up(mesh))))
     }
 
     pub fn cone(
@@ -4258,9 +4262,8 @@ impl SceneModel {
         cap: bool,
         material: gaanim_scene::Material3D,
     ) -> Result<DrawableHandle, primitives3d::Primitive3DError> {
-        Ok(self.spawn(SpawnKind::Primitive3D(primitives3d::cone(
-            radius, height, segments, cap, material,
-        )?)))
+        let mesh = primitives3d::cone(radius, height, segments, cap, material)?;
+        Ok(self.spawn(SpawnKind::Primitive3D(self.along_world_up(mesh))))
     }
 
     pub fn plane(
@@ -4270,16 +4273,31 @@ impl SceneModel {
         subdivisions: (u32, u32),
         material: gaanim_scene::Material3D,
     ) -> Result<DrawableHandle, primitives3d::Primitive3DError> {
-        Ok(self.spawn(SpawnKind::Primitive3D(primitives3d::plane(
-            width,
-            height,
-            subdivisions,
-            material,
-        )?)))
+        let mesh = primitives3d::plane(width, height, subdivisions, material)?;
+        Ok(self.spawn(SpawnKind::Primitive3D(self.along_world_up(mesh))))
     }
 
-    /// A Y-up torus: a tube `minor_radius` thick around a circle of
-    /// `major_radius` in the XZ plane.
+    /// `mesh`, built with its axis along y, turned to stand along the
+    /// world's up: a quarter turn about x takes y to z when z is up.
+    fn along_world_up(
+        &self,
+        mut mesh: gaanim_scene::TriangleMeshData,
+    ) -> gaanim_scene::TriangleMeshData {
+        if self.world_up != DVec3::Z {
+            return mesh;
+        }
+        let turn = |[x, y, z]: [f32; 3]| [x, -z, y];
+        for vertex in &mut mesh.vertices {
+            *vertex = turn(*vertex);
+        }
+        for normal in mesh.normals.iter_mut().flatten() {
+            *normal = turn(*normal);
+        }
+        mesh
+    }
+
+    /// A torus about the world's up axis: a tube `minor_radius` thick
+    /// around a circle of `major_radius` in the XZ plane (XY when z is up).
     pub fn torus(
         &mut self,
         major_radius: f64,
@@ -4288,13 +4306,8 @@ impl SceneModel {
         rings: u32,
         material: gaanim_scene::Material3D,
     ) -> Result<DrawableHandle, primitives3d::Primitive3DError> {
-        Ok(self.spawn(SpawnKind::Primitive3D(primitives3d::torus(
-            major_radius,
-            minor_radius,
-            segments,
-            rings,
-            material,
-        )?)))
+        let mesh = primitives3d::torus(major_radius, minor_radius, segments, rings, material)?;
+        Ok(self.spawn(SpawnKind::Primitive3D(self.along_world_up(mesh))))
     }
 
     /// A closed, lit arrow from `start` to `end` in world space, placed at
@@ -4614,6 +4627,7 @@ impl SceneModel {
             enabled,
             intensity,
             shadows,
+            z_up: false,
         };
     }
 
@@ -4941,19 +4955,31 @@ impl SceneModel {
         self.image_with_options(path, ImageOptions::default())
     }
 
+    /// `options` sized to the safe area when they give no size: the source
+    /// fits there, while its frame stays the fitted size (see
+    /// `ImageOptions::media_frame`).
+    fn sized_to_safe_frame(&self, options: ImageOptions) -> ImageOptions {
+        if options.width.is_some() || options.height.is_some() {
+            return options;
+        }
+        let safe = self.safe_frame();
+        ImageOptions {
+            width: Some(safe.width()),
+            height: Some(safe.height()),
+            ..options
+        }
+    }
+
     /// Load an image with an optional target size, fit mode, and source crop.
     pub fn image_with_options(
         &mut self,
         path: impl AsRef<Path>,
-        mut options: ImageOptions,
+        options: ImageOptions,
     ) -> Result<super::ImageHandle, ImageLoadError> {
         let image = load_image(self.resolve_asset_path(path))?;
-        if options.width.is_none() && options.height.is_none() {
-            let safe = self.safe_frame();
-            options.width = Some(safe.width());
-            options.height = Some(safe.height());
-        }
-        let view = options.resolve(image.width, image.height)?;
+        let view = self
+            .sized_to_safe_frame(options)
+            .resolve(image.width, image.height)?;
         let drawable = self.spawn(SpawnKind::Image { image, view });
         drawable
             .spec
@@ -4976,7 +5002,7 @@ impl SceneModel {
     pub fn video_with_options(
         &mut self,
         path: impl AsRef<Path>,
-        mut options: VideoOptions,
+        options: VideoOptions,
     ) -> Result<VideoClip, VideoLoadError> {
         for (name, value, positive) in [
             ("offset", options.offset, false),
@@ -5010,12 +5036,9 @@ impl SceneModel {
         if options.offset + source_duration > metadata.duration + 1e-6 {
             return Err(VideoLoadError::DurationOutOfRange);
         }
-        if options.image.width.is_none() && options.image.height.is_none() {
-            let safe = self.safe_frame();
-            options.image.width = Some(safe.width());
-            options.image.height = Some(safe.height());
-        }
-        let view = options.image.resolve(metadata.width, metadata.height)?;
+        let view = self
+            .sized_to_safe_frame(options.image)
+            .resolve(metadata.width, metadata.height)?;
         let poster = gaanim_media::decode_video_frame(&path, &metadata, options.offset)?;
         let has_audio = metadata.has_audio;
         let playback = gaanim_media::VideoPlayback {
@@ -5575,6 +5598,7 @@ impl SceneModel {
             duration: None,
             entering: None,
             leaving: None,
+            fold: false,
             resolve: false,
             remeasure: None,
         });
@@ -5594,8 +5618,102 @@ impl SceneModel {
         leaving: Option<&DrawableHandle>,
     ) {
         self.push_reflow(
-            container, members, spec, version, duration, entering, leaving, None,
+            container, members, spec, version, duration, entering, leaving, None, false,
         );
+    }
+
+    /// [`Self::reflow_layout`] where `entering` unfolds into its slot and
+    /// `leaving` folds out of it instead of fading: each moves with the
+    /// sibling before it while the wipe [`Self::fold_layout_child`] launched
+    /// opens or closes it.
+    #[allow(clippy::too_many_arguments)]
+    pub fn reflow_layout_folding(
+        &mut self,
+        container: &DrawableHandle,
+        members: Vec<LayoutMemberSpec>,
+        spec: LayoutSpec,
+        version: u64,
+        duration: Option<f64>,
+        entering: Option<&DrawableHandle>,
+        leaving: Option<&DrawableHandle>,
+    ) {
+        self.push_reflow(
+            container, members, spec, version, duration, entering, leaving, None, true,
+        );
+    }
+
+    /// Clip `child` behind an edge that travels in `direction`, the main
+    /// axis of its box, and open it (`opening`) or close it over `duration`
+    /// seconds with the smooth easing layout transitions use, without moving
+    /// the cursor. A child keeps one such clip all along its timeline, given
+    /// by its first fold, which replaces any clip it had: hidden before an
+    /// opening, whole before a closing. Later folds move its edge, and
+    /// [`Self::unfolded_layout_child`] makes a closed child whole again.
+    pub fn fold_layout_child(
+        &mut self,
+        child: &DrawableHandle,
+        direction: super::Direction,
+        opening: bool,
+        duration: f64,
+    ) -> Result<(), super::InvalidWipe> {
+        let existing = self
+            .state
+            .lock()
+            .expect("canvas state poisoned")
+            .fold_wipes
+            .get(&child.id)
+            .cloned();
+        let progress = match existing {
+            Some((progress, closed)) => {
+                // A child whole since its last fold opens from closed.
+                if opening && !closed {
+                    progress.set(0.0).expect("0 is a valid parameter value");
+                }
+                progress
+            }
+            None => {
+                let progress = super::visualization::parameter_in(
+                    &self.state,
+                    if opening { 0.0 } else { 1.0 },
+                )
+                .expect("a parameter starting at 0 or 1 is valid");
+                super::drawable::wipe_mask(
+                    &self.state,
+                    child.id,
+                    progress.source(),
+                    direction,
+                    !opening,
+                )?;
+                progress
+            }
+        };
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .fold_wipes
+            .insert(child.id, (progress.clone(), !opening));
+        let edge = progress
+            .animate()
+            .set(if opening { 1.0 } else { 0.0 })
+            .duration(duration)
+            .rate_func(RateFunc::Smooth);
+        self.launch_composition_configured(Composition::leaf(edge), None, None)
+            .expect("a scene parameter's animations belong to this scene");
+        Ok(())
+    }
+
+    /// Make `child` whole again if it folded out of a box, so a fade-in or an
+    /// instant add shows all of it.
+    pub fn unfolded_layout_child(&mut self, child: &DrawableHandle) {
+        let mut state = self.state.lock().expect("canvas state poisoned");
+        let Some((progress, closed)) = state.fold_wipes.get_mut(&child.id) else {
+            return;
+        };
+        if std::mem::take(closed) {
+            let progress = progress.clone();
+            drop(state);
+            progress.set(1.0).expect("1 is a valid parameter value");
+        }
     }
 
     /// [`Self::reflow_layout`] measuring the children of `within` (the
@@ -5621,6 +5739,7 @@ impl SceneModel {
             None,
             None,
             Some(within.id),
+            false,
         );
     }
 
@@ -5635,6 +5754,7 @@ impl SceneModel {
         entering: Option<&DrawableHandle>,
         leaving: Option<&DrawableHandle>,
         remeasure: Option<gaanim_core::ObjectId>,
+        fold: bool,
     ) {
         let mut state = self.state.lock().expect("canvas state poisoned");
         let snapshot = LayoutTreeSnapshot {
@@ -5650,6 +5770,7 @@ impl SceneModel {
             duration: duration.filter(|value| value.is_finite() && *value > 0.0),
             entering: entering.map(|member| member.id),
             leaving: leaving.map(|member| member.id),
+            fold,
             resolve: true,
             remeasure,
         });
@@ -6157,7 +6278,9 @@ impl SceneModel {
     ) -> Anim {
         let eye = DVec3::new(eye.0, eye.1, eye.2);
         let target = DVec3::new(target.0, target.1, target.2);
-        let up = up.map(|(x, y, z)| DVec3::new(x, y, z)).unwrap_or(DVec3::Y);
+        let up = up
+            .map(|(x, y, z)| DVec3::new(x, y, z))
+            .unwrap_or(self.world_up);
         self.camera_anim(AnimationType::CameraLookAt { eye, target, up }, duration)
     }
 
@@ -13301,6 +13424,36 @@ mod tests {
         assert_eq!(title.spec.lock().unwrap().chalk, Some(chalk));
     }
 
+    /// With z up, a cylinder stands along z and a plane lies on the floor
+    /// facing up; with y up they keep their y axis.
+    #[test]
+    fn primitives_stand_along_the_world_up_axis() {
+        let material = gaanim_scene::Material3D::default();
+        let extent = |canvas: &mut SceneModel, z_up: bool| {
+            canvas.world_up = if z_up { DVec3::Z } else { DVec3::Y };
+            let cylinder = canvas.cylinder(0.5, 3.0, 16, true, material).unwrap();
+            let plane = canvas.plane(2.0, 2.0, (1, 1), material).unwrap();
+            let mesh = |handle: &DrawableHandle| match &handle.spec.lock().unwrap().kind {
+                SpawnKind::Primitive3D(mesh) => mesh.clone(),
+                _ => panic!("a 3D primitive"),
+            };
+            let (cylinder, plane) = (mesh(&cylinder), mesh(&plane));
+            let span = |axis: usize| {
+                let values = cylinder.vertices.iter().map(|vertex| vertex[axis]);
+                values.clone().fold(f32::MIN, f32::max) - values.fold(f32::MAX, f32::min)
+            };
+            let normal = plane.normals.as_ref().unwrap()[0];
+            (span(1), span(2), normal)
+        };
+        let mut canvas = SceneModel::new(640, 360);
+        let (height_y, depth_z, normal) = extent(&mut canvas, false);
+        assert!((height_y - 3.0).abs() < 1e-5 && (depth_z - 1.0).abs() < 1e-5);
+        assert_eq!(normal, [0.0, 1.0, 0.0]);
+        let (depth_y, height_z, normal) = extent(&mut canvas, true);
+        assert!((height_z - 3.0).abs() < 1e-5 && (depth_y - 1.0).abs() < 1e-5);
+        assert_eq!(normal, [0.0, 0.0, 1.0]);
+    }
+
     #[test]
     fn media_framing_validates_and_preserves_birth_state() {
         let mut scene = SceneModel::new(1280, 720);
@@ -13330,6 +13483,38 @@ mod tests {
             birth
         );
         assert_eq!(image.spec.lock().unwrap().media_frame.unwrap().width, 8.0);
+    }
+
+    /// An image made without a size fits the safe area and its frame is the
+    /// fitted size, so it takes only its own room in a layout; one made with
+    /// both sizes keeps that frame, as `frame()` does, so a crop fills it.
+    #[test]
+    fn image_frames_are_the_fitted_size_unless_both_sizes_are_given() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("page.png");
+        image::RgbaImage::from_pixel(100, 200, image::Rgba([10, 20, 30, 255]))
+            .save(&path)
+            .unwrap();
+        let mut scene = SceneModel::new(1280, 720);
+        let safe = scene.safe_frame();
+        let fitted = scene.image(&path).unwrap();
+        let frame = fitted.spec.lock().unwrap().media_frame.unwrap();
+        assert_eq!(
+            (frame.width, frame.height),
+            (safe.height() / 2.0, safe.height())
+        );
+        let framed = scene
+            .image_with_options(
+                &path,
+                ImageOptions {
+                    width: Some(7.0),
+                    height: Some(4.0),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let frame = framed.spec.lock().unwrap().media_frame.unwrap();
+        assert_eq!((frame.width, frame.height), (7.0, 4.0));
     }
 
     #[test]

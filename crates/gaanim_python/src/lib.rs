@@ -231,6 +231,7 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<pycanvas::PyTypography>()?;
     m.add_class::<pycanvas::PyLayoutBuilder>()?;
     m.add_class::<pycanvas::PyMediaLibrary>()?;
+    m.add_class::<pycanvas::PyUi>()?;
     m.add_class::<pycanvas::PyVisualization>()?;
     m.add_class::<pycanvas::PySlideKit>()?;
     m.add_class::<pycanvas::PyMechanics>()?;

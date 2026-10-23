@@ -1851,6 +1851,35 @@ def validate_in_3d_contract(module: object) -> list[str]:
     group = scene.geometry.group([scene.geometry.square(1.0), scene.geometry.circle(0.5)]).in_3d()
     if not isinstance(group, module.Drawable):
         failures.append("a group cannot be placed in 3D")
+    # A drawing laid on a plane of the model.
+    plan = scene.geometry.square(1.0)
+    if plan.in_3d(plane="xz", origin=(0.0, 5.0, 0.0)) is not plan:
+        failures.append("Drawable.in_3d(plane=, origin=) did not return the same drawable")
+    scene.geometry.square(1.0).in_3d(plane=((0, 1, 0), (0, 0, 1)), origin=(2.0, 0.0, 0.0))
+    for call, error in (
+        (lambda: scene.geometry.square(1.0).in_3d(plane="xw"), ValueError),
+        (lambda: scene.geometry.square(1.0).in_3d(plane=((1, 0, 0), (2, 0, 0))), ValueError),
+        (lambda: scene.geometry.square(1.0).in_3d(plane=3), TypeError),
+        (lambda: scene.geometry.square(1.0).in_3d(origin=(math.nan, 0.0, 0.0)), ValueError),
+    ):
+        if not raises_error(error, call):
+            failures.append(f"in_3d(plane=, origin=) did not raise {error.__name__} for a bad value")
+    # A world with z up: camera states and orbits take z as their up.
+    upright = module.Scene(frame=(16, 9), up="z")
+    front = upright.camera.state_orbit((0.0, 0.0, 0.0), 0.0, 0.0, distance=10.0)
+    above, right = upright.camera.project((0.0, 0.0, 1.0), front), upright.camera.project((1.0, 0.0, 0.0), front)
+    if not (above[1] > 0.1 and abs(above[0]) < 1e-6 and right[0] > 0.1):
+        failures.append(f"an orbit with z up does not look at the -y front with z up: {above}, {right}")
+    look = upright.camera.state_3d((0.0, -10.0, 0.0), (0.0, 0.0, 0.0))
+    if not upright.camera.project((0.0, 0.0, 1.0), look)[1] > 0.1:
+        failures.append("state_3d in a z-up scene does not take z as its up")
+    level = scene.camera.state_orbit((0.0, 0.0, 0.0), 0.0, 0.0, distance=10.0)
+    if not scene.camera.project((0.0, 1.0, 0.0), level)[1] > 0.1:
+        failures.append("an orbit with y up no longer takes y as its up")
+    upright.geometry.cylinder(0.5, 2.0)
+    upright.geometry.plane(2.0, 2.0)
+    if not raises_error(ValueError, lambda: module.Scene(up="x")):
+        failures.append("Scene accepted up='x'")
     tag = scene.text("load").move_to_3d(1.0, 2.0, -3.0)
     if tag.billboard(offset=(0.0, 0.3), anchor="bottom") is not tag:
         failures.append("Drawable.billboard(offset=, anchor=) did not return the same drawable")
@@ -2158,7 +2187,7 @@ def validate_python_module_stubs() -> list[str]:
         return names
 
     failures: list[str] = []
-    for module_name in ("sections", "templates", "matrix", "colors"):
+    for module_name in ("sections", "templates", "matrix", "colors", "pointer", "timeline"):
         stub = STUB.with_name(f"{module_name}.pyi")
         tree = ast.parse(stub.read_text(encoding="utf-8"), filename=str(stub))
         code = importlib.import_module(f"gaanim.{module_name}")
@@ -2687,7 +2716,7 @@ def validate_scene_capability_surface(module) -> list[str]:
     """Keep Scene limited to orchestration and scene-owned capabilities."""
     expected = {
         "assets", "camera", "canvas", "fx", "geometry", "layout", "mechanics",
-        "media", "slides", "text", "viz", "fade_out_all", "link", "persist", "z_layers", "layer",
+        "media", "slides", "text", "ui", "viz", "fade_out_all", "link", "persist", "z_layers", "layer",
         "play", "release", "render", "reuse", "sections", "segment", "snapshots", "stop",
         "wait", "time", "cursor", "stops", "random", "noise",
         "voiceover", "live_take", "narration_script", "marker", "markers",
@@ -3100,6 +3129,51 @@ def validate_copy_and_offset_contract(module):
     return failures
 
 
+def validate_timeline_contract(module):
+    """Timeline dates map through their breaks and labels stack in lanes that do not overlap."""
+    failures = []
+    scene = module.Scene(frame=(16, 9))
+    line = scene.viz.timeline(1980, 2026, x_range=(-6, 6), y=-0.5, breaks=[(2016, 0.5)])
+    if (line.x(1980), line.x(2016), line.x(2026)) != (-6.0, 0.0, 6.0):
+        failures.append(f"timeline dates did not map through the break: {line.x(1980), line.x(2016), line.x(2026)}")
+    if not isinstance(line.axis, module.Drawable):
+        failures.append("the timeline axis is not a drawable")
+    first = line.event(1990, "First", "a body line", side="above")
+    second = line.event(1991, "Second", side="above")
+    if second.lane <= first.lane:
+        failures.append(f"a label that would touch the one before did not go to a further lane: {first.lane, second.lane}")
+    a, b = first.label.bounds(), second.label.bounds()
+    if not (b.bottom >= a.top or b.top <= a.bottom):
+        failures.append("two labels on the same side overlap")
+    if first.title.bounds().left < line.x(1990) - 0.1 or first.side != "above":
+        failures.append("a label did not grow to the right of its stem")
+    late = line.event(2025, "Near the end", side="below")
+    if abs(late.title.bounds().right - line.x(2025)) > 0.1:
+        failures.append("a label near the end of the axis did not grow to the left")
+    alternate = [line.event(year, str(year)).side for year in (2000, 2008)]
+    if alternate[0] == alternate[1]:
+        failures.append(f"auto events as near on both sides did not alternate: {alternate}")
+    line.reserve(2017, 2024, side="above")
+    if line.event(2020, "Reserved above").side != "below":
+        failures.append("an auto event took a side whose lanes were reserved")
+    if not all(isinstance(part, module.Drawable) for part in first.parts):
+        failures.append("the parts of an event are not drawables")
+    scene.play([line.axis.animate.create(), *[part.animate.fade_in() for part in first.parts]])
+    for description, operation in (
+        ("an end before the start", lambda: scene.viz.timeline(2000, 1990)),
+        ("a break that goes back", lambda: scene.viz.timeline(1980, 2026, breaks=[(2016, 0.5), (2010, 0.7)])),
+        ("a break at the end", lambda: scene.viz.timeline(1980, 2026, breaks=[(2026, 0.9)])),
+        ("a date outside the timeline", lambda: line.event(1970, "Too early")),
+        ("an unknown side", lambda: line.event(2000, "x", side="left")),
+        ("a negative lane", lambda: line.reserve(2000, 2001, side="above", lane=-1)),
+        ("a side reserved in every lane", lambda: line.event(2021, "Blocked", side="above")),
+        ("a zero lane height", lambda: scene.viz.timeline(0, 1, lane_height=0)),
+    ):
+        if not raises_error(ValueError, operation):
+            failures.append(f"timeline accepted {description}")
+    return failures
+
+
 def validate_audio_viz_contract(module):
     failures = []
     track = Path(__file__).resolve().parent.parent / "docs/fixtures/assets/ritmo.ogg"
@@ -3446,6 +3520,60 @@ def validate_text_contract(module):
     return failures
 
 
+def validate_pointer_contract(module):
+    """The demonstration pointer keeps track of its tip and checks its targets."""
+    failures = []
+    scene = module.Scene(frame=(16, 9))
+    button = scene.geometry.rect(2, 1).move_to(3, -2)
+    cursor = scene.ui.pointer(style="hand", size=1.5, at=(-4, 2))
+    if cursor.position != (-4.0, 2.0) or not isinstance(cursor.drawable, module.Drawable):
+        failures.append("a pointer did not start at `at` as a drawable")
+    scene.play(cursor.animate.to(button).duration(0.4))
+    if cursor.position != (3.0, -2.0):
+        failures.append(f"animate.to a drawable did not leave the tip on its center: {cursor.position}")
+    scene.play(cursor.animate.click(radius=0.4))
+    scene.play(cursor.animate.to(button, anchor="top_left", arc=0.3).duration(0.4))
+    if cursor.position != (2.0, -1.5):
+        failures.append(f"animate.to did not leave the tip on the anchor: {cursor.position}")
+    token = scene.geometry.circle(0.2).move_to(0, 0)
+    scene.play(cursor.animate.drag((0, 1), token, duration=0.4))
+    if any(abs(a - b) > 1e-6 for a, b in zip(token.bounds().center, (-2.0, 2.5))):
+        failures.append(f"drag did not carry the object as far as the tip: {token.bounds().center}")
+    scene.play(cursor.animate.to(scene.layout.safe.inset("80px")).duration(0.2))
+    if cursor.jump((1, 1)) is not cursor or cursor.position != (1.0, 1.0):
+        failures.append("jump did not place the tip and return the pointer")
+    # A click presses by scaling, so a size given to the drawable stays.
+    cursor.drawable.scale_to(2.0)
+    before = cursor.drawable.bounds().width
+    scene.play(cursor.animate.click())
+    if abs(cursor.drawable.bounds().width - before) > 1e-6:
+        failures.append("a click changed the size given to the pointer")
+    flat = scene.ui.pointer()
+    ball = scene.geometry.circle(0.2)
+    cursor_3d = scene.ui.pointer(style="text", at=(0, 0, 0))
+    marker = scene.geometry.circle(0.1).move_to_3d(0, 0, 0).billboard()
+    scene.play(cursor_3d.animate.to((1, 1, 1)).duration(0.2))
+    scene.play(cursor_3d.animate.click())
+    scene.play(cursor_3d.animate.drag((2, 1, 1), marker, duration=0.2))
+    if cursor_3d.position != (2.0, 1.0, 1.0):
+        failures.append(f"a 3D pointer did not follow its 3D targets: {cursor_3d.position}")
+    for description, operation, expected in (
+        ("an unknown style", lambda: scene.ui.pointer(style="cross"), ValueError),
+        ("a zero size", lambda: scene.ui.pointer(size=0), ValueError),
+        ("a number as target", lambda: flat.animate.to(5), TypeError),
+        ("a point of four coordinates", lambda: flat.animate.to((1, 2, 3, 4)), ValueError),
+        ("an unknown anchor", lambda: flat.animate.to(ball, anchor="middle"), ValueError),
+        ("a 2D target for a 3D pointer", lambda: cursor_3d.animate.to((1, 1)), ValueError),
+        ("a 3D target for a 2D pointer", lambda: flat.animate.drag((1, 1, 1), ball), ValueError),
+        ("an arc for a 3D pointer", lambda: cursor_3d.animate.to((0, 0, 0), arc=0.2), ValueError),
+    ):
+        if not raises_error(expected, operation):
+            failures.append(f"{description} was accepted")
+    if flat.position != (0.0, 0.0) or cursor_3d.position != (2.0, 1.0, 1.0):
+        failures.append("a refused move still moved the pointer")
+    return failures
+
+
 def validate_layout_box_contract(module):
     """Boxes, styles, classes, zones and item rules keep their contracts."""
     failures = []
@@ -3479,6 +3607,15 @@ def validate_layout_box_contract(module):
     added = scene.geometry.rect(2, 1)
     card.add(added, at=0)
     card.remove(added)
+    # A child unfolds into its slot and folds out of it.
+    unfolding = card.add(scene.geometry.rect(2, 1), at=1, duration=0.3, enter="unfold")
+    card.remove(unfolding, duration=0.3, exit="fold")
+    for description, operation in (
+        ("an unknown enter", lambda: card.add(scene.geometry.rect(1, 1), enter="slide")),
+        ("an unknown exit", lambda: card.remove(card[0], exit="slide")),
+    ):
+        if not raises_error(ValueError, operation):
+            failures.append(f"Box accepted {description}")
     if child.item(grow=1, margin=(0, "auto")) is not child:
         failures.append("Drawable.item did not return the drawable")
     try:
@@ -3508,6 +3645,26 @@ def validate_layout_box_contract(module):
     body = zones["body"]
     if not (zones["top"].bottom > body.top and body.width > 0):
         failures.append("zones did not divide the safe area in order")
+    # A root box takes a zone or an object as its region; Zone.crop moves edges to scene coordinates.
+    safe = L.safe
+    index = safe.crop(top=0.95, right=-1.5)
+    if (index.top, index.right, index.left, index.bottom) != (0.95, -1.5, safe.left, safe.bottom):
+        failures.append("Zone.crop did not move only the edges it was given")
+    inside = L.column(L.box("uno"), L.box("dos"), within=index, width="fill", height="fill", justify="start")
+    region = inside.bounds()
+    if not (abs(region.right - index.right) < 1e-6 and abs(region.top - index.top) < 1e-6 and abs(region.left - index.left) < 1e-6):
+        failures.append(f"a root box did not fill the zone it was given: {region}")
+    frame_box = scene.geometry.rect(4, 2).move_to(3, -1)
+    over_object = L.row(L.box("x"), within=frame_box, width="fill", height="fill")
+    if abs(over_object.bounds().x - 3) > 1e-6:
+        failures.append("a root box did not take the region of an object")
+    for description, operation in (
+        ("an unknown within name", lambda: L.box(within="page")),
+        ("a number as within", lambda: L.box(within=3)),
+        ("a non-finite crop edge", lambda: safe.crop(top=float("nan"))),
+    ):
+        if not raises_error((ValueError, TypeError), operation):
+            failures.append(f"{description} was accepted")
     part = zones[1:]
     if not isinstance(part, module.ZoneSet) or len(part) != 1 or part.names != ["body"]:
         failures.append("a ZoneSet slice is not a ZoneSet of those zones")
@@ -4128,11 +4285,13 @@ def main() -> int:
     missing.extend(validate_audio_signals_contract(module))
     missing.extend(validate_copy_and_offset_contract(module))
     missing.extend(validate_audio_viz_contract(module))
+    missing.extend(validate_timeline_contract(module))
     missing.extend(validate_shader_effect_contract(module))
     missing.extend(validate_shader_uniform_mappings(module, tree))
     missing.extend(validate_matte_metaballs_glass_contract(module))
     missing.extend(validate_chalk_quantity_and_arc_contract(module))
     missing.extend(validate_layout_box_contract(module))
+    missing.extend(validate_pointer_contract(module))
     missing.extend(validate_falloff_contract(module))
     missing.extend(validate_emphasis_contract(module))
     missing.extend(validate_stroke_contract(module))

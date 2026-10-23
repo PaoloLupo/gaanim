@@ -951,6 +951,28 @@ scene.play([block.annotate.bracket("left", color=BLUE).animate.create()])
 ]
 
 #api-entry(
+  name: "UI.pointer",
+  kind: "factory",
+  params: (
+    (name: "style", type: "str", default: "\"arrow\"", desc: [`"arrow"`, `"hand"` o `"text"` (una barra I).]),
+    (name: "size", type: "float", default: "1.0", desc: [Escala del puntero.]),
+    (name: "color", type: "ColorLike | None", default: "None", desc: [Relleno; por defecto el color `foreground` del tema, con el fondo como contorno.]),
+    (name: "at", type: "tuple[float, float] | tuple[float, float, float]", default: "(0, 0)", desc: [Dónde empieza la punta. Un punto 3D crea un puntero 3D, que mira a la cámara y va de un punto 3D a otro.]),
+  ),
+  returns: (type: "Pointer", desc: [El puntero: `drawable` (el grupo que lo dibuja, con la punta como pivote), `position`, `jump(destino)` y el proxy `animate`.]),
+  desc: [Un puntero de ratón para mostrar cómo se usa un programa. Lleva la cuenta de dónde está su punta, así que los movimientos se encadenan. `animate.to(destino, anchor="center", arc=0)` lleva la punta a un punto, a un objeto (en su ancla) o a una `Zone`; con `arc`, el punto medio del camino se aparta de la recta esa fracción de la distancia, hacia la izquierda (negativo, hacia la derecha). `animate.click(color=, radius=)` dibuja una onda en la punta y hunde un poco el puntero durante 0.44 s; lo hace escalándolo, así que conserva el tamaño que se le haya dado. `animate.drag(destino, objeto, duration=1.0)` mueve el objeto junto con la punta. Un puntero creado en un punto del plano se queda en el plano y uno creado en un punto 3D, en el espacio, así que para cruzar de un menú a un modelo 3D se usan dos. Un estilo o ancla desconocidos, un tamaño no positivo o un destino del otro espacio lanzan `ValueError`; un destino que no es un punto, un objeto ni una zona, `TypeError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9), theme="paper")
+button = scene.layout.box("Guardar", padding="16px", background="#e5e7eb", radius="8px")
+cursor = scene.ui.pointer(at=(-5, 3))
+scene.play([cursor.animate.to(button, arc=0.2).duration(0.9)])
+scene.play([cursor.animate.click()])
+```
+]
+
+#api-entry(
   name: "Drawable.modifiers",
   kind: "property",
   returns: (type: "PathModifiers", desc: [La pila de modificadores de trazado del objeto.]),
@@ -1562,13 +1584,18 @@ scene.play([vaiven.animate.set(-0.8).duration(0.6)])
   kind: "method",
   params: (
     (name: "material", type: "Material3D | None", default: "None", desc: [Con él, el objeto se ilumina y recibe sombras como una superficie; sin él, conserva sus colores sin iluminar.]),
+    (name: "plane", type: "str | tuple[Vec3, Vec3] | None", default: "None", desc: [Plano del modelo donde se tiende el dibujo: su eje x va por `u` y su eje y por `v` (escuadrado con `u`), dados como `"xy"`, `"xz"`, `"yz"` o un par de direcciones `(u, v)`.]),
+    (name: "origin", type: "tuple[float, float, float] | None", default: "None", desc: [Dónde cae el origen de escena del dibujo; `(0, 0, 0)` por defecto.]),
   ),
-  desc: [Coloca el objeto en el mundo 3D: `move_to_3d` y `rotate_to_3d` lo sitúan y lo inclinan bajo la cámara en perspectiva, y las mallas que tiene delante lo tapan píxel a píxel, en vez de dibujarse encima de todo el 3D. El pase 3D lo dibuja a partir de sus contornos, así que los bordes siguen nítidos a cualquier tamaño. Conserva sus animaciones, colores, degradados y trazos: `write`, un fundido o un cambio de color se ven como en 2D. Un `wipe` lo barre en su propio plano, mire hacia donde mire, y un `clip` con otra figura lo recorta mientras sus ejes x e y sigan en el plano de la escena. Proyecta sombra sobre el 3D iluminado, como una malla opaca, donde es al menos medio opaco. Una imagen se dibuja en su plano con sus píxeles, y una escena Lottie con los contornos que rellena y traza, al ritmo de la línea de tiempo; en Lottie, los modos de mezcla se dibujan como el normal y una capa translúcida atenúa cada una de sus formas. Su `shadow`, su `glow` y su `blur`, o los de sus partes (como las letras de un texto), los dibuja el pase 3D como en una malla; la tiza se omite. A diferencia de `billboard`, que mantiene el objeto de frente a la cámara, gira con la escena; `hud` lo fija a la imagen.],
+  desc: [Coloca el objeto en el mundo 3D: `move_to_3d` y `rotate_to_3d` lo sitúan y lo inclinan bajo la cámara en perspectiva, y las mallas que tiene delante lo tapan píxel a píxel, en vez de dibujarse encima de todo el 3D. El pase 3D lo dibuja a partir de sus contornos, así que los bordes siguen nítidos a cualquier tamaño. Conserva sus animaciones, colores, degradados y trazos: `write`, un fundido o un cambio de color se ven como en 2D. Un `wipe` lo barre en su propio plano, mire hacia donde mire, y un `clip` con otra figura lo recorta mientras sus ejes x e y sigan en el plano de la escena. Proyecta sombra sobre el 3D iluminado, como una malla opaca, donde es al menos medio opaco. Una imagen se dibuja en su plano con sus píxeles, y una escena Lottie con los contornos que rellena y traza, al ritmo de la línea de tiempo; en Lottie, los modos de mezcla se dibujan como el normal y una capa translúcida atenúa cada una de sus formas. Su `shadow`, su `glow` y su `blur`, o los de sus partes (como las letras de un texto), los dibuja el pase 3D como en una malla; la tiza se omite. A diferencia de `billboard`, que mantiene el objeto de frente a la cámara, gira con la escena; `hud` lo fija a la imagen. Con `plane` u `origin`, cada punto `(x, y)` del dibujo, tal como está dibujado, cae en `origin + x·u + y·v`, sea cual sea su posición o su pivote, y desde entonces gira alrededor de ese origen. Con `Scene(up="z")`, una planta es `in_3d(plane="xy", origin=(0, 0, z))` y un muro en Y dibujado en (y, z), `in_3d(plane="yz", origin=(x, 0, 0))`. Direcciones paralelas o nulas, un plano desconocido o un origen no finito lanzan `ValueError`; un hijo de una caja, `LayoutOwnershipError`.],
 )[
 ```python
 >>>from gaanim import *
 >>>scene = Scene(frame=(16, 9))
 sign = scene.text("Hola").in_3d().move_to_3d(0, 1, -2).rotate_to_3d(-1.2, 0, 0)
+modelo = Scene(frame=(16, 9), up="z")
+planta = modelo.geometry.rect(6, 4).in_3d(plane="xy", origin=(0, 0, 3))
+muro = modelo.geometry.polygon([(0, 0), (4, 0), (4, 3), (0, 3)]).in_3d(plane="yz", origin=(-3, -2, 0))
 floor = scene.text("bajo la luz").in_3d(material=Material3D.matte(WHITE)).rotate_to_3d(-1.5708, 0, 0)
 ```
 ]

@@ -117,9 +117,11 @@ pub(crate) fn camera_view_3d(
         exclude: exclude.into_iter().map(|drawable| drawable.0).collect(),
         ..CameraViewOptions::default()
     };
-    let up = up.map_or(gaanim_core::glam::DVec3::Y, |(x, y, z)| {
-        gaanim_core::glam::DVec3::new(x, y, z)
-    });
+    let world_up = crate::pyzones::canvas_of(screen)?
+        .lock()
+        .expect("scene canvas poisoned")
+        .world_up;
+    let up = up.map_or(world_up, |(x, y, z)| gaanim_core::glam::DVec3::new(x, y, z));
     let view = screen
         .clone()
         .camera_view_3d(

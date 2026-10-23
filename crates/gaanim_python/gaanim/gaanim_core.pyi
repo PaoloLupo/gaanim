@@ -11,6 +11,8 @@ from typing import Any, Callable, ClassVar, Iterator, Literal, Mapping, Optional
 from .live import Player, Pose, State
 from .questions import Question
 from .matrix import Matrix
+from .pointer import Pointer
+from .timeline import Timeline
 from .sections import SceneSections
 from .animation_types import AnimationChannel, CustomAnimationValues
 
@@ -1274,16 +1276,35 @@ class Box(Drawable):
             strip = scene.layout.box("Breaking", background="#f5e6c8", edge=True)
         """
         ...
-    def add(self, child: Drawable | str, *, at: Optional[int] = None, duration: Optional[float] = None, advance: bool = True) -> Any:
+    def add(self, child: Drawable | str, *, at: Optional[int] = None, duration: Optional[float] = None, advance: bool = True, enter: Literal["fade", "unfold"] = "fade") -> Any:
         """Insert a child (at ``at`` or at the end) and return it.
 
         With ``duration`` the others slide to make room while it fades in. A
         child that comes from another box (taken out with ``detach``) slides
         from where it stands instead, and follows its former box until then.
+
+        ``enter="unfold"`` opens its slot instead, as a CSS ``height``
+        transition with ``overflow: hidden``: the slot grows from nothing
+        along the box's main axis (down a column, right along a row) with the
+        same duration and easing as the others slide, and the child is
+        clipped to it, its content on the edge it enters from, moving with
+        the sibling before it. Nothing overlaps while the slot opens. The
+        clip replaces any ``clip`` the child had; in a grid or a stack the
+        slot opens in place. An unknown value raises ``ValueError``.
+
+        Example:
+            index.add(detail, at=1, duration=0.45, enter="unfold")
         """
         ...
-    def remove(self, child: Drawable, *, duration: Optional[float] = None, advance: bool = True) -> None:
-        """Remove a child: it fades out while the others close the gap."""
+    def remove(self, child: Drawable, *, duration: Optional[float] = None, advance: bool = True, exit: Literal["fade", "fold"] = "fade") -> None:
+        """Remove a child: it fades out while the others close the gap.
+
+        ``exit="fold"`` closes its slot instead, the reverse of
+        ``add(enter="unfold")``: the child moves with the sibling before it,
+        clipped to the shrinking slot, and is hidden once it has closed (whole
+        again, so a later ``add`` shows all of it). An unknown value raises
+        ``ValueError``.
+        """
         ...
     def detach(self, child: Drawable, *, duration: Optional[float] = None, advance: bool = True) -> None:
         """Take a child out of the box without hiding it: it stays where it is and can move freely again.
@@ -1374,6 +1395,19 @@ class Zone:
         ...
     def inset(self, padding: Padding) -> Zone:
         """The zone shrunk by ``padding``."""
+        ...
+    def crop(self, *, top: Optional[float] = None, bottom: Optional[float] = None, left: Optional[float] = None, right: Optional[float] = None) -> Zone:
+        """The zone with the given edges moved to scene coordinates.
+
+        Edges not given stay where they are; an edge that would cross its
+        opposite one leaves the zone empty on that axis. Unlike ``inset``,
+        the values are positions in the scene (y up), not distances, so the
+        result does not depend on the margin or the design resolution.
+
+        Example:
+            index = scene.layout.safe.crop(top=0.95, right=-1.5)
+            scene.layout.column(*entries, within=index, width="fill", height="fill", justify="start")
+        """
         ...
     def split(self, template: Zones) -> ZoneSet:
         """Apply a template inside this zone."""
@@ -5008,8 +5042,27 @@ class Drawable:
             tag = scene.text("load").move_to_3d(*node).billboard(offset=(0, 0.3), anchor="bottom")
         """
         ...
-    def in_3d(self, material: Optional[Material3D] = None) -> Self:
+    def in_3d(
+        self,
+        material: Optional[Material3D] = None,
+        *,
+        plane: Optional[Literal["xy", "xz", "yz"] | tuple[tuple[float, float, float], tuple[float, float, float]]] = None,
+        origin: Optional[tuple[float, float, float]] = None,
+    ) -> Self:
         """Place the drawable in the 3D world, where perspective tilts it and meshes hide it.
+
+        ``plane`` lays the drawing on a plane of the model: its x axis goes
+        along ``u`` and its y axis along ``v`` (squared to ``u``), given as
+        ``"xy"``, ``"xz"``, ``"yz"`` or a pair of directions ``(u, v)``, and
+        ``origin`` is where the drawing's scene origin lands (``(0, 0, 0)``
+        by default). Every point ``(x, y)`` of the drawing, as it is drawn
+        now, lands at ``origin + x * u + y * v``, whatever its own position
+        or pivot, and it turns about that origin from then on. With
+        ``Scene(up="z")`` a floor plan is ``in_3d(plane="xy", origin=(0, 0,
+        z))`` and a wall along y, drawn in (y, z), ``in_3d(plane="yz",
+        origin=(x, 0, 0))``. Parallel or zero directions, an unknown plane
+        or a non-finite origin raise ``ValueError``; a box child raises
+        ``LayoutOwnershipError``.
 
         ``move_to_3d`` and ``rotate_to_3d`` then place and turn it in the
         world under the perspective camera. The 3D pass draws it from its
@@ -5032,6 +5085,7 @@ class Drawable:
 
         Example:
             sign = scene.text("Hola").in_3d().move_to_3d(0.0, 1.0, -2.0).rotate_to_3d(-1.2, 0.0, 0.0)
+            floor = scene.geometry.polygon(outline).in_3d(plane="xy", origin=(0, 0, 3.2))
         """
         ...
     def hud(self) -> Self:
@@ -6537,7 +6591,7 @@ class Camera:
         self,
         eye: tuple[float, float, float],
         target: tuple[float, float, float],
-        up: tuple[float, float, float] = (0.0, 1.0, 0.0),
+        up: Optional[tuple[float, float, float]] = None,
         fov_y: float = 0.7853981633974483,
         near: float = 0.1,
         far: float = 1000.0,
@@ -6545,6 +6599,8 @@ class Camera:
         screen_offset: tuple[float, float] = (0.0, 0.0),
     ) -> CameraState:
         """A perspective camera state looking from ``eye`` at ``target``.
+
+        ``up`` is the scene's up axis (``Scene(up=)``) by default.
 
         ``screen_offset`` draws ``target`` that far from the middle of the
         frame, in scene units, as ``screen_offset`` sets it; ``to`` moves
@@ -6560,7 +6616,7 @@ class Camera:
         *,
         distance: Optional[float] = None,
         scale: Optional[float] = None,
-        up: tuple[float, float, float] = (0.0, 1.0, 0.0),
+        up: Optional[tuple[float, float, float]] = None,
         fov_y: float = 0.7853981633974483,
         near: float = 0.1,
         far: float = 1000.0,
@@ -6568,8 +6624,9 @@ class Camera:
     ) -> CameraState:
         """A perspective camera state looking at ``target`` from around it.
 
-        ``azimuth`` turns the eye about ``up``, in radians, from the side
-        the default camera looks from (+z with y up) toward +x;
+        ``azimuth`` turns the eye about ``up`` (the scene's up axis by
+        default), in radians, from the side the default camera looks from
+        (+z with y up, -y with z up) toward +x;
         ``elevation`` raises it above the plane across ``up``, up to a
         quarter turn, where it looks straight down and the azimuth turns the
         view. Give ``distance``, the eye's distance in world units, or
@@ -10708,7 +10765,9 @@ class LayoutBuilder:
     - Container: ``direction``, ``gap``, ``row_gap``, ``column_gap``,
       ``padding``, ``width``, ``height``, ``min_width``, ``max_width``,
       ``min_height``, ``max_height``, ``aspect_ratio``, ``align``,
-      ``justify``, ``wrap``, ``columns``, ``rows``, ``auto_flow``, ``within``.
+      ``justify``, ``wrap``, ``columns``, ``rows``, ``auto_flow``, ``within``
+      (root boxes only: ``"safe"``, ``"frame"``, a ``Zone`` or a ``Drawable``;
+      a zone or a drawable gives the region it covers when the box is built).
     - Item (how the box sits in its parent): ``grow``, ``shrink``, ``basis``,
       ``align_self``, ``row``, ``column``, ``row_span``, ``column_span``,
       ``margin`` (``"auto"`` takes the free space), ``fit``, ``anchor``,
@@ -10788,6 +10847,49 @@ class LayoutBuilder:
         Unsatisfied weak constraints, text composition errors, and decorated
         boxes with zero width or height, each prefixed with the box's path
         such as ``column[2] > row[1]``. ``gaanim check`` reports them too.
+        """
+        ...
+
+class UI:
+    """Scene-owned interface elements for software demonstrations."""
+    def pointer(
+        self,
+        *,
+        style: Literal["arrow", "hand", "text"] = "arrow",
+        size: float = 1.0,
+        color: Optional[ColorLike] = None,
+        at: tuple[float, float] | tuple[float, float, float] = (0.0, 0.0),
+    ) -> Pointer:
+        """A mouse pointer whose tip is its pivot, for showing how a program is used.
+
+        ``style`` is ``"arrow"``, ``"hand"`` or ``"text"`` (an I-beam), ``size``
+        scales it and ``color`` fills it (the theme's foreground by default,
+        with the background as its outline). The pointer is an ordinary group
+        (``pointer.drawable``): fade it in, style it or give it effects as
+        any drawable. It keeps track of where its tip is, so its moves chain:
+
+        - ``pointer.animate.to(target)``: move the tip to a point, a
+          ``Drawable`` (its ``anchor``) or a ``Zone``; ``arc`` bends the way.
+        - ``pointer.animate.click()``: a ripple at the tip and a small press
+          (0.44 s).
+        - ``pointer.animate.drag(target, obj, duration=1.0)``: the tip and
+          ``obj`` travel together.
+        - ``pointer.jump(target)``: place the tip without animating.
+
+        A pointer made at a 3D point (``at=(x, y, z)``) faces the camera as a
+        billboard and moves between 3D points; one made at a 2D point stays in
+        the plane, so a demonstration that crosses from a menu to a 3D model
+        uses one of each. ``click`` and ``drag`` raise the press by scaling,
+        so a size given to ``pointer.drawable`` is kept.
+
+        An unknown style or anchor, a non-positive size, or a target in the
+        other space raise ``ValueError``; a target that is not a point, a
+        drawable or a zone raises ``TypeError``.
+
+        Example:
+            cursor = scene.ui.pointer(style="arrow", at=(-5, 3))
+            scene.play(cursor.animate.to(menu_item).duration(0.8))
+            scene.play(cursor.animate.click())
         """
         ...
 
@@ -11384,6 +11486,51 @@ class Visualization:
             bars = scene.viz.equalizer(music.spectrum(32), shape="capsule",
                                        fill=Falloff.index().gradient(BLUE, GOLD))
             ring = scene.viz.equalizer(music.spectrum(48), layout="radial", shape="dot")
+        """
+        ...
+    def timeline(
+        self,
+        start: float,
+        end: float,
+        *,
+        x_range: tuple[float, float] = (-6.5, 6.5),
+        y: float = 0.0,
+        breaks: Sequence[tuple[float, float]] = (),
+        lane_height: float = 0.6,
+        gap: float = 0.2,
+        label_width: Optional[float] = None,
+        color: Optional[ColorLike] = None,
+    ) -> Timeline:
+        """Draw an axis of dates from ``start`` to ``end`` whose events stack in lanes.
+
+        The axis runs along ``y`` over ``x_range`` in the theme's
+        foreground. ``breaks`` are scale breaks, ``(date, fraction)``: that
+        date lies at that fraction of the axis, dates are spread linearly
+        between breaks, and each break is drawn as a gap with two slanted
+        bars. Dates are numbers, such as years.
+
+        ``timeline.event(date, title, body)`` adds a dot, a stem and a
+        label in the first lane of its side (``"above"``, ``"below"`` or
+        ``"auto"``) where it does not touch the labels already there; lanes
+        are ``lane_height`` apart and labels keep ``gap`` between them. A
+        label grows to the right, or to the left when it would pass the end
+        of the axis, and a plate of the background color behind it hides
+        the stems that pass under it (``knockout=False`` leaves it out).
+        ``label_width`` wraps titles and bodies at that width.
+        ``timeline.reserve(start, end, side=...)`` keeps dates free for
+        what is drawn apart, and ``timeline.x(date)`` gives the scene x of a
+        date. Every part (``timeline.axis``, ``event.dot``, ``event.stem``,
+        ``event.label``) is an ordinary drawable.
+
+        An end not after the start, breaks that do not go forward, a date
+        outside the timeline, an unknown side, a label whose side is
+        reserved in every lane over it, or non-positive sizes raise
+        ``ValueError``.
+
+        Example:
+            line = scene.viz.timeline(1980, 2026, breaks=[(2016, 0.55)])
+            first = line.event(1985, "Masonry", "First tests", side="above")
+            scene.play([line.axis.animate.create(), *[part.animate.fade_in() for part in first.parts]])
         """
         ...
     def matrix(
@@ -12217,11 +12364,24 @@ class Scene:
         theme: ThemeName | Theme | None = "technical",
         post: Optional[PostProcess | Sequence[PostProcess]] = None,
         design_resolution: float = 1080.0,
+        up: Literal["y", "z"] = "y",
     ) -> None:
         """Create a resolution-independent scene in logical units.
 
         ``design_resolution`` is the frame height, in design pixels, that
         layout lengths such as ``"24px"`` refer to.
+
+        ``up`` is the 3D world's vertical axis. With ``"z"``, as engineering
+        and architecture models use, 3D coordinates are read with z up and
+        the plan in x/y: ``state_3d``, ``state_orbit``, ``look_at``,
+        ``bind_3d`` and ``camera_view_3d`` take z as their default up, an
+        orbit's azimuth turns about z from the -y side (the front that faces
+        the camera), cylinders, cones and tori stand along z and planes lie
+        on the x/y floor, and the fixed key light and the sky light from
+        above z. Coordinates are never converted: ``move_to_3d``,
+        ``line_3d``, ``camera.project`` and the rest take them as written.
+        The 2D camera and 2D content are unchanged. Another value raises
+        ``ValueError``.
 
         ``frame`` is ``(16, 9)`` by default, centered at the origin. Geometry,
         margins, text sizes, strokes, and effects use the same logical unit;
@@ -13064,6 +13224,11 @@ class Scene:
     @property
     def media(self) -> MediaLibrary:
         """Return the scene-owned media capability."""
+        ...
+
+    @property
+    def ui(self) -> UI:
+        """Return the scene-owned interface capability: ``pointer``."""
         ...
 
     @property

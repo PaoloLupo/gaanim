@@ -389,6 +389,10 @@ path = "emphasis/hand_drawn.py"
 description = "Hand-drawn underlines, boxes, circles, strikes and brackets with every roughness, pass count, seed and style, marks that follow moving targets, and chalk shapes."
 
 [[example]]
+path = "emphasis/pointer.py"
+description = "A mouse pointer for software demonstrations: its arrow, hand and text styles, moves to objects straight or along an arc, clicks and drags."
+
+[[example]]
 path = "effects/glow_blur_shadow.py"
 description = "Glow, blur and drop shadow: their parameters, the drawables they apply to, and how they animate."
 
@@ -578,6 +582,10 @@ title = "Order-independent transparency"
 description = "Translucent panels that cross, a ball passing through a panel, nested shells, a ring in a box, a knot and a Möbius strip, each surface blended in the order it lies at each pixel."
 
 [[example]]
+path = "3d/z_up.py"
+description = "A world with z up and the plan in x/y, as engineering models are written: orbits about z, upright columns, and plans and walls laid on the planes of the model with in_3d(plane=, origin=)."
+
+[[example]]
 path = "3d/spot_lights_3d.py"
 title = "Spot lights"
 description = "Cones of light of three widths and three softnesses over a cube, a sphere and a cone, and a spot that sweeps across the stage while the shadows turn away from it."
@@ -648,6 +656,10 @@ description = "Charts that morph between specs by key or index, change mark fami
 [[example]]
 path = "visualization/bar_race.py"
 description = "Ranked bars that grow, overtake each other and leave the top, with value formats, colors and a rolling ticker."
+
+[[example]]
+path = "visualization/timeline.py"
+description = "Timelines whose labelled events stack in lanes that do not overlap: sides chosen automatically, scale breaks, labels that grow left near the end and reserved spans."
 
 [[example]]
 path = "visualization/vector_fields.py"
