@@ -4941,19 +4941,31 @@ impl SceneModel {
         self.image_with_options(path, ImageOptions::default())
     }
 
+    /// `options` sized to the safe area when they give no size: the source
+    /// fits there, while its frame stays the fitted size (see
+    /// `ImageOptions::media_frame`).
+    fn sized_to_safe_frame(&self, options: ImageOptions) -> ImageOptions {
+        if options.width.is_some() || options.height.is_some() {
+            return options;
+        }
+        let safe = self.safe_frame();
+        ImageOptions {
+            width: Some(safe.width()),
+            height: Some(safe.height()),
+            ..options
+        }
+    }
+
     /// Load an image with an optional target size, fit mode, and source crop.
     pub fn image_with_options(
         &mut self,
         path: impl AsRef<Path>,
-        mut options: ImageOptions,
+        options: ImageOptions,
     ) -> Result<super::ImageHandle, ImageLoadError> {
         let image = load_image(self.resolve_asset_path(path))?;
-        if options.width.is_none() && options.height.is_none() {
-            let safe = self.safe_frame();
-            options.width = Some(safe.width());
-            options.height = Some(safe.height());
-        }
-        let view = options.resolve(image.width, image.height)?;
+        let view = self
+            .sized_to_safe_frame(options)
+            .resolve(image.width, image.height)?;
         let drawable = self.spawn(SpawnKind::Image { image, view });
         drawable
             .spec
@@ -4976,7 +4988,7 @@ impl SceneModel {
     pub fn video_with_options(
         &mut self,
         path: impl AsRef<Path>,
-        mut options: VideoOptions,
+        options: VideoOptions,
     ) -> Result<VideoClip, VideoLoadError> {
         for (name, value, positive) in [
             ("offset", options.offset, false),
@@ -5010,12 +5022,9 @@ impl SceneModel {
         if options.offset + source_duration > metadata.duration + 1e-6 {
             return Err(VideoLoadError::DurationOutOfRange);
         }
-        if options.image.width.is_none() && options.image.height.is_none() {
-            let safe = self.safe_frame();
-            options.image.width = Some(safe.width());
-            options.image.height = Some(safe.height());
-        }
-        let view = options.image.resolve(metadata.width, metadata.height)?;
+        let view = self
+            .sized_to_safe_frame(options.image)
+            .resolve(metadata.width, metadata.height)?;
         let poster = gaanim_media::decode_video_frame(&path, &metadata, options.offset)?;
         let has_audio = metadata.has_audio;
         let playback = gaanim_media::VideoPlayback {
@@ -13330,6 +13339,38 @@ mod tests {
             birth
         );
         assert_eq!(image.spec.lock().unwrap().media_frame.unwrap().width, 8.0);
+    }
+
+    /// An image made without a size fits the safe area and its frame is the
+    /// fitted size, so it takes only its own room in a layout; one made with
+    /// both sizes keeps that frame, as `frame()` does, so a crop fills it.
+    #[test]
+    fn image_frames_are_the_fitted_size_unless_both_sizes_are_given() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("page.png");
+        image::RgbaImage::from_pixel(100, 200, image::Rgba([10, 20, 30, 255]))
+            .save(&path)
+            .unwrap();
+        let mut scene = SceneModel::new(1280, 720);
+        let safe = scene.safe_frame();
+        let fitted = scene.image(&path).unwrap();
+        let frame = fitted.spec.lock().unwrap().media_frame.unwrap();
+        assert_eq!(
+            (frame.width, frame.height),
+            (safe.height() / 2.0, safe.height())
+        );
+        let framed = scene
+            .image_with_options(
+                &path,
+                ImageOptions {
+                    width: Some(7.0),
+                    height: Some(4.0),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let frame = framed.spec.lock().unwrap().media_frame.unwrap();
+        assert_eq!((frame.width, frame.height), (7.0, 4.0));
     }
 
     #[test]

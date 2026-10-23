@@ -351,7 +351,8 @@ impl ImageOptions {
     pub(crate) fn media_frame(self, view: ImageView) -> gaanim_scene::MediaFrame {
         // With both sizes the destination is that frame, as `frame()` keeps it,
         // so a later crop fits its region to the frame rather than to the
-        // `contain`-fitted size of the whole source.
+        // `contain`-fitted size of the whole source. Without them (an image
+        // that fits the safe area) the frame is the fitted size.
         let (width, height) = match (self.width, self.height) {
             (Some(width), Some(height)) => (width, height),
             _ => (view.display_width, view.display_height),
