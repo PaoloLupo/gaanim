@@ -7271,6 +7271,28 @@ impl SceneModel {
                     }
                 }
 
+                Op::Deform {
+                    target,
+                    lattice,
+                    gate,
+                    scale,
+                } => {
+                    if let Some(target_id) = id_map.get(target).copied()
+                        && let Some(entity) =
+                            builder.states.get(target_id).map(|state| state.entity)
+                    {
+                        let term = gaanim_animation::DeformTerm {
+                            lattice: lattice.clone(),
+                            gate: compile_tracking_scalar(gate, id_map, &builder.states),
+                            scale: compile_tracking_scalar(scale, id_map, &builder.states),
+                        };
+                        let deformation = builder.deformations.entry(target_id).or_default();
+                        deformation.terms.push(term);
+                        let deformation = deformation.clone();
+                        builder.commands.entity(entity).insert(deformation);
+                    }
+                }
+
                 Op::AttachDelayedFollow {
                     target,
                     source,
@@ -24821,6 +24843,115 @@ mod tests {
                 }
             ) if *from == 0.0 && *to == 1.0
         )));
+    }
+
+    /// A deformed group moves its points as wholes, the 3D line between
+    /// them follows them, and its mesh's vertices move one by one, all by
+    /// the field at their place, eased in with the animation and gone again
+    /// before it.
+    #[test]
+    fn a_deformed_group_moves_points_lines_and_mesh_vertices_by_the_field() {
+        use bevy::prelude::App;
+        let mut canvas = SceneModel::new(640, 360);
+        let material = gaanim_scene::Material3D::default();
+        let top = canvas.circle(0.1).move_to_3d(0.0, 2.0, 0.0);
+        let bottom = canvas.circle(0.1).move_to_3d(0.0, 0.0, 0.0);
+        let line = canvas
+            .line_3d(
+                CanvasEndpoint::Entity(top.id),
+                CanvasEndpoint::Entity(bottom.id),
+                0.05,
+                8,
+                false,
+                material,
+            )
+            .unwrap();
+        let cube = canvas
+            .cube(1.0, material)
+            .unwrap()
+            .move_to_3d(3.0, 2.0, 0.0);
+        let model = canvas.group(&[&top, &bottom, &line, &cube]);
+        canvas.wait(0.5);
+        // A shear: x moves by half of y. A lattice reads it exactly.
+        let field = |p: DVec3| DVec3::new(0.5 * p.y, 0.0, 0.0);
+        let grid = model
+            .deform_grid(
+                Some(crate::canvas::DeformSamples::Counts([3, 3, 3])),
+                Some(Bounds3D::new(DVec3::splat(-5.0), DVec3::splat(5.0))),
+            )
+            .unwrap();
+        let values = grid.points().into_iter().map(field).collect();
+        let anim = model.animate().deform(Some(values)).unwrap().duration(1.0);
+        canvas.play(vec![anim]);
+        canvas.wait(0.5);
+
+        let mut app = App::new();
+        app.add_plugins(bevy::prelude::MinimalPlugins)
+            .add_plugins(gaanim_scene::GaanimScenePlugin)
+            .add_plugins(gaanim_animation::GaanimAnimationPlugin)
+            .add_plugins(gaanim_timeline::GaanimTimelinePlugin)
+            .add_plugins(gaanim_text::GaanimTextPlugin)
+            .add_plugins(gaanim_renderer::GaanimDerivedGeometryPlugin);
+        app.finish();
+        app.cleanup();
+        app.update();
+        crate::runtime::replay_canvas_into(app.world_mut(), canvas);
+        app.update();
+        app.world_mut().resource_mut::<Timeline>().keyframes.clear();
+        gaanim_timeline::capture_reload_keyframe(app.world_mut());
+        let (top, line, cube) = (
+            entity_of(app.world_mut(), &top),
+            entity_of(app.world_mut(), &line),
+            entity_of(app.world_mut(), &cube),
+        );
+        let at = |app: &mut App, time: f64| {
+            app.world_mut().resource_mut::<Timeline>().seek_request = Some(time);
+            app.update();
+            let world = app.world();
+            let origin = |entity| {
+                world
+                    .get::<gaanim_math::GlobalSpatialTransform>(entity)
+                    .unwrap()
+                    .mat4
+                    .transform_point3(DVec3::ZERO)
+            };
+            let corners: Vec<DVec3> = {
+                let global = world
+                    .get::<gaanim_math::GlobalSpatialTransform>(cube)
+                    .unwrap()
+                    .mat4;
+                let mesh = world.get::<gaanim_scene::TriangleMeshData>(cube).unwrap();
+                mesh.vertices
+                    .iter()
+                    .map(|vertex| global.transform_point3(DVec3::from_array(vertex.map(f64::from))))
+                    .collect()
+            };
+            (origin(top), origin(line), corners)
+        };
+        let close = |a: DVec3, b: DVec3| a.distance(b) < 1e-5;
+        // Each corner of the cube stands 0.5 * y * weight along x from its
+        // undeformed x, 2.5 or 3.5.
+        let sheared = |corners: &[DVec3], weight: f64| {
+            corners.iter().all(|corner| {
+                let rest = corner.x - 0.5 * corner.y * weight;
+                (rest - 2.5).abs() < 1e-5 || (rest - 3.5).abs() < 1e-5
+            })
+        };
+        let (point, middle, corners) = at(&mut app, 1.5);
+        assert!(close(point, DVec3::new(1.0, 2.0, 0.0)), "{point:?}");
+        // The line runs from the moved top to the bottom, which stayed.
+        assert!(close(middle, DVec3::new(0.5, 1.0, 0.0)), "{middle:?}");
+        assert!(sheared(&corners, 1.0), "{corners:?}");
+        let (point, _, corners) = at(&mut app, 1.0);
+        assert!(close(point, DVec3::new(0.5, 2.0, 0.0)), "halfway {point:?}");
+        assert!(sheared(&corners, 0.5), "halfway {corners:?}");
+        let (point, middle, corners) = at(&mut app, 0.25);
+        assert!(close(point, DVec3::new(0.0, 2.0, 0.0)), "before {point:?}");
+        assert!(
+            close(middle, DVec3::new(0.0, 1.0, 0.0)),
+            "before {middle:?}"
+        );
+        assert!(sheared(&corners, 0.0), "before {corners:?}");
     }
 
     /// A column 300 high whose two 80 × 30 children are centered, where an

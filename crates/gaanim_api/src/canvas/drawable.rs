@@ -993,6 +993,24 @@ impl DrawableHandle {
             spec.layout_owner = None;
         }
     }
+    /// A handle to the drawable `id` of the scene that owns `state`.
+    pub(crate) fn existing(state: &SharedCanvasState, id: ObjectId) -> Option<Self> {
+        let (spec, segment_idx) = {
+            let canvas = state.lock().expect("canvas state poisoned");
+            (canvas.object_specs.get(&id)?.clone(), canvas.active_idx)
+        };
+        Some(Self {
+            id,
+            spec,
+            state: state.clone(),
+            segment_idx,
+            named_parts: None,
+            gltf: None,
+            morph_targets: Arc::new([]),
+            style_targets: Arc::new(Vec::new()),
+        })
+    }
+
     pub(crate) fn new(
         id: ObjectId,
         kind: SpawnKind,

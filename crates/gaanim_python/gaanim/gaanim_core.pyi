@@ -2121,6 +2121,27 @@ class Anim:
             scene.play(chart.layer("marks").animate.wipe(Direction.RIGHT), duration=3)
         """
         ...
+    def deform(
+        self,
+        field: Optional[Callable[[float, float, float], tuple[float, float, float]] | Callable[[float, float], tuple[float, float]]],
+        *,
+        samples: Optional[int | tuple[int, int, int]] = None,
+        region: Optional[tuple[tuple[float, float, float], tuple[float, float, float]]] = None,
+    ) -> Anim:
+        """Move the drawable's shape from what it is deformed by now to ``field``, or back with ``None``.
+
+        The displacement eases from the current one to the new one with
+        this animation's duration and easing, which chain on it (see
+        ``Drawable.deform`` for how the field is read and what each member
+        does). The animation drives the change, not the drawable, as
+        ``wipe`` does. A field that is not callable raises ``TypeError``;
+        one that returns another length or a non-finite value, or invalid
+        ``samples`` or ``region``, raise ``ValueError``.
+
+        Example:
+            scene.play(model.animate.deform(lambda x, y, z: (0.4 * math.sin(math.pi * y / 6), 0, 0)).duration(1.2))
+        """
+        ...
     def grow_arrow(self) -> Anim:
         """Grow an arrow from its tail, with an undistorted head.
 
@@ -4517,6 +4538,47 @@ class Drawable:
         Example:
             ball = scene.geometry.circle(0.4).fill(CORAL).echo(6, delay=0.05)
             scene.play([ball.animate.move_to(4, 0).duration(1.0)])
+        """
+        ...
+    def deform(
+        self,
+        field: Optional[Callable[[float, float, float], tuple[float, float, float]] | Callable[[float, float], tuple[float, float]]],
+        *,
+        amount: Optional[_ReactiveScalar] = None,
+        samples: Optional[int | tuple[int, int, int]] = None,
+        region: Optional[tuple[tuple[float, float, float], tuple[float, float, float]]] = None,
+    ) -> Self:
+        """Deform the drawable and everything in it by a displacement field, from the cursor on.
+
+        ``field(x, y, z) -> (dx, dy, dz)`` (or ``field(x, y) -> (dx, dy)``
+        in the plane) is read in world coordinates, at each place of the
+        drawable as it stands undeformed, times ``amount`` (1 by default; a
+        ``Parameter`` or ``Computed`` moves the shape with it, so animating
+        the parameter sways the model). ``None`` puts the shape back.
+        Each member takes it the way it is drawn: the vertices of meshes
+        (primitives, ``mesh``, extrusions, subdivided ``plane`` walls) and
+        of 3D line lists move one by one, so a wall bends; a ``line_3d``
+        whose ends follow other objects follows them; and any other member
+        (a point, a text, a billboard, a 2D drawable in the 3D world) moves
+        as a whole by the displacement at its origin. A group passes it to
+        its members at any depth. The authored values never change, and a
+        seek finds the same shape as playback.
+
+        The field is sampled once, on a grid that the drawable's first
+        deformation fixes over ``region`` (two corners) or over its world
+        box padded by a quarter of its longest side, with ``samples``
+        points along the longest side (12 by default) or ``(x, y, z)``
+        points along each axis, and read between them trilinearly: give
+        more samples to a field that changes quickly. ``animate.deform``
+        eases from one field to another. A field that is not callable
+        raises ``TypeError``; one that returns another length or a
+        non-finite value, or ``samples`` out of 1 to 64 (2 to 64 for the
+        longest side) or an inverted ``region``, raise ``ValueError``.
+
+        Example:
+            height = 10.0
+            model.deform(lambda x, y, z: (0.0, 0.0, -math.sin(math.pi * y / (2 * height))), amount=sway)
+            scene.play(sway.animate.set(0.6).duration(1.2))
         """
         ...
     def wipe(self, reveal: _ReactiveScalar, direction: Optional[Direction] = None) -> Drawable:

@@ -160,6 +160,10 @@ pub use profile::{
 mod text_motion;
 pub(crate) use incremental::SceneFingerprints;
 pub(crate) use inspection::deferred_index;
+pub(crate) mod deform;
+pub use deform::{
+    DEFAULT_DEFORM_SAMPLES, DeformError, DeformGrid, DeformSamples, MAX_DEFORM_SAMPLES,
+};
 mod extrude;
 pub mod text_animator;
 pub mod text_path;
