@@ -389,6 +389,10 @@ path = "emphasis/hand_drawn.py"
 description = "Hand-drawn underlines, boxes, circles, strikes and brackets with every roughness, pass count, seed and style, marks that follow moving targets, and chalk shapes."
 
 [[example]]
+path = "emphasis/pointer.py"
+description = "A mouse pointer for software demonstrations: its arrow, hand and text styles, moves to objects straight or along an arc, clicks and drags."
+
+[[example]]
 path = "effects/glow_blur_shadow.py"
 description = "Glow, blur and drop shadow: their parameters, the drawables they apply to, and how they animate."
 

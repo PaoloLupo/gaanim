@@ -2124,7 +2124,7 @@ def validate_python_module_stubs() -> list[str]:
         return names
 
     failures: list[str] = []
-    for module_name in ("sections", "templates", "matrix", "colors"):
+    for module_name in ("sections", "templates", "matrix", "colors", "pointer"):
         stub = STUB.with_name(f"{module_name}.pyi")
         tree = ast.parse(stub.read_text(encoding="utf-8"), filename=str(stub))
         code = importlib.import_module(f"gaanim.{module_name}")
@@ -2653,7 +2653,7 @@ def validate_scene_capability_surface(module) -> list[str]:
     """Keep Scene limited to orchestration and scene-owned capabilities."""
     expected = {
         "assets", "camera", "canvas", "fx", "geometry", "layout", "mechanics",
-        "media", "slides", "text", "viz", "fade_out_all", "link", "persist", "z_layers", "layer",
+        "media", "slides", "text", "ui", "viz", "fade_out_all", "link", "persist", "z_layers", "layer",
         "play", "release", "render", "reuse", "sections", "segment", "snapshots", "stop",
         "wait", "time", "cursor", "stops", "random", "noise",
         "voiceover", "live_take", "narration_script", "marker", "markers",
@@ -3412,6 +3412,60 @@ def validate_text_contract(module):
     return failures
 
 
+def validate_pointer_contract(module):
+    """The demonstration pointer keeps track of its tip and checks its targets."""
+    failures = []
+    scene = module.Scene(frame=(16, 9))
+    button = scene.geometry.rect(2, 1).move_to(3, -2)
+    cursor = scene.ui.pointer(style="hand", size=1.5, at=(-4, 2))
+    if cursor.position != (-4.0, 2.0) or not isinstance(cursor.drawable, module.Drawable):
+        failures.append("a pointer did not start at `at` as a drawable")
+    scene.play(cursor.animate.to(button).duration(0.4))
+    if cursor.position != (3.0, -2.0):
+        failures.append(f"animate.to a drawable did not leave the tip on its center: {cursor.position}")
+    scene.play(cursor.animate.click(radius=0.4))
+    scene.play(cursor.animate.to(button, anchor="top_left", arc=0.3).duration(0.4))
+    if cursor.position != (2.0, -1.5):
+        failures.append(f"animate.to did not leave the tip on the anchor: {cursor.position}")
+    token = scene.geometry.circle(0.2).move_to(0, 0)
+    scene.play(cursor.animate.drag((0, 1), token, duration=0.4))
+    if any(abs(a - b) > 1e-6 for a, b in zip(token.bounds().center, (-2.0, 2.5))):
+        failures.append(f"drag did not carry the object as far as the tip: {token.bounds().center}")
+    scene.play(cursor.animate.to(scene.layout.safe.inset("80px")).duration(0.2))
+    if cursor.jump((1, 1)) is not cursor or cursor.position != (1.0, 1.0):
+        failures.append("jump did not place the tip and return the pointer")
+    # A click presses by scaling, so a size given to the drawable stays.
+    cursor.drawable.scale_to(2.0)
+    before = cursor.drawable.bounds().width
+    scene.play(cursor.animate.click())
+    if abs(cursor.drawable.bounds().width - before) > 1e-6:
+        failures.append("a click changed the size given to the pointer")
+    flat = scene.ui.pointer()
+    ball = scene.geometry.circle(0.2)
+    cursor_3d = scene.ui.pointer(style="text", at=(0, 0, 0))
+    marker = scene.geometry.circle(0.1).move_to_3d(0, 0, 0).billboard()
+    scene.play(cursor_3d.animate.to((1, 1, 1)).duration(0.2))
+    scene.play(cursor_3d.animate.click())
+    scene.play(cursor_3d.animate.drag((2, 1, 1), marker, duration=0.2))
+    if cursor_3d.position != (2.0, 1.0, 1.0):
+        failures.append(f"a 3D pointer did not follow its 3D targets: {cursor_3d.position}")
+    for description, operation, expected in (
+        ("an unknown style", lambda: scene.ui.pointer(style="cross"), ValueError),
+        ("a zero size", lambda: scene.ui.pointer(size=0), ValueError),
+        ("a number as target", lambda: flat.animate.to(5), TypeError),
+        ("a point of four coordinates", lambda: flat.animate.to((1, 2, 3, 4)), ValueError),
+        ("an unknown anchor", lambda: flat.animate.to(ball, anchor="middle"), ValueError),
+        ("a 2D target for a 3D pointer", lambda: cursor_3d.animate.to((1, 1)), ValueError),
+        ("a 3D target for a 2D pointer", lambda: flat.animate.drag((1, 1, 1), ball), ValueError),
+        ("an arc for a 3D pointer", lambda: cursor_3d.animate.to((0, 0, 0), arc=0.2), ValueError),
+    ):
+        if not raises_error(expected, operation):
+            failures.append(f"{description} was accepted")
+    if flat.position != (0.0, 0.0) or cursor_3d.position != (2.0, 1.0, 1.0):
+        failures.append("a refused move still moved the pointer")
+    return failures
+
+
 def validate_layout_box_contract(module):
     """Boxes, styles, classes, zones and item rules keep their contracts."""
     failures = []
@@ -4098,6 +4152,7 @@ def main() -> int:
     missing.extend(validate_matte_metaballs_glass_contract(module))
     missing.extend(validate_chalk_quantity_and_arc_contract(module))
     missing.extend(validate_layout_box_contract(module))
+    missing.extend(validate_pointer_contract(module))
     missing.extend(validate_falloff_contract(module))
     missing.extend(validate_emphasis_contract(module))
     missing.extend(validate_stroke_contract(module))

@@ -3594,6 +3594,16 @@ impl PyScene {
     }
 
     #[getter]
+    fn ui(slf: &Bound<'_, Self>) -> PyResult<PyUi> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            PyUi {
+                scene: slf.clone().unbind(),
+            }
+        })
+    }
+
+    #[getter]
     fn slides(slf: &Bound<'_, Self>) -> PyResult<PySlideKit> {
         crate::custom::ensure_authoring_allowed()?;
         Ok({
@@ -5384,6 +5394,30 @@ impl PyVisualization {
         Ok(module
             .getattr("_build_equalizer")?
             .call((self.scene.bind(py), values), options)?
+            .unbind())
+    }
+}
+
+/// `scene.ui`: interface elements built in Python from the scene's public API.
+#[pyclass(name = "UI", module = "gaanim_core")]
+pub struct PyUi {
+    pub(crate) scene: Py<PyScene>,
+}
+
+#[pymethods]
+impl PyUi {
+    /// A mouse pointer for software demonstrations; see `gaanim_core.pyi`.
+    #[pyo3(signature = (**options))]
+    fn pointer<'py>(
+        &self,
+        py: Python<'py>,
+        options: Option<&Bound<'py, PyDict>>,
+    ) -> PyResult<Py<PyAny>> {
+        crate::custom::ensure_authoring_allowed()?;
+        let module = py.import("gaanim.pointer")?;
+        Ok(module
+            .getattr("_build_pointer")?
+            .call((self.scene.bind(py),), options)?
             .unbind())
     }
 }
