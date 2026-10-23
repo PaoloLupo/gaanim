@@ -2490,23 +2490,58 @@ pub fn tracking_line_system(world: &mut World) {
     }
 }
 
+/// A drawable a layout replaced by `copy` from timeline second `since` on:
+/// a text it rewrapped at another width. What follows the drawable follows
+/// it until then and the copy from then on.
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
+pub struct ReplacedBy {
+    pub copy: Entity,
+    pub since: f64,
+}
+
+/// What stands for `entity` at timeline second `time`: the copy that
+/// replaced it by then (see [`ReplacedBy`]), however many times it was
+/// replaced, or `entity` itself.
+pub fn stand_in_at(entity: Entity, time: f64, world: &World) -> Entity {
+    let mut current = entity;
+    // A copy is spawned after what it replaces, so the chain has no cycle;
+    // the bound only guards a malformed one.
+    for _ in 0..64 {
+        match world.get::<ReplacedBy>(current) {
+            Some(replaced) if time + 1e-9 >= replaced.since => current = replaced.copy,
+            _ => break,
+        }
+    }
+    current
+}
+
+/// [`stand_in_at`] at the playhead.
+pub fn stand_in(entity: Entity, world: &World) -> Entity {
+    let time = world
+        .get_resource::<PlaybackState>()
+        .map_or(0.0, |state| state.current_time);
+    stand_in_at(entity, time, world)
+}
+
 /// Resolve the current world-space position of a reactive endpoint.
 pub fn resolve_tracking_endpoint(ep: &TrackingEndpoint, world: &World) -> Option<DVec3> {
     match ep {
         TrackingEndpoint::Static(pos) => Some(*pos),
         TrackingEndpoint::Entity(entity) => {
-            entity_world_matrix(*entity, world).map(|matrix| matrix.transform_point3(DVec3::ZERO))
+            let entity = stand_in(*entity, world);
+            entity_world_matrix(entity, world).map(|matrix| matrix.transform_point3(DVec3::ZERO))
         }
         TrackingEndpoint::EntityAnchor {
             entity,
             normalized,
             offset,
         } => {
-            let bounds = world.get::<LocalBounds>(*entity)?.0;
+            let entity = stand_in(*entity, world);
+            let bounds = world.get::<LocalBounds>(entity)?.0;
             let center = bounds.center();
             let half = bounds.size() * 0.5;
             let local = center + half * *normalized + *offset;
-            entity_world_matrix(*entity, world).map(|matrix| matrix.transform_point3(local))
+            entity_world_matrix(entity, world).map(|matrix| matrix.transform_point3(local))
         }
         TrackingEndpoint::Expression { x, y, z } => Some(DVec3::new(
             x.evaluate(world)?,
@@ -2597,9 +2632,10 @@ pub fn resolve_entity_bounds(entity: Entity, world: &World) -> Option<gaanim_mat
 
 fn endpoint_basis(ep: &TrackingEndpoint, world: &World) -> DMat4 {
     match ep {
-        TrackingEndpoint::Entity(entity)
-        | TrackingEndpoint::EntityAnchor { entity, .. }
-        | TrackingEndpoint::MediaPixel { entity, .. } => {
+        TrackingEndpoint::Entity(entity) | TrackingEndpoint::EntityAnchor { entity, .. } => {
+            entity_world_matrix(stand_in(*entity, world), world).unwrap_or(DMat4::IDENTITY)
+        }
+        TrackingEndpoint::MediaPixel { entity, .. } => {
             entity_world_matrix(*entity, world).unwrap_or(DMat4::IDENTITY)
         }
         TrackingEndpoint::LocalExpression { space, .. }

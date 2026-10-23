@@ -344,7 +344,7 @@ pub fn project_camera_view_follows_system(world: &mut bevy::prelude::World) {
         };
         let target = match &follow.endpoint {
             TrackingEndpoint::Entity(entity) | TrackingEndpoint::EntityAnchor { entity, .. } => {
-                *entity
+                gaanim_animation::stand_in_at(*entity, time, world)
             }
             _ => continue,
         };

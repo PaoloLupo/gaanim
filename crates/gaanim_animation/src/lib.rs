@@ -76,7 +76,7 @@ pub use updaters::{
     AmbientClock, AngleArrowheads, AngleLabelPlacement, AngleSweep, DimensionLabelOrientation,
     DimensionLabelPlacement, DimensionSide, EndpointAngle, EndpointDistance, EndpointFollow,
     FollowOffsetSpace, InvalidFixedStep, InvalidSampledSeries, MediaRegion, PlaybackState,
-    RotationBinding, RotationTranslationBinding, SampledInterpolation, SampledProperty,
+    ReplacedBy, RotationBinding, RotationTranslationBinding, SampledInterpolation, SampledProperty,
     SampledSeriesDriver, SampledSeriesDrivers, SurroundingRays, SurroundingRect, SurroundingShape,
     TracedPath, TracedPath3D, TrackingAngle, TrackingAnglePart, TrackingEndpoint, TrackingLine,
     TrackingLine3D, TrackingRay, TrackingScalar, TrackingVectorHead, Updater, advance_updaters_by,
@@ -86,10 +86,10 @@ pub use updaters::{
     mechanism_binding_system, media_pixel_point, media_region_shape, media_region_system,
     orbit_updater, pulse_updater, reactive_positions_move, resolve_entity_bounds,
     resolve_tracking_endpoint, resolve_tracking_endpoint_with_offset, rotate_updater,
-    sampled_series_system, screen_follow_system, seek_updaters, surrounding_rect_system,
-    traced_path_3d_system, traced_path_geometry, traced_path_system, traced_source_position,
-    tracking_angle_system, tracking_line_system, tracking_vector_head_system,
-    tracking_world_to_local, updater_system,
+    sampled_series_system, screen_follow_system, seek_updaters, stand_in, stand_in_at,
+    surrounding_rect_system, traced_path_3d_system, traced_path_geometry, traced_path_system,
+    traced_source_position, tracking_angle_system, tracking_line_system,
+    tracking_vector_head_system, tracking_world_to_local, updater_system,
 };
 pub use writing::{
     FillDrawProgress, PathReveal, PathSource, PathTrimWindow, WriteTipGlow,
