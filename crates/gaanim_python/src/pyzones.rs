@@ -436,6 +436,39 @@ impl PyZone {
         })
     }
 
+    /// This zone with the given edges moved to scene coordinates; the edges
+    /// not given stay where they are.
+    #[pyo3(signature = (*, top=None, bottom=None, left=None, right=None))]
+    fn crop(
+        &self,
+        top: Option<f64>,
+        bottom: Option<f64>,
+        left: Option<f64>,
+        right: Option<f64>,
+    ) -> PyResult<Self> {
+        for (name, value) in [
+            ("top", top),
+            ("bottom", bottom),
+            ("left", left),
+            ("right", right),
+        ] {
+            if value.is_some_and(|value| !value.is_finite()) {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "{name} must be finite"
+                )));
+            }
+        }
+        let b = self.bounds;
+        let min_x = left.unwrap_or(b.min.x);
+        let max_x = right.unwrap_or(b.max.x).max(min_x);
+        let min_y = bottom.unwrap_or(b.min.y);
+        let max_y = top.unwrap_or(b.max.y).max(min_y);
+        Ok(Self {
+            canvas: self.canvas.clone(),
+            bounds: Bounds3D::new_2d(min_x, min_y, max_x, max_y),
+        })
+    }
+
     /// Divide this zone with a `Zones` template.
     fn split(&self, py: Python<'_>, template: PyRef<'_, PyZones>) -> PyResult<PyZoneSet> {
         PyZoneSet::resolve(py, self.canvas.clone(), &template, self.bounds)

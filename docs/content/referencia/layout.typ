@@ -151,7 +151,9 @@ Las mismas propiedades valen para `box`, `row`, `column`, `grid`, `stack`,
   `around`, `evenly`.
 - `wrap` (filas y columnas), `columns`, `rows`, `auto_flow` (grids).
 - `within`: solo en la raíz; `"safe"` (el fotograma menos el margen, por
-  defecto) o `"frame"` (a sangre).
+  defecto), `"frame"` (a sangre), una `Zone` o un objeto (la región que
+  cubren al construir la caja). Con `Zone.crop` una columna puede empezar a
+  una altura de la escena sin calcular rellenos.
 
 *Hijo* (también en `Drawable.item`)
 
@@ -488,15 +490,26 @@ title = scene.text("Título", size=0.5).place(z["cabecera"], anchor="left")
 )
 
 #api-entry(
-  name: "Zone.point / inset / split / arrange",
+  name: "Zone.point / inset / crop / split / arrange",
   kind: "method",
-  desc: [Una `Zone` expone `left`, `right`, `top`, `bottom`, `width`, `height` y `center` en unidades de escena. `point(anchor)` da uno de sus puntos; `inset(padding)` la encoge; `split(plantilla)` aplica otra plantilla dentro; `arrange(*objetos, direction="row", gap=..., align=..., justify=...)` alinea objetos libres sin adoptarlos; `direction` es `"row"`, `"column"` o `"wrap"` (filas que saltan a la siguiente cuando el objeto no cabe).],
+  desc: [Una `Zone` expone `left`, `right`, `top`, `bottom`, `width`, `height` y `center` en unidades de escena. `point(anchor)` da uno de sus puntos; `inset(padding)` la encoge; `crop(top=, bottom=, left=, right=)` lleva cada borde dado a esa coordenada de la escena (y arriba) y deja los demás, de modo que no depende del margen ni de la resolución de diseño; `split(plantilla)` aplica otra plantilla dentro; `arrange(*objetos, direction="row", gap=..., align=..., justify=...)` alinea objetos libres sin adoptarlos; `direction` es `"row"`, `"column"` o `"wrap"` (filas que saltan a la siguiente cuando el objeto no cabe).],
 )[
 ```python
 >>>from gaanim import *
 >>>scene = Scene(frame=(16, 9), theme="paper")
 dots = [scene.geometry.circle(0.3) for _ in range(4)]
 scene.layout.safe.inset("80px").arrange(*dots, gap="24px")
+```
+
+Una zona recortada también es la región de una caja raíz con `within=`. La
+caja se centra en ella como en el área segura; con `height="fill"` y
+`justify="start"`, la columna empieza en el borde superior de la zona:
+
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9), theme="paper")
+index = scene.layout.safe.crop(top=0.95, right=-1.5)
+scene.layout.column("Uno", "Dos", "Tres", within=index, width="fill", height="fill", justify="start")
 ```
 ]
 

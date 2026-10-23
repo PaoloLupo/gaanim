@@ -1375,6 +1375,19 @@ class Zone:
     def inset(self, padding: Padding) -> Zone:
         """The zone shrunk by ``padding``."""
         ...
+    def crop(self, *, top: Optional[float] = None, bottom: Optional[float] = None, left: Optional[float] = None, right: Optional[float] = None) -> Zone:
+        """The zone with the given edges moved to scene coordinates.
+
+        Edges not given stay where they are; an edge that would cross its
+        opposite one leaves the zone empty on that axis. Unlike ``inset``,
+        the values are positions in the scene (y up), not distances, so the
+        result does not depend on the margin or the design resolution.
+
+        Example:
+            index = scene.layout.safe.crop(top=0.95, right=-1.5)
+            scene.layout.column(*entries, within=index, width="fill", height="fill", justify="start")
+        """
+        ...
     def split(self, template: Zones) -> ZoneSet:
         """Apply a template inside this zone."""
         ...
@@ -10646,7 +10659,9 @@ class LayoutBuilder:
     - Container: ``direction``, ``gap``, ``row_gap``, ``column_gap``,
       ``padding``, ``width``, ``height``, ``min_width``, ``max_width``,
       ``min_height``, ``max_height``, ``aspect_ratio``, ``align``,
-      ``justify``, ``wrap``, ``columns``, ``rows``, ``auto_flow``, ``within``.
+      ``justify``, ``wrap``, ``columns``, ``rows``, ``auto_flow``, ``within``
+      (root boxes only: ``"safe"``, ``"frame"``, a ``Zone`` or a ``Drawable``;
+      a zone or a drawable gives the region it covers when the box is built).
     - Item (how the box sits in its parent): ``grow``, ``shrink``, ``basis``,
       ``align_self``, ``row``, ``column``, ``row_span``, ``column_span``,
       ``margin`` (``"auto"`` takes the free space), ``fit``, ``anchor``,
