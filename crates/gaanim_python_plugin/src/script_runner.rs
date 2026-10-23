@@ -273,6 +273,7 @@ const GAANIM_TEMPLATES: &str = include_str!("../../gaanim_python/gaanim/template
 const GAANIM_SECTIONS: &str = include_str!("../../gaanim_python/gaanim/sections.py");
 const GAANIM_MATRIX: &str = include_str!("../../gaanim_python/gaanim/matrix.py");
 const GAANIM_AUDIO_VIZ: &str = include_str!("../../gaanim_python/gaanim/audio_viz.py");
+const GAANIM_POINTER: &str = include_str!("../../gaanim_python/gaanim/pointer.py");
 const GAANIM_ANIMATION_TYPES: &str = include_str!("../../gaanim_python/gaanim/animation_types.py");
 const GAANIM_TYPE_ALIASES: &str = include_str!("../../gaanim_python/gaanim/_type_aliases.py");
 const GAANIM_LIVE: &str = include_str!("../../gaanim_python/gaanim/live.py");
@@ -327,6 +328,12 @@ fn bootstrap_gaanim_package(py: Python<'_>) -> PyResult<()> {
     let audio_viz_name = std::ffi::CString::new("gaanim.audio_viz").unwrap();
     let audio_viz = PyModule::from_code(py, &audio_viz_source, &audio_viz_file, &audio_viz_name)?;
     modules.set_item("gaanim.audio_viz", &audio_viz)?;
+
+    let pointer_source = std::ffi::CString::new(GAANIM_POINTER).unwrap();
+    let pointer_file = std::ffi::CString::new("gaanim/pointer.py").unwrap();
+    let pointer_name = std::ffi::CString::new("gaanim.pointer").unwrap();
+    let pointer = PyModule::from_code(py, &pointer_source, &pointer_file, &pointer_name)?;
+    modules.set_item("gaanim.pointer", &pointer)?;
 
     let types_source = std::ffi::CString::new(GAANIM_ANIMATION_TYPES).unwrap();
     let types_file = std::ffi::CString::new("gaanim/animation_types.py").unwrap();

@@ -11,6 +11,7 @@ from typing import Any, Callable, ClassVar, Iterator, Literal, Mapping, Optional
 from .live import Player, Pose, State
 from .questions import Question
 from .matrix import Matrix
+from .pointer import Pointer
 from .sections import SceneSections
 from .animation_types import AnimationChannel, CustomAnimationValues
 
@@ -10763,6 +10764,49 @@ class LayoutBuilder:
         """
         ...
 
+class UI:
+    """Scene-owned interface elements for software demonstrations."""
+    def pointer(
+        self,
+        *,
+        style: Literal["arrow", "hand", "text"] = "arrow",
+        size: float = 1.0,
+        color: Optional[ColorLike] = None,
+        at: tuple[float, float] | tuple[float, float, float] = (0.0, 0.0),
+    ) -> Pointer:
+        """A mouse pointer whose tip is its pivot, for showing how a program is used.
+
+        ``style`` is ``"arrow"``, ``"hand"`` or ``"text"`` (an I-beam), ``size``
+        scales it and ``color`` fills it (the theme's foreground by default,
+        with the background as its outline). The pointer is an ordinary group
+        (``pointer.drawable``): fade it in, style it or give it effects as
+        any drawable. It keeps track of where its tip is, so its moves chain:
+
+        - ``pointer.animate.to(target)``: move the tip to a point, a
+          ``Drawable`` (its ``anchor``) or a ``Zone``; ``arc`` bends the way.
+        - ``pointer.animate.click()``: a ripple at the tip and a small press
+          (0.44 s).
+        - ``pointer.animate.drag(target, obj, duration=1.0)``: the tip and
+          ``obj`` travel together.
+        - ``pointer.jump(target)``: place the tip without animating.
+
+        A pointer made at a 3D point (``at=(x, y, z)``) faces the camera as a
+        billboard and moves between 3D points; one made at a 2D point stays in
+        the plane, so a demonstration that crosses from a menu to a 3D model
+        uses one of each. ``click`` and ``drag`` raise the press by scaling,
+        so a size given to ``pointer.drawable`` is kept.
+
+        An unknown style or anchor, a non-positive size, or a target in the
+        other space raise ``ValueError``; a target that is not a point, a
+        drawable or a zone raises ``TypeError``.
+
+        Example:
+            cursor = scene.ui.pointer(style="arrow", at=(-5, 3))
+            scene.play(cursor.animate.to(menu_item).duration(0.8))
+            scene.play(cursor.animate.click())
+        """
+        ...
+
 class MediaLibrary:
     """Scene-owned loader for image, SVG, glTF, video, Lottie, and audio assets."""
     def audio(
@@ -13036,6 +13080,11 @@ class Scene:
     @property
     def media(self) -> MediaLibrary:
         """Return the scene-owned media capability."""
+        ...
+
+    @property
+    def ui(self) -> UI:
+        """Return the scene-owned interface capability: ``pointer``."""
         ...
 
     @property

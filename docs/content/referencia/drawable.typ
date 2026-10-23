@@ -951,6 +951,28 @@ scene.play([block.annotate.bracket("left", color=BLUE).animate.create()])
 ]
 
 #api-entry(
+  name: "UI.pointer",
+  kind: "factory",
+  params: (
+    (name: "style", type: "str", default: "\"arrow\"", desc: [`"arrow"`, `"hand"` o `"text"` (una barra I).]),
+    (name: "size", type: "float", default: "1.0", desc: [Escala del puntero.]),
+    (name: "color", type: "ColorLike | None", default: "None", desc: [Relleno; por defecto el color `foreground` del tema, con el fondo como contorno.]),
+    (name: "at", type: "tuple[float, float] | tuple[float, float, float]", default: "(0, 0)", desc: [Dónde empieza la punta. Un punto 3D crea un puntero 3D, que mira a la cámara y va de un punto 3D a otro.]),
+  ),
+  returns: (type: "Pointer", desc: [El puntero: `drawable` (el grupo que lo dibuja, con la punta como pivote), `position`, `jump(destino)` y el proxy `animate`.]),
+  desc: [Un puntero de ratón para mostrar cómo se usa un programa. Lleva la cuenta de dónde está su punta, así que los movimientos se encadenan. `animate.to(destino, anchor="center", arc=0)` lleva la punta a un punto, a un objeto (en su ancla) o a una `Zone`; con `arc`, el punto medio del camino se aparta de la recta esa fracción de la distancia, hacia la izquierda (negativo, hacia la derecha). `animate.click(color=, radius=)` dibuja una onda en la punta y hunde un poco el puntero durante 0.44 s; lo hace escalándolo, así que conserva el tamaño que se le haya dado. `animate.drag(destino, objeto, duration=1.0)` mueve el objeto junto con la punta. Un puntero creado en un punto del plano se queda en el plano y uno creado en un punto 3D, en el espacio, así que para cruzar de un menú a un modelo 3D se usan dos. Un estilo o ancla desconocidos, un tamaño no positivo o un destino del otro espacio lanzan `ValueError`; un destino que no es un punto, un objeto ni una zona, `TypeError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9), theme="paper")
+button = scene.layout.box("Guardar", padding="16px", background="#e5e7eb", radius="8px")
+cursor = scene.ui.pointer(at=(-5, 3))
+scene.play([cursor.animate.to(button, arc=0.2).duration(0.9)])
+scene.play([cursor.animate.click()])
+```
+]
+
+#api-entry(
   name: "Drawable.modifiers",
   kind: "property",
   returns: (type: "PathModifiers", desc: [La pila de modificadores de trazado del objeto.]),
