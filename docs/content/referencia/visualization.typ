@@ -865,7 +865,7 @@ scene.play([line.axis.animate.create()])
 ]
 
 #api-entry(
-  name: "Timeline.event",
+  name: "timeline.event",
   kind: "method",
   params: (
     (name: "date / title / body", type: "float / str / str | None", default: "— / — / None", desc: [La fecha y el rótulo: el título en negrita sobre el cuerpo, alineados con el tallo.]),
