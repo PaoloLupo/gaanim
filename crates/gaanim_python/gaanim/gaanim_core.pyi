@@ -4946,8 +4946,27 @@ class Drawable:
             tag = scene.text("load").move_to_3d(*node).billboard(offset=(0, 0.3), anchor="bottom")
         """
         ...
-    def in_3d(self, material: Optional[Material3D] = None) -> Self:
+    def in_3d(
+        self,
+        material: Optional[Material3D] = None,
+        *,
+        plane: Optional[Literal["xy", "xz", "yz"] | tuple[tuple[float, float, float], tuple[float, float, float]]] = None,
+        origin: Optional[tuple[float, float, float]] = None,
+    ) -> Self:
         """Place the drawable in the 3D world, where perspective tilts it and meshes hide it.
+
+        ``plane`` lays the drawing on a plane of the model: its x axis goes
+        along ``u`` and its y axis along ``v`` (squared to ``u``), given as
+        ``"xy"``, ``"xz"``, ``"yz"`` or a pair of directions ``(u, v)``, and
+        ``origin`` is where the drawing's scene origin lands (``(0, 0, 0)``
+        by default). Every point ``(x, y)`` of the drawing, as it is drawn
+        now, lands at ``origin + x * u + y * v``, whatever its own position
+        or pivot, and it turns about that origin from then on. With
+        ``Scene(up="z")`` a floor plan is ``in_3d(plane="xy", origin=(0, 0,
+        z))`` and a wall along y, drawn in (y, z), ``in_3d(plane="yz",
+        origin=(x, 0, 0))``. Parallel or zero directions, an unknown plane
+        or a non-finite origin raise ``ValueError``; a box child raises
+        ``LayoutOwnershipError``.
 
         ``move_to_3d`` and ``rotate_to_3d`` then place and turn it in the
         world under the perspective camera. The 3D pass draws it from its
@@ -4970,6 +4989,7 @@ class Drawable:
 
         Example:
             sign = scene.text("Hola").in_3d().move_to_3d(0.0, 1.0, -2.0).rotate_to_3d(-1.2, 0.0, 0.0)
+            floor = scene.geometry.polygon(outline).in_3d(plane="xy", origin=(0, 0, 3.2))
         """
         ...
     def hud(self) -> Self:
@@ -6475,7 +6495,7 @@ class Camera:
         self,
         eye: tuple[float, float, float],
         target: tuple[float, float, float],
-        up: tuple[float, float, float] = (0.0, 1.0, 0.0),
+        up: Optional[tuple[float, float, float]] = None,
         fov_y: float = 0.7853981633974483,
         near: float = 0.1,
         far: float = 1000.0,
@@ -6483,6 +6503,8 @@ class Camera:
         screen_offset: tuple[float, float] = (0.0, 0.0),
     ) -> CameraState:
         """A perspective camera state looking from ``eye`` at ``target``.
+
+        ``up`` is the scene's up axis (``Scene(up=)``) by default.
 
         ``screen_offset`` draws ``target`` that far from the middle of the
         frame, in scene units, as ``screen_offset`` sets it; ``to`` moves
@@ -6498,7 +6520,7 @@ class Camera:
         *,
         distance: Optional[float] = None,
         scale: Optional[float] = None,
-        up: tuple[float, float, float] = (0.0, 1.0, 0.0),
+        up: Optional[tuple[float, float, float]] = None,
         fov_y: float = 0.7853981633974483,
         near: float = 0.1,
         far: float = 1000.0,
@@ -6506,8 +6528,9 @@ class Camera:
     ) -> CameraState:
         """A perspective camera state looking at ``target`` from around it.
 
-        ``azimuth`` turns the eye about ``up``, in radians, from the side
-        the default camera looks from (+z with y up) toward +x;
+        ``azimuth`` turns the eye about ``up`` (the scene's up axis by
+        default), in radians, from the side the default camera looks from
+        (+z with y up, -y with z up) toward +x;
         ``elevation`` raises it above the plane across ``up``, up to a
         quarter turn, where it looks straight down and the azimuth turns the
         view. Give ``distance``, the eye's distance in world units, or
@@ -12155,11 +12178,24 @@ class Scene:
         theme: ThemeName | Theme | None = "technical",
         post: Optional[PostProcess | Sequence[PostProcess]] = None,
         design_resolution: float = 1080.0,
+        up: Literal["y", "z"] = "y",
     ) -> None:
         """Create a resolution-independent scene in logical units.
 
         ``design_resolution`` is the frame height, in design pixels, that
         layout lengths such as ``"24px"`` refer to.
+
+        ``up`` is the 3D world's vertical axis. With ``"z"``, as engineering
+        and architecture models use, 3D coordinates are read with z up and
+        the plan in x/y: ``state_3d``, ``state_orbit``, ``look_at``,
+        ``bind_3d`` and ``camera_view_3d`` take z as their default up, an
+        orbit's azimuth turns about z from the -y side (the front that faces
+        the camera), cylinders, cones and tori stand along z and planes lie
+        on the x/y floor, and the fixed key light and the sky light from
+        above z. Coordinates are never converted: ``move_to_3d``,
+        ``line_3d``, ``camera.project`` and the rest take them as written.
+        The 2D camera and 2D content are unchanged. Another value raises
+        ``ValueError``.
 
         ``frame`` is ``(16, 9)`` by default, centered at the origin. Geometry,
         margins, text sizes, strokes, and effects use the same logical unit;

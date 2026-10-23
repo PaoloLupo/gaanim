@@ -3723,7 +3723,10 @@ impl SceneModel {
         builder
             .commands
             .insert_resource(gaanim_media::PreviewAudioTracks(self.audio_tracks.clone()));
-        builder.commands.insert_resource(self.lighting_3d);
+        builder.commands.insert_resource(gaanim_scene::Lighting3D {
+            z_up: self.world_up == DVec3::Z,
+            ..self.lighting_3d
+        });
         builder.commands.insert_resource(self.transparency_3d);
         Compiled {
             checkpoint,
@@ -6546,7 +6549,9 @@ impl SceneModel {
                     temp_cam.position = *camera_position;
                     temp_cam.target = *camera_target;
                     temp_cam.rotation = *camera_rotation;
-                    temp_cam.up = gaanim_core::glam::DVec3::Y;
+                    // It orbits about the camera's up, the world's for a 3D
+                    // state.
+                    temp_cam.up = *camera_up;
                     temp_cam.projection = if let Some((fov, near, far)) = *camera_fov {
                         gaanim_math::Projection::Perspective {
                             fov_y: fov,
@@ -6571,7 +6576,7 @@ impl SceneModel {
                                 lens: gaanim_timeline::clip::PropertyLensSpec::CameraOrbit {
                                     from_position: *camera_position,
                                     target: *camera_target,
-                                    up: gaanim_core::glam::DVec3::Y,
+                                    up: *camera_up,
                                     delta_yaw: *delta_yaw,
                                     delta_pitch: *delta_pitch,
                                     dolly: 1.0,
@@ -22204,6 +22209,75 @@ mod tests {
         let right = global.affine_2d * gaanim_core::kurbo::Point::new(2.5, 0.0);
         // The camera looks at the origin: the canvas's middle.
         assert!(right.to_vec2().hypot() < 1e-6, "right edge at {right:?}");
+    }
+
+    /// A drawing laid on a model plane puts each of its points p at
+    /// origin + x * u + y * v, a moved shape and a group's members alike.
+    #[test]
+    fn a_drawing_on_a_model_plane_lands_at_origin_plus_its_axes() {
+        use bevy::prelude::App;
+        let mut canvas = SceneModel::new(640, 360);
+        let card = canvas
+            .rect(2.0, 1.0)
+            .move_to(3.0, 1.0)
+            .in_3d_on_plane(None, DVec3::X, DVec3::Z, DVec3::new(0.0, 5.0, 0.0))
+            .unwrap();
+        let near = canvas.rect(0.5, 0.5).move_to(1.0, 0.0);
+        let far = canvas.rect(0.5, 0.5).move_to(3.0, 0.0);
+        canvas
+            .group(&[&near, &far])
+            .in_3d_on_plane(None, DVec3::Y, DVec3::Z, DVec3::new(7.0, 0.0, 0.0))
+            .unwrap();
+        assert!(
+            canvas
+                .rect(1.0, 1.0)
+                .in_3d_on_plane(None, DVec3::X, DVec3::X, DVec3::ZERO)
+                .is_err()
+        );
+        // One already shown is placed at the cursor the same way.
+        let late = canvas.rect(2.0, 1.0).move_to(3.0, 1.0);
+        canvas.wait(0.5);
+        let late = late
+            .in_3d_on_plane(None, DVec3::X, DVec3::Z, DVec3::new(0.0, 5.0, 0.0))
+            .unwrap();
+        canvas.wait(0.5);
+        let mut app = App::new();
+        app.add_plugins(bevy::prelude::MinimalPlugins)
+            .add_plugins(gaanim_scene::GaanimScenePlugin)
+            .add_plugins(gaanim_animation::GaanimAnimationPlugin)
+            .add_plugins(gaanim_timeline::GaanimTimelinePlugin)
+            .add_plugins(gaanim_text::GaanimTextPlugin)
+            .add_plugins(gaanim_renderer::GaanimDerivedGeometryPlugin);
+        app.finish();
+        app.cleanup();
+        app.update();
+        crate::runtime::replay_canvas_into(app.world_mut(), canvas);
+        app.update();
+        app.world_mut().resource_mut::<Timeline>().seek_request = Some(0.75);
+        app.update();
+        let mut world_point = |handle: &DrawableHandle, local: DVec3| {
+            let entity = entity_of(app.world_mut(), handle);
+            app.world()
+                .get::<gaanim_math::GlobalSpatialTransform>(entity)
+                .unwrap()
+                .mat4
+                .transform_point3(local)
+        };
+        let close = |a: DVec3, b: DVec3| a.distance(b) < 1e-9;
+        for (local, expected) in [
+            (DVec3::ZERO, DVec3::new(3.0, 5.0, 1.0)),
+            (DVec3::X, DVec3::new(4.0, 5.0, 1.0)),
+            (DVec3::Y, DVec3::new(3.0, 5.0, 2.0)),
+        ] {
+            let point = world_point(&card, local);
+            assert!(close(point, expected), "{local:?}: {point:?}");
+            let point = world_point(&late, local);
+            assert!(close(point, expected), "late {local:?}: {point:?}");
+        }
+        let point = world_point(&near, DVec3::ZERO);
+        assert!(close(point, DVec3::new(7.0, 1.0, 0.0)), "{point:?}");
+        let point = world_point(&far, DVec3::ZERO);
+        assert!(close(point, DVec3::new(7.0, 3.0, 0.0)), "{point:?}");
     }
 
     #[test]

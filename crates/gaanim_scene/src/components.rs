@@ -886,6 +886,9 @@ pub struct Lighting3D {
     /// Whether opaque meshes cast shadows from the first lights onto lit
     /// meshes.
     pub shadows: bool,
+    /// The world's up axis is z rather than y: the fixed key light shines
+    /// from above it and the sky lights what faces it.
+    pub z_up: bool,
 }
 
 impl Default for Lighting3D {
@@ -894,6 +897,7 @@ impl Default for Lighting3D {
             enabled: true,
             intensity: 1.0,
             shadows: true,
+            z_up: false,
         }
     }
 }

@@ -1258,21 +1258,21 @@ scene.render()
 #api-entry(
   name: "Geometry.cylinder",
   kind: "factory",
-  desc: [Cilindro a lo largo de Y; `caps=False` lo deja abierto.],
+  desc: [Cilindro a lo largo del eje vertical de la escena (Y, o Z con `Scene(up="z")`); `caps=False` lo deja abierto.],
   none,
 )
 
 #api-entry(
   name: "Geometry.cone",
   kind: "factory",
-  desc: [Cono a lo largo de Y; `cap=False` quita la base.],
+  desc: [Cono a lo largo del eje vertical de la escena (Y, o Z con `Scene(up="z")`); `cap=False` quita la base.],
   none,
 )
 
 #api-entry(
   name: "Geometry.plane",
   kind: "factory",
-  desc: [Plano en XZ con normales hacia arriba, subdividido en `subdivisions` celdas.],
+  desc: [Plano horizontal con normales hacia arriba (en XZ, o en XY con `Scene(up="z")`), subdividido en `subdivisions` celdas.],
   none,
 )
 

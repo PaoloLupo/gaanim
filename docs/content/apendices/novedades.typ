@@ -253,13 +253,14 @@ sobre su punto.
 
 == Al actualizar
 
-- Los paquetes `.gaanim` pasan al formato 14, que guarda los morphs 3D, las
+- Los paquetes `.gaanim` pasan al formato 15, que guarda los morphs 3D, las
   copias de mallas, las imágenes de los objetos en el mundo 3D, la sombra y
   el desenfoque de los objetos 3D, los morph targets y mapas de normales de
   los modelos glTF, cómo se mezcla el contenido 3D translúcido, los conos de
   los focos, la profundidad de campo del contenido 3D, los volúmenes, el
-  desplazamiento de la lente de la cámara y la cámara del segmento que sale
-  en una transición. Gaanim sigue abriendo los de formato 5 a 13; un Gaanim
+  desplazamiento de la lente de la cámara, la cámara del segmento que sale
+  en una transición y si el eje vertical del mundo es z. Gaanim sigue
+  abriendo los de formato 5 a 14; un Gaanim
   anterior no abre los nuevos, así que actualiza los reproductores que los
   publican.
 - Un segmento que sale con una transición mientras el siguiente cambia la
