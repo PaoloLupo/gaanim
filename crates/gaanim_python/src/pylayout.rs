@@ -1660,8 +1660,8 @@ impl PyBox {
             false,
             true,
         );
-        // After the reflow, at the same instant: a clip given before the box
-        // takes the child is lost when it does.
+        // After the reflow, at the same instant: the wipe follows the child as
+        // the box placed it, or the copy the box rewrapped a text into.
         for (child, opening) in [(&entering, true), (&leaving, false)] {
             if let Some(child) = child {
                 canvas
