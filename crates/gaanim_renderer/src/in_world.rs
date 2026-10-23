@@ -469,6 +469,7 @@ pub(crate) fn resolve_in_world_wipes_system(world: &mut World) {
         if wiped != wiped_too {
             continue;
         }
+        let wiped = &gaanim_animation::stand_in_at(*wiped, time, world);
         if !follow.holds_at(time) {
             updates.push((target, BezPath::new()));
             continue;

@@ -3307,6 +3307,13 @@ impl Timeline {
     ) -> Option<gaanim_core::glam::DMat4> {
         use gaanim_animation::{FollowOffsetSpace, TrackingEndpoint};
         use gaanim_core::glam::DVec3;
+        // A text a layout replaced by a copy by then is read as the copy.
+        let source = context
+            .entity_map
+            .get(&source)
+            .map(|entity| gaanim_animation::stand_in_at(*entity, time, world))
+            .and_then(|entity| context.object_of.get(&entity).copied())
+            .unwrap_or(source);
         let clips = context
             .clips
             .get(&source)

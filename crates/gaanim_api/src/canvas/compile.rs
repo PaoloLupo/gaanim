@@ -5524,6 +5524,19 @@ impl SceneModel {
                             text_config,
                         );
                         Self::carry_text_fill(builder, member, replacement.id);
+                        // What follows the text, given before now, follows the
+                        // copy from now on.
+                        if let (Some(old), Some(copy)) = (
+                            builder.states.get(member),
+                            builder.states.get(replacement.id),
+                        ) {
+                            let (old, copy) = (old.entity, copy.entity);
+                            let since = builder.current_time;
+                            builder
+                                .commands
+                                .entity(old)
+                                .insert(gaanim_animation::ReplacedBy { copy, since });
+                        }
                         let entering_ancestor = entering.is_some_and(|entering| {
                             let mut current = Some(*layout_id);
                             while let Some(id) = current {
@@ -25293,6 +25306,137 @@ mod tests {
         assert!(
             unclipped.is_empty(),
             "unclipped: {unclipped:?} of {drawn:?}"
+        );
+    }
+
+    /// What follows a loose text, given before a column adopts it at 0.5 s,
+    /// follows the text until then, and from then on the copy the column
+    /// rewraps it into, by its origin and by an anchor of its bounds.
+    #[test]
+    fn a_follow_given_before_a_box_adopts_a_text_follows_its_copy() {
+        use bevy::prelude::App;
+        use gaanim_animation::FollowOffsetSpace;
+        let mut canvas = SceneModel::new(640, 360);
+        let member = |handle: &crate::canvas::DrawableHandle| crate::canvas::LayoutMemberSpec {
+            id: handle.id,
+            style: gaanim_layout::LayoutItemStyle::default(),
+        };
+        let column = crate::canvas::LayoutSpec {
+            kind: gaanim_layout::LayoutNodeKind::Column { wrap: false },
+            style: gaanim_layout::LayoutStyle {
+                gap: DVec2::splat(20.0),
+                ..Default::default()
+            },
+            within: LayoutWithin::Intrinsic,
+        };
+        let first = canvas.rect(80.0, 30.0);
+        let outer = canvas.group(&[&first]);
+        canvas.reflow_layout(
+            &outer,
+            vec![member(&first)],
+            column.clone(),
+            1,
+            None,
+            None,
+            None,
+        );
+        let label = canvas.text("target").move_to(-250.0, 120.0);
+        canvas.circle(5.0).follow_endpoint(
+            CanvasEndpoint::Entity(label.id),
+            DVec3::ZERO,
+            FollowOffsetSpace::World,
+        );
+        canvas.circle(5.0).follow_endpoint(
+            CanvasEndpoint::Anchor(label.anchor_point(Anchor::TopRight, DVec3::ZERO)),
+            DVec3::ZERO,
+            FollowOffsetSpace::World,
+        );
+        canvas.wait(0.5);
+        label.claim_layout(&outer).unwrap();
+        canvas.set_group_members(&outer, &[&first, &label]);
+        canvas.reflow_layout(
+            &outer,
+            vec![member(&first), member(&label)],
+            column,
+            2,
+            None,
+            Some(&label),
+            None,
+        );
+        canvas.wait(0.5);
+
+        let mut app = App::new();
+        app.add_plugins(bevy::prelude::MinimalPlugins)
+            .add_plugins(gaanim_scene::GaanimScenePlugin)
+            .add_plugins(gaanim_animation::GaanimAnimationPlugin)
+            .add_plugins(gaanim_timeline::GaanimTimelinePlugin)
+            .add_plugins(gaanim_text::GaanimTextPlugin)
+            .add_plugins(gaanim_renderer::GaanimDerivedGeometryPlugin);
+        app.finish();
+        app.cleanup();
+        app.update();
+        crate::runtime::replay_canvas_into(app.world_mut(), canvas);
+        app.update();
+        app.world_mut().resource_mut::<Timeline>().keyframes.clear();
+        gaanim_timeline::capture_reload_keyframe(app.world_mut());
+        let label = entity_of(app.world_mut(), &label);
+        // The followers, by what they follow: the text's origin or a corner.
+        let follower = |app: &mut App, anchored: bool| {
+            app.world_mut()
+                .query::<(Entity, &gaanim_animation::EndpointFollow)>()
+                .iter(app.world())
+                .find(|(_, follow)| {
+                    matches!(
+                        follow.endpoint,
+                        gaanim_animation::TrackingEndpoint::EntityAnchor { .. }
+                    ) == anchored
+                })
+                .unwrap()
+                .0
+        };
+        let (origin, corner) = (follower(&mut app, false), follower(&mut app, true));
+        let copy = app
+            .world()
+            .get::<gaanim_animation::ReplacedBy>(label)
+            .expect("the column rewraps the text into a copy")
+            .copy;
+        // Where the followers stand, and where the origin and the top right
+        // corner of `text` are, at `time`.
+        let at = |app: &mut App, time: f64, text: Entity| {
+            app.world_mut().resource_mut::<Timeline>().seek_request = Some(time);
+            app.update();
+            let world = app.world();
+            let place = |entity| {
+                world
+                    .get::<gaanim_math::GlobalSpatialTransform>(entity)
+                    .unwrap()
+                    .mat4
+                    .transform_point3(DVec3::ZERO)
+            };
+            let bounds = world.get::<LocalBounds>(text).unwrap().0;
+            let top_right = world
+                .get::<gaanim_math::GlobalSpatialTransform>(text)
+                .unwrap()
+                .mat4
+                .transform_point3(DVec3::new(bounds.max.x, bounds.max.y, 0.0));
+            ([place(origin), place(corner)], [place(text), top_right])
+        };
+        let close = |a: DVec3, b: DVec3| a.truncate().distance(b.truncate()) < 1e-6;
+        let ([followed, cornered], [text, top_right]) = at(&mut app, 0.25, label);
+        assert!(close(followed, text), "before: {followed:?} {text:?}");
+        assert!(
+            close(cornered, top_right),
+            "before: {cornered:?} {top_right:?}"
+        );
+        let ([followed, cornered], [text, top_right]) = at(&mut app, 0.75, copy);
+        assert!(close(followed, text), "after: {followed:?} {text:?}");
+        assert!(
+            close(cornered, top_right),
+            "after: {cornered:?} {top_right:?}"
+        );
+        assert!(
+            text.distance(DVec3::new(-250.0, 120.0, 0.0)) > 50.0,
+            "the column moved the text: {text:?}"
         );
     }
 
