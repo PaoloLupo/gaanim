@@ -224,11 +224,13 @@ const WIPE_MASK_SIDE: f64 = 2000.0;
 /// target's bounds in `direction` as `reveal` goes from 0 to 1. The edge
 /// runs from the bounds' corner (or side) behind the travel to the one
 /// ahead of it, both read every frame, so the wipe follows the target.
+/// Before the cursor the target is hidden, or whole with `whole_before`.
 pub(crate) fn wipe_mask(
     state: &SharedCanvasState,
     target: ObjectId,
     reveal: ScalarSource,
     direction: Direction,
+    whole_before: bool,
 ) -> Result<DrawableHandle, InvalidWipe> {
     let travel = direction.to_vector().truncate();
     if !travel.is_finite() || travel.length_squared() <= f64::EPSILON {
@@ -260,8 +262,14 @@ pub(crate) fn wipe_mask(
             .no_stroke()
             .rotate_to(travel.y.atan2(travel.x));
     // Until the follow below takes over at the cursor, the mask waits far
-    // behind the travel, so the target is hidden rather than whole.
-    let waiting = -travel * WIPE_MASK_SIDE * 10.0;
+    // behind the travel, so the target is hidden rather than whole; or, with
+    // `whole_before`, over the middle of the scene, its leading edge a
+    // hundred units past the origin, so the target is whole.
+    let waiting = if whole_before {
+        -travel * (WIPE_MASK_SIDE * 0.5 - 100.0)
+    } else {
+        -travel * WIPE_MASK_SIDE * 10.0
+    };
     let mask = mask.move_to(waiting.x, waiting.y);
     let mut state = state.lock().expect("canvas state poisoned");
     let ops = &mut state.active_mut().ops;
@@ -900,6 +908,7 @@ impl DrawableHandle {
                 duration: duration.filter(|value| value.is_finite() && *value > 0.0),
                 entering: None,
                 leaving: None,
+                fold: false,
                 resolve: true,
                 remeasure: None,
             });
@@ -2152,7 +2161,7 @@ impl DrawableHandle {
         reveal: ScalarSource,
         direction: Direction,
     ) -> Result<DrawableHandle, InvalidWipe> {
-        wipe_mask(&self.state, self.id, reveal, direction)
+        wipe_mask(&self.state, self.id, reveal, direction, false)
     }
 
     /// Colors every matching text or equation fragment in this drawable.

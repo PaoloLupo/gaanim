@@ -1274,16 +1274,35 @@ class Box(Drawable):
             strip = scene.layout.box("Breaking", background="#f5e6c8", edge=True)
         """
         ...
-    def add(self, child: Drawable | str, *, at: Optional[int] = None, duration: Optional[float] = None, advance: bool = True) -> Any:
+    def add(self, child: Drawable | str, *, at: Optional[int] = None, duration: Optional[float] = None, advance: bool = True, enter: Literal["fade", "unfold"] = "fade") -> Any:
         """Insert a child (at ``at`` or at the end) and return it.
 
         With ``duration`` the others slide to make room while it fades in. A
         child that comes from another box (taken out with ``detach``) slides
         from where it stands instead, and follows its former box until then.
+
+        ``enter="unfold"`` opens its slot instead, as a CSS ``height``
+        transition with ``overflow: hidden``: the slot grows from nothing
+        along the box's main axis (down a column, right along a row) with the
+        same duration and easing as the others slide, and the child is
+        clipped to it, its content on the edge it enters from, moving with
+        the sibling before it. Nothing overlaps while the slot opens. The
+        clip replaces any ``clip`` the child had; in a grid or a stack the
+        slot opens in place. An unknown value raises ``ValueError``.
+
+        Example:
+            index.add(detail, at=1, duration=0.45, enter="unfold")
         """
         ...
-    def remove(self, child: Drawable, *, duration: Optional[float] = None, advance: bool = True) -> None:
-        """Remove a child: it fades out while the others close the gap."""
+    def remove(self, child: Drawable, *, duration: Optional[float] = None, advance: bool = True, exit: Literal["fade", "fold"] = "fade") -> None:
+        """Remove a child: it fades out while the others close the gap.
+
+        ``exit="fold"`` closes its slot instead, the reverse of
+        ``add(enter="unfold")``: the child moves with the sibling before it,
+        clipped to the shrinking slot, and is hidden once it has closed (whole
+        again, so a later ``add`` shows all of it). An unknown value raises
+        ``ValueError``.
+        """
         ...
     def detach(self, child: Drawable, *, duration: Optional[float] = None, advance: bool = True) -> None:
         """Take a child out of the box without hiding it: it stays where it is and can move freely again.

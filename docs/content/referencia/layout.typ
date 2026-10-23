@@ -266,13 +266,14 @@ sitio, no mueven a sus hermanos y conservan su desplazamiento cuando la caja
 se reorganiza.
 Los cambios de estructura se registran en la línea de tiempo; con
 `duration=` se animan (los hijos se deslizan, lo que entra aparece con un
-fundido y lo que sale se desvanece) y avanzan el cursor como `scene.play`.
+fundido o se despliega y lo que sale se desvanece o se pliega) y avanzan el
+cursor como `scene.play`.
 Con `advance=False` el siguiente cambio empieza a la vez.
 
 #api-entry(
   name: "Box.add / remove / replace",
   kind: "method",
-  desc: [`add(hijo, at=None)` inserta un hijo (o una cadena) y lo devuelve; con `duration`, entra con un fundido, salvo un hijo que viene de otra caja (sacado con `detach`), que se desliza desde donde está. `remove(hijo)` lo quita con un fundido; `replace(viejo, nuevo)` pone `nuevo` en su lugar, heredando sus reglas de `item` si no trae las suyas. Un índice fuera de rango lanza `IndexError`.],
+  desc: [`add(hijo, at=None)` inserta un hijo (o una cadena) y lo devuelve; con `duration`, entra con un fundido, salvo un hijo que viene de otra caja (sacado con `detach`), que se desliza desde donde está. `remove(hijo)` lo quita con un fundido. Con `add(..., enter="unfold")` el hueco del hijo crece desde cero en el eje principal de la caja (hacia abajo en una columna, a la derecha en una fila), con la misma duración y curva con que se deslizan los demás, y el hijo se recorta a ese hueco con el contenido pegado al borde por el que entra, moviéndose con el hermano anterior: nada se encima mientras se abre, como una transición de `height` con `overflow: hidden` en CSS. `remove(..., exit="fold")` lo cierra igual y oculta el hijo al terminar. El recorte reemplaza el `clip` que tuviera el hijo; en un grid o una pila el hueco se abre en su sitio. `replace(viejo, nuevo)` pone `nuevo` en su lugar, heredando sus reglas de `item` si no trae las suyas. Un índice fuera de rango lanza `IndexError`.],
 )[
 ```python
 >>>from gaanim import *
@@ -282,6 +283,9 @@ Con `advance=False` el siguiente cambio empieza a la vez.
 board.add(scene.layout.box("Nueva", style=chip), at=1, duration=0.6)
 board.remove(board[3], duration=0.6)
 board.replace(board[0], scene.layout.box("Otra", style=chip), duration=0.6)
+indice = scene.layout.column("Métodos", "Resultados", gap="12px")
+detalle = indice.add(scene.layout.box("Seis muros", style=chip), at=1, duration=0.45, enter="unfold")
+indice.remove(detalle, duration=0.45, exit="fold")
 ```
 ]
 

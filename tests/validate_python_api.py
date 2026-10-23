@@ -3445,6 +3445,15 @@ def validate_layout_box_contract(module):
     added = scene.geometry.rect(2, 1)
     card.add(added, at=0)
     card.remove(added)
+    # A child unfolds into its slot and folds out of it.
+    unfolding = card.add(scene.geometry.rect(2, 1), at=1, duration=0.3, enter="unfold")
+    card.remove(unfolding, duration=0.3, exit="fold")
+    for description, operation in (
+        ("an unknown enter", lambda: card.add(scene.geometry.rect(1, 1), enter="slide")),
+        ("an unknown exit", lambda: card.remove(card[0], exit="slide")),
+    ):
+        if not raises_error(ValueError, operation):
+            failures.append(f"Box accepted {description}")
     if child.item(grow=1, margin=(0, "auto")) is not child:
         failures.append("Drawable.item did not return the drawable")
     try:
