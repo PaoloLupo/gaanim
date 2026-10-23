@@ -1,6 +1,6 @@
 ---
 name: gaanim-docs
-description: Consult the Gaanim documentation that matches the version installed in the current project before writing or explaining Gaanim scenes. Use in any project that uses Gaanim (a gaanim.toml, `from gaanim import`, or `gaanim` in pyproject.toml) when authoring or editing scenes, slides, animations, text, layout, visualization, audio, assets, themes, or export; when answering questions about the Gaanim Python API; or when a Gaanim error needs its documented contract.
+description: Consult the Gaanim documentation that matches the version installed in the current project before writing or explaining Gaanim scenes. Use in any project that uses Gaanim (a gaanim.toml, `from gaanim import`, or `gaanim` in pyproject.toml) when authoring or editing scenes, slides, animations, text, layout, visualization, audio, assets, themes, or export; when answering questions about the Gaanim Python API; when a Gaanim error needs its documented contract; or when checking how a rendered scene looks.
 ---
 
 # Consult Gaanim documentation
@@ -57,6 +57,22 @@ in the Gaanim application) rather than guessing the API.
    `gaanim check .` for a project (or `gaanim check path/to/script.py`), and
    `gaanim .` to preview. If the `gaanim` executable is unavailable, say the
    scene was not executed.
+6. Look at the result before calling it done: `gaanim check` only proves the
+   script runs, and the preview is a window you cannot see. Capture frames
+   into the gitignored `snapshots/` folder and open every PNG as an image:
+   - With `scene.stop()`: `gaanim --diff --example . --capture-stops
+     --capture-only --current snapshots` writes one `stop_NNNN.png` per stop.
+   - Without stops: end the script with `if snapshots :=
+     os.environ.get("GAANIM_SNAPSHOTS"): scene.snapshots(snapshots, [...])`
+     `else: scene.render()`, listing the seconds where each step has finished
+     (`scene.cursor` is the last frame), and run `gaanim --diff --example .
+     --capture-only --current snapshots` for `seek_*.png`.
+
+   Compare each image with the request (layout, overlaps, clipped text,
+   colors, what is visible when), fix the script and capture again. Never
+   pass `--bless` unless the user asks: it replaces approved baselines. If
+   you cannot capture or read images, say the result was not checked
+   visually. `guias/capturas-y-comparacion.typ` documents these options.
 
 Cite the page (`referencia/scene.typ`, ...) and docs version behind non-obvious API
 choices. Never edit files under the installed `_docs` directory.
