@@ -72,7 +72,9 @@ con un paquete por sistema y su suma SHA-256. No necesitas Rust ni compilar nada
 - El wheel `gaanim-<versión>-py3-none-any.whl` es el paquete de autoría: tipos,
   stubs y ayudas para que tu editor autocomplete la API. No contiene el
   renderer, así que `python main.py` falla a propósito: las escenas siempre se
-  ejecutan con `gaanim`.
+  ejecutan con `gaanim`. El mismo wheel está en PyPI como `gaanim`: los
+  proyectos lo fijan a la versión de la aplicación, así que `uv sync` instala
+  el mismo paquete.
 
 == Verifica la descarga
 

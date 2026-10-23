@@ -237,8 +237,10 @@ extensión nativa. Ejecutar o importar escenas con Python plano produce un error
 que dirige al usuario a la aplicación `gaanim`.
 
 Esta separación es un contrato de producto, no una limitación temporal del
-empaquetado: no se publicará un wheel autónomo. Los proyectos declaran el wheel
-para obtener la experiencia de autoría, pero siempre se ejecutan con
+empaquetado: no se publicará un wheel autónomo. El wheel de autoría se publica
+en PyPI como [`gaanim`](https://pypi.org/project/gaanim/) con cada versión, y
+los proyectos lo fijan a la versión de la aplicación (`gaanim==<versión>`) para
+que `uv sync` instale el mismo paquete; aun así siempre se ejecutan con
 `gaanim <script.py>` o `gaanim export ...`.
 
 Después de `just python-develop`, ejecute `just validate-python-api` para
