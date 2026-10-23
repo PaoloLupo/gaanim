@@ -13,18 +13,27 @@ instalar una versión nueva, sigue
 
 = 0.17.0
 
-Sin publicar. Una malla 3D se transforma en otra con `animate.transform_to`,
-`points_3d` e `instances` dibujan miles de puntos o copias de una malla
-como un solo objeto, las imágenes, las escenas Lottie, las sombras y los
-desenfoques también viven en el mundo 3D, los modelos glTF traen sus
-morph targets y sus mapas de normales, el contenido 3D translúcido puede
-mezclarse en el orden en que está en cada píxel, hay focos, la
+Publicada el 22 de octubre de 2026. Una malla 3D se transforma en otra con
+`animate.transform_to`, `points_3d` e `instances` dibujan miles de puntos o
+copias de una malla como un solo objeto, las imágenes, las escenas Lottie,
+las sombras y los desenfoques también viven en el mundo 3D, los modelos glTF
+traen sus morph targets y sus mapas de normales, el contenido 3D translúcido
+puede mezclarse en el orden en que está en cada píxel, hay focos, la
 profundidad de campo de la cámara desenfoca también el contenido 3D, y los
-campos escalares se dibujan como isosuperficies y volúmenes. La cámara 3D
-puede dejar su objetivo a un lado del encuadre, moverse con parámetros,
-describir tomas en órbita y pasar de una a otra rodeando el objetivo, y
-valer para una sola diapositiva; los rótulos 3D se colocan en pantalla
-sobre su punto.
+campos escalares se dibujan como isosuperficies y volúmenes. `deform` dobla
+un modelo con un campo de desplazamientos, una escena puede tener z hacia
+arriba, como los modelos de ingeniería, e `in_3d` pone un dibujo en un plano
+del modelo. La cámara 3D puede dejar su objetivo a un lado del encuadre,
+moverse con parámetros, describir tomas en órbita y pasar de una a otra
+rodeando el objetivo, y valer para una sola diapositiva; los rótulos 3D se
+colocan en pantalla sobre su punto. `scene.ui.pointer` enseña a usar un
+programa con un puntero que se mueve, hace clic y arrastra,
+`scene.viz.timeline` dibuja líneas de tiempo con sus eventos en carriles, el
+hijo de una caja puede desplegarse en su hueco y una caja raíz se acomoda en
+una zona o en la caja de un objeto. Trae también lo que iba a publicarse
+como 0.16.1: `orient_3d`, `polyline_3d` con coordenadas reactivas,
+`camera.project` y `screen_point`, y correcciones encontradas al hacer un
+video real. Lee «Al actualizar».
 
 == Morph entre mallas 3D
 
@@ -198,6 +207,113 @@ sobre su punto.
   muestra la vista previa, con sus restricciones: antes partía de la cámara
   sin `bind_3d` y el modelo saltaba.
 
+== Deformar un modelo con un campo
+
+- `modelo.deform(campo, amount=...)` deforma un objeto y todo lo que
+  contiene con un campo de desplazamientos, `campo(x, y, z) -> (dx, dy, dz)`
+  (o `campo(x, y) -> (dx, dy)` en el plano), leído en coordenadas del mundo
+  donde está cada parte sin deformar. `amount` lo escala, y con un
+  `Parameter` la forma se mueve con él: animar el parámetro hace oscilar el
+  modelo. `animate.deform(campo)` pasa de la deformación actual a otra y
+  `animate.deform(None)` vuelve a la forma original. Ver
+  #link("/referencia/drawable/#api-drawable-deform")[Drawable].
+- Cada parte la toma como se dibuja: los vértices de las mallas
+  (primitivas, `mesh`, extrusiones, muros hechos con un `plane` subdividido)
+  y de las líneas 3D se mueven uno a uno, con sus normales; una `line_3d`
+  cuyos extremos siguen a otros objetos los sigue; y lo demás (puntos,
+  textos, billboards, dibujos con `in_3d`) se mueve entero por el
+  desplazamiento en su origen.
+- El campo se muestrea una vez en una rejilla (`samples`, `region`) y se lee
+  entre sus puntos: Python no corre en cada fotograma, los valores escritos
+  no cambian y un salto en la línea de tiempo muestra la misma forma que la
+  reproducción.
+- Nuevo ejemplo, `3d/deform_3d`.
+
+== Modelos con z hacia arriba
+
+- `Scene(up="z")` lee las coordenadas 3D con z hacia arriba y la planta en
+  x/y, como los modelos de ingeniería y arquitectura, sin convertirlas:
+  `state_3d`, `state_orbit`, `look_at`, `bind_3d` y `camera_view_3d` toman z
+  como vertical, una órbita gira alrededor de z desde el lado −y, cilindros,
+  conos y toros quedan de pie sobre z, los planos se tienden en x/y, y la
+  luz fija y el cielo iluminan desde arriba. Ver
+  #link("/referencia/scene/#api-scene")[Escena].
+- `in_3d(plane=, origin=)` pone cada punto `(x, y)` de un dibujo en
+  `origin + x·u + y·v`, con `plane` igual a `"xy"`, `"xz"`, `"yz"` o un par
+  de direcciones `(u, v)`, sea cual sea su posición o su pivote: una planta
+  a una altura, un muro en y/z. Ver
+  #link("/referencia/drawable/#api-drawable-in-3d")[Drawable].
+- Las órbitas animadas giran alrededor del `up` de la cámara, no siempre de
+  y.
+- Nuevo ejemplo, `3d/z_up`.
+
+== Cajas que se despliegan y regiones para el layout
+
+- `box.add(hijo, duration=..., enter="unfold")` abre el hueco del hijo desde
+  cero en el eje principal de la caja, con la misma duración y curva con que
+  se deslizan los demás, y lo recorta a ese hueco con su contenido pegado al
+  borde por el que entra: nada se encima mientras se abre.
+  `box.remove(hijo, duration=..., exit="fold")` lo cierra igual. Ver
+  #link("/referencia/layout/#api-box-add-remove-replace")[Layout] y el
+  segmento nuevo del ejemplo `layout/reflow`.
+- `within=` de una caja raíz acepta también una `Zone` o un objeto (su
+  caja), como `layout.zones(..., within=)`: la caja se acomoda en esa
+  región. Antes una `Zone` lanzaba `TypeError`.
+- `Zone.crop(top=, bottom=, left=, right=)` lleva cada borde dado a esa
+  coordenada de la escena, sin depender del margen ni de la resolución de
+  diseño: `scene.layout.safe.crop(top=0.95, right=-1.5)` deja sitio a un
+  panel. Ver
+  #link("/referencia/layout/#api-zone-point-inset-crop-split-arrange")[Layout].
+
+== Puntero y líneas de tiempo
+
+- `scene.ui.pointer(style="arrow")` es un puntero de ratón (`"arrow"`,
+  `"hand"` o `"text"`) para enseñar a usar un programa:
+  `animate.to(objetivo, arc=...)` lleva su punta a un punto, un objeto o una
+  zona, `animate.click()` hace una onda y una pulsación, y
+  `animate.drag(objetivo, objeto)` arrastra un objeto con ella. Creado en un
+  punto 3D, mira a la cámara. Ver
+  #link("/referencia/drawable/#api-ui-pointer")[Drawable] y el ejemplo
+  `emphasis/pointer`.
+- `scene.viz.timeline(inicio, fin, breaks=...)` dibuja un eje de fechas, con
+  cortes de escala, y `timeline.event(fecha, título, cuerpo)` añade un
+  punto, un tallo y una etiqueta en el primer carril de su lado donde no
+  toca a las demás. `reserve` deja fechas libres para lo que se dibuja
+  aparte y `x(fecha)` da la posición de una fecha. Ver
+  #link("/referencia/visualization/#api-visualization-timeline")[Visualización]
+  y el ejemplo `visualization/timeline`.
+
+== Otros cambios
+
+- `Drawable.orient_3d(x_axis, y_axis)` y `.animate.orient_3d(...)` orientan un
+  objeto dando hacia dónde apuntan sus ejes x e y locales, sin buscar los
+  ángulos de `rotate_to_3d`: `orient_3d((0, 0, -1), (-1, 0, 0))` tiende una
+  gráfica `in_3d` en el suelo con su eje x hacia −z.
+- `scene.geometry.polyline_3d` acepta en cada coordenada un `Parameter`, un
+  `Computed` o `scene.time`, como `polyline`, y se vuelve a trazar en cada
+  fotograma: una línea 3D que crece o se deforma con los datos.
+- `scene.camera.project(punto, estado)` dice dónde dibuja un estado de
+  cámara un punto del mundo, en las unidades de los objetos `hud()`, y
+  `scene.camera.screen_point(objetivo)` es un punto que sigue en cada
+  fotograma dónde lo dibuja la cámara: una etiqueta `hud()` que lo sigue con
+  `follow` queda sobre un objeto 3D aunque la cámara se mueva.
+- `scene.drive_from_samples(times, values, "x", targets=[(objeto, escala), ...])`
+  conduce varios objetos con una misma serie, cada uno con su escala, sin
+  copiar la serie por objeto: los pisos de un modelo glTF con la forma de un
+  modo, por ejemplo.
+- `CoordinateRef.place` y `Drawable.at_coordinate` aceptan `anchor` y
+  `offset`, como `Drawable.place`: `plane.coord(t, pico).place(etiqueta,
+  anchor="left", offset=(0.15, 0))` deja la etiqueta a la derecha del punto,
+  en unidades de escena, sin desplazar la coordenada en unidades de datos.
+- `gaanim check` avisa de un texto que se sale del área segura en una pausa
+  o al final de un segmento, y de una fila de un layout que parte un texto en
+  varias líneas por falta de ancho, con el texto y dónde.
+- La referencia dice en qué orden se componen los ángulos de `rotate_to_3d`
+  (`Rx · Ry · Rz`: primero z, luego y, luego x, sobre los ejes del mundo),
+  qué eje mueve `Axis.crossing` (`crossing("min")` en el eje y baja el eje x)
+  y que un nodo de glTF se mueve en las unidades del archivo, que escalan con
+  el `scale_to` del modelo.
+
 == Correcciones
 
 - `animate.move_to_3d(p)` de un grupo llevaba su traslación a `p`, así que
@@ -250,6 +366,50 @@ sobre su punto.
 - El stub de `gaanim.sections` no declaraba `camera=` en `Section` ni en
   `SectionStep`, ni el alias `SegmentCamera`, así que pyright rechazaba lo
   que la escena aceptaba.
+- `scene.media.image(ruta, width=w, height=h, fit="contain")` (y `video`)
+  guardaba como marco el tamaño ajustado de la imagen entera, así que un
+  `crop` posterior se ajustaba a esa caja pequeña y se veía a la escala de
+  la imagen completa. El marco es ahora el tamaño pedido, como con
+  `frame(w, h)`; sin tamaño, sigue siendo el tamaño ajustado.
+- Un recorte (`clip`, `wipe`, `animate.wipe`) dado a un objeto antes de que
+  una caja lo adoptara con `add` se perdía: el fondo de una caja creada
+  después de la columna que la adopta aún no estaba en la caja, y la copia
+  en la que el layout vuelve a partir un texto nacía sin recorte. Ahora se
+  conservan, y una caja que entra con `duration` toma su tamaño de
+  inmediato en lugar de crecer desde el que tenía sola.
+- Lo que seguía a un texto suelto antes de que una caja lo adoptara (un
+  `connector`, un `follow`, un barrido) seguía al texto original, que el
+  layout reemplaza por una copia: apuntaba a donde estaba el texto antes del
+  `add`. Ahora sigue al texto hasta ese momento y a la copia desde entonces,
+  también al saltar en la línea de tiempo.
+- Con un paso decimal, la marca del cero de un eje se rotulaba con el residuo
+  de coma flotante: `Axis.linear(-0.35, 0.35).ticks(0.1)` mostraba
+  `−2.776e−17`. Cada marca es ahora un múltiplo exacto del paso, en vez de
+  sumarlo una y otra vez desde el mínimo, y el cero dice `0`.
+- `camera.animate.look_at(..., up=...)` con otro `up` giraba la imagen de golpe
+  en el primer fotograma. Ahora `up` gira hacia el nuevo a lo largo de la
+  animación, como el ojo y el objetivo; si no cambia, la cámara se mueve igual
+  que antes.
+- `traced_path_3d(...).stroke(color, ancho)` tomaba el ancho pero dibujaba la
+  estela siempre en blanco. Ahora usa el color del trazo, o el del estilo
+  `plot` del tema si no se da, como `polyline_3d`; un `colormap` la sigue
+  coloreando en el tiempo.
+- `polyline_3d(..., color=...)` ignoraba el color en una escena con tema: el
+  trazo del estilo `plot` del tema lo tapaba. Ahora el trazo del tema toma ese
+  color y conserva su ancho.
+- `wipe(reveal)`, `animate.wipe()` y `clip` no recortaban un objeto llevado al
+  mundo con `in_3d()`: la curva se veía entera desde el inicio. El pase 3D
+  recorta ahora sus contornos con la máscara, como en 2D, y un `wipe` barre
+  el objeto en su propio plano, también si `orient_3d` o `rotate_to_3d` lo
+  giran fuera del plano de la escena.
+- `gaanim export` con solo `--width` (o solo `--height`) dejaba el otro lado
+  en 1080 (o 1920) y añadía franjas vacías: una escena 16 × 9 con
+  `--width 960` salía de 960 × 1080. Ahora el otro lado sigue la proporción del
+  marco, redondeado a un número par de píxeles: 960 × 540.
+- Una lectura (`scene.viz.readout`, `variable`) separaba sus términos por la
+  tinta de cada uno, así que `T = 1.62 s` dejaba más aire entre `T` y `=` que
+  entre `=` y el número. Ahora los compone como un texto, desde el avance de
+  cada término, y conservan el blanco que la fuente da a cada glifo.
 
 == Al actualizar
 
@@ -284,81 +444,11 @@ sobre su punto.
   su caja.
 - Lo que cambia de golpe justo después de un `scene.stop()` empieza un
   microsegundo más tarde, y lo que le sigue también.
-
-= 0.16.1
-
-Sin publicar. Corrige detalles encontrados al hacer un video real: el
-rótulo del cero de los ejes con pasos decimales, el giro de la cámara al
-cambiar `up`, el color de `traced_path_3d` y de `polyline_3d`, `wipe` dentro
-de `in_3d`, el tamaño de `gaanim export` con solo `--width` y el espaciado de
-las lecturas. `orient_3d` orienta un objeto en 3D dando las direcciones de sus
-ejes, `polyline_3d` acepta coordenadas reactivas y `place` coloca una etiqueta
-junto a un dato por un ancla.
-
-== Cambios
-
-- `Drawable.orient_3d(x_axis, y_axis)` y `.animate.orient_3d(...)` orientan un
-  objeto dando hacia dónde apuntan sus ejes x e y locales, sin buscar los
-  ángulos de `rotate_to_3d`: `orient_3d((0, 0, -1), (-1, 0, 0))` tiende una
-  gráfica `in_3d` en el suelo con su eje x hacia −z.
-- `scene.geometry.polyline_3d` acepta en cada coordenada un `Parameter`, un
-  `Computed` o `scene.time`, como `polyline`, y se vuelve a trazar en cada
-  fotograma: una línea 3D que crece o se deforma con los datos.
-- `scene.camera.project(punto, estado)` dice dónde dibuja un estado de
-  cámara un punto del mundo, en las unidades de los objetos `hud()`, y
-  `scene.camera.screen_point(objetivo)` es un punto que sigue en cada
-  fotograma dónde lo dibuja la cámara: una etiqueta `hud()` que lo sigue con
-  `follow` queda sobre un objeto 3D aunque la cámara se mueva.
-- `scene.drive_from_samples(times, values, "x", targets=[(objeto, escala), ...])`
-  conduce varios objetos con una misma serie, cada uno con su escala, sin
-  copiar la serie por objeto: los pisos de un modelo glTF con la forma de un
-  modo, por ejemplo.
-- `CoordinateRef.place` y `Drawable.at_coordinate` aceptan `anchor` y
-  `offset`, como `Drawable.place`: `plane.coord(t, pico).place(etiqueta,
-  anchor="left", offset=(0.15, 0))` deja la etiqueta a la derecha del punto,
-  en unidades de escena, sin desplazar la coordenada en unidades de datos.
-- `gaanim check` avisa de un texto que se sale del área segura en una pausa
-  o al final de un segmento, y de una fila de un layout que parte un texto en
-  varias líneas por falta de ancho, con el texto y dónde.
-- La referencia dice en qué orden se componen los ángulos de `rotate_to_3d`
-  (`Rx · Ry · Rz`: primero z, luego y, luego x, sobre los ejes del mundo),
-  qué eje mueve `Axis.crossing` (`crossing("min")` en el eje y baja el eje x)
-  y que un nodo de glTF se mueve en las unidades del archivo, que escalan con
-  el `scale_to` del modelo.
-
-== Correcciones
-
-- Con un paso decimal, la marca del cero de un eje se rotulaba con el residuo
-  de coma flotante: `Axis.linear(-0.35, 0.35).ticks(0.1)` mostraba
-  `−2.776e−17`. Cada marca es ahora un múltiplo exacto del paso, en vez de
-  sumarlo una y otra vez desde el mínimo, y el cero dice `0`.
-- `camera.animate.look_at(..., up=...)` con otro `up` giraba la imagen de golpe
-  en el primer fotograma. Ahora `up` gira hacia el nuevo a lo largo de la
-  animación, como el ojo y el objetivo; si no cambia, la cámara se mueve igual
-  que antes.
-- `traced_path_3d(...).stroke(color, ancho)` tomaba el ancho pero dibujaba la
-  estela siempre en blanco. Ahora usa el color del trazo, o el del estilo
-  `plot` del tema si no se da, como `polyline_3d`; un `colormap` la sigue
-  coloreando en el tiempo.
-- `polyline_3d(..., color=...)` ignoraba el color en una escena con tema: el
-  trazo del estilo `plot` del tema lo tapaba. Ahora el trazo del tema toma ese
-  color y conserva su ancho.
-- `wipe(reveal)`, `animate.wipe()` y `clip` no recortaban un objeto llevado al
-  mundo con `in_3d()`: la curva se veía entera desde el inicio. El pase 3D
-  recorta ahora sus contornos con la máscara, como en 2D, y un `wipe` barre
-  el objeto en su propio plano, también si `orient_3d` o `rotate_to_3d` lo
-  giran fuera del plano de la escena.
-- `gaanim export` con solo `--width` (o solo `--height`) dejaba el otro lado
-  en 1080 (o 1920) y añadía franjas vacías: una escena 16 × 9 con
-  `--width 960` salía de 960 × 1080. Ahora el otro lado sigue la proporción del
-  marco, redondeado a un número par de píxeles: 960 × 540.
-- Una lectura (`scene.viz.readout`, `variable`) separaba sus términos por la
-  tinta de cada uno, así que `T = 1.62 s` dejaba más aire entre `T` y `=` que
-  entre `=` y el número. Ahora los compone como un texto, desde el avance de
-  cada término, y conservan el blanco que la fuente da a cada glifo.
-
-== Al actualizar
-
+- Una imagen o un vídeo con `width`, `height` y `fit="contain"` mide ahora
+  el marco pedido para el layout y las anclas, como con `frame(...)`; antes
+  medía el tamaño ajustado.
+- `state_3d` y `state_orbit` toman por defecto el eje vertical de la escena
+  (`up=None`); con y hacia arriba no cambia nada.
 - La estela de un `traced_path_3d` sin `stroke` ni `colormap` ya no es blanca:
   toma el color del estilo `plot` del tema, como una `polyline_3d`. Para
   conservar el blanco, añade `.stroke(WHITE, 0.03)`.
