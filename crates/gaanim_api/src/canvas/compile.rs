@@ -2124,6 +2124,23 @@ fn compiled_text_measure(
     })
 }
 
+/// The animated layout changes that start at one instant (`advance=False`),
+/// which run together: a later one animates from where the earlier ones
+/// started to the layout they all leave, as if it were the only one.
+#[derive(Default)]
+struct LayoutInstant {
+    time: f64,
+    /// Each box child, root box and leaving child as it stood before the
+    /// first change of the instant moved it.
+    starts: HashMap<ObjectId, SpatialTransform>,
+    /// Each root box's rest before the first change of the instant.
+    root_rests: HashMap<ObjectId, SpatialTransform>,
+    /// Children that entered, by source object, and whether they unfold.
+    entering: HashMap<ObjectId, bool>,
+    /// Children that left and whether they fold out.
+    leaving: HashMap<ObjectId, bool>,
+}
+
 struct CompiledLayoutTree {
     root: gaanim_layout::LayoutNode,
     source_by_id: BTreeMap<gaanim_layout::LayoutId, ObjectId>,
@@ -2132,6 +2149,24 @@ struct CompiledLayoutTree {
     children_by_id: BTreeMap<gaanim_layout::LayoutId, Vec<gaanim_layout::LayoutId>>,
     fixed: BTreeMap<gaanim_layout::LayoutId, DVec2>,
     texts: BTreeMap<gaanim_layout::LayoutId, CompiledTextMeasure>,
+}
+
+impl CompiledLayoutTree {
+    /// Whether node `id` is one of `sources` or lies inside one.
+    fn within(&self, id: gaanim_layout::LayoutId, sources: &HashSet<ObjectId>) -> bool {
+        let mut current = Some(id);
+        while let Some(id) = current {
+            if self
+                .source_by_id
+                .get(&id)
+                .is_some_and(|source| sources.contains(source))
+            {
+                return true;
+            }
+            current = self.parent_by_id.get(&id).copied();
+        }
+        false
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3830,6 +3865,7 @@ impl SceneModel {
         diagnostic_state: &crate::canvas::ops::SharedCanvasState,
     ) {
         let scene_start = builder.current_time;
+        let mut layout_instant: Option<LayoutInstant> = None;
         let transform_targets = Self::transform_targets(&seg.ops);
         let mut fade_in_targets: HashSet<ObjectId> = seg
             .ops
@@ -5138,18 +5174,47 @@ impl SceneModel {
                                 .and_then(|id| builder.states.get(*id))
                                 .is_some_and(|state| state.opacity > 0.0))
                     });
+                    // Animated changes that start at the same instant run
+                    // together (see `LayoutInstant`). A cut at that instant,
+                    // such as a new box laying itself out, does not join
+                    // them: it places its children at once, and later changes
+                    // move them from there.
+                    if layout_instant
+                        .as_ref()
+                        .is_some_and(|instant| instant.time != builder.current_time)
+                    {
+                        layout_instant = None;
+                    }
+                    let joins_instant = duration.is_some();
+                    if let Some(instant) = layout_instant.as_mut()
+                        && !joins_instant
+                    {
+                        for actual in tree
+                            .source_by_id
+                            .values()
+                            .filter_map(|source| id_map.get(source))
+                        {
+                            instant.starts.remove(actual);
+                        }
+                        instant.root_rests.remove(&container);
+                    }
+                    if joins_instant && layout_instant.is_none() {
+                        layout_instant = Some(LayoutInstant {
+                            time: builder.current_time,
+                            ..Default::default()
+                        });
+                    }
+                    // The children entering at this instant, by source: this
+                    // change's and those of the changes before it.
+                    let entered: HashSet<ObjectId> = layout_instant
+                        .iter()
+                        .filter(|_| joins_instant)
+                        .flat_map(|instant| instant.entering.keys().copied())
+                        .chain(entering)
+                        .collect();
                     // A child entering now appears in its place: only the
                     // others move, from where they were.
-                    let entering_subtree = |id: gaanim_layout::LayoutId| {
-                        let mut current = Some(id);
-                        while let Some(id) = current {
-                            if tree.source_by_id.get(&id) == entering.as_ref() {
-                                return true;
-                            }
-                            current = tree.parent_by_id.get(&id).copied();
-                        }
-                        false
-                    };
+                    let entering_subtree = |id| tree.within(id, &entered);
                     let mut before: HashMap<ObjectId, SpatialTransform> = tree
                         .source_by_id
                         .iter()
@@ -5537,16 +5602,7 @@ impl SceneModel {
                                 .entity(old)
                                 .insert(gaanim_animation::ReplacedBy { copy, since });
                         }
-                        let entering_ancestor = entering.is_some_and(|entering| {
-                            let mut current = Some(*layout_id);
-                            while let Some(id) = current {
-                                if tree.source_by_id.get(&id) == Some(&entering) {
-                                    return true;
-                                }
-                                current = tree.parent_by_id.get(&id).copied();
-                            }
-                            false
-                        });
+                        let entering_ancestor = tree.within(*layout_id, &entered);
                         let entry_pending = Self::fade_in_pending(&seg.ops, op_index, *source);
                         // A text placed for the first time, or entering with
                         // its box, has shown no composition worth fading from.
@@ -5736,8 +5792,14 @@ impl SceneModel {
                         root_box.bounds.width() * 0.5,
                         root_box.bounds.height() * 0.5,
                     );
-                    // Where the box stands now, moved by its own animations.
-                    let root_before = builder.states.get(container).map(|state| state.transform);
+                    // Where the box stands now, moved by its own animations,
+                    // or where it stood before the changes of this instant.
+                    let root_before = layout_instant
+                        .as_ref()
+                        .filter(|_| joins_instant)
+                        .and_then(|instant| instant.starts.get(&container))
+                        .copied()
+                        .or_else(|| builder.states.get(container).map(|state| state.transform));
                     if let Some(state) = builder.states.get_mut(container) {
                         state.bounds = local_root_bounds;
                         state.transform = SpatialTransform::identity();
@@ -5778,7 +5840,18 @@ impl SceneModel {
                     if let Some(placed) = builder.states.get(container).map(|state| state.transform)
                     {
                         let previous = builder.layout_root_rests.insert(container, placed);
+                        let previous = layout_instant
+                            .as_ref()
+                            .filter(|_| joins_instant)
+                            .and_then(|instant| instant.root_rests.get(&container))
+                            .copied()
+                            .or(previous);
                         if let (Some(previous), Some(before)) = (previous, root_before) {
+                            if let Some(instant) = layout_instant.as_mut().filter(|_| joins_instant)
+                            {
+                                instant.root_rests.entry(container).or_insert(previous);
+                                instant.starts.entry(container).or_insert(before);
+                            }
                             let entity = builder.states.get(container).map(|state| state.entity);
                             if let Some(entity) = entity {
                                 Self::insert_transform_keeping_grow(builder, entity, previous);
@@ -5795,16 +5868,7 @@ impl SceneModel {
 
                     // A box entering now takes its size at once, as it takes
                     // its place: only the others resize, from what they were.
-                    let entering_now = |id: gaanim_layout::LayoutId| {
-                        let mut current = Some(id);
-                        while let Some(id) = current {
-                            if tree.source_by_id.get(&id) == entering.as_ref() {
-                                return true;
-                            }
-                            current = tree.parent_by_id.get(&id).copied();
-                        }
-                        false
-                    };
+                    let entering_now = |id| tree.within(id, &entered);
                     let mut targets = Vec::new();
                     let mut cover_clips = Vec::new();
                     for (layout_id, member) in &materialized_by_id {
@@ -6102,32 +6166,108 @@ impl SceneModel {
                         .as_ref()
                         .and_then(|member| id_map.get(member))
                         .copied();
-                    let unfold_start = entering_actual.filter(|_| folding).map(|child| {
-                        let shift = Self::fold_shift(
-                            builder,
-                            &tree,
-                            &resolved,
-                            &materialized_by_id,
-                            &before,
-                            &targets,
-                            child,
-                            true,
-                        );
-                        (child, shift)
-                    });
-                    let fold_travel = leaving_actual.filter(|_| folding).map(|child| {
-                        let shift = Self::fold_shift(
-                            builder,
-                            &tree,
-                            &resolved,
-                            &materialized_by_id,
-                            &before,
-                            &targets,
-                            child,
-                            false,
-                        );
-                        (child, shift)
-                    });
+                    // The changes before this one at this instant moved the
+                    // children from where they stood then: this one moves
+                    // them from there to where all of them leave them, and
+                    // redoes the entries and exits they started against that
+                    // layout, whatever order they came in.
+                    let mut entries: Vec<(ObjectId, bool)> = entering_actual
+                        .map(|child| (child, folding))
+                        .into_iter()
+                        .collect();
+                    let mut exits: Vec<(ObjectId, bool)> = leaving_actual
+                        .map(|child| (child, folding))
+                        .into_iter()
+                        .collect();
+                    // Exits an earlier change of the instant moved, put back
+                    // where they started.
+                    let mut restarted = HashSet::new();
+                    if let Some(instant) = layout_instant.as_mut().filter(|_| joins_instant) {
+                        for (member, transform) in before.iter_mut() {
+                            *transform = *instant.starts.entry(*member).or_insert(*transform);
+                        }
+                        if let Some(source) = entering {
+                            instant.entering.insert(source, folding);
+                        }
+                        if let Some(child) = leaving_actual
+                            && let Some(state) = builder.states.get(child)
+                        {
+                            instant.starts.entry(child).or_insert(state.transform);
+                            instant.leaving.insert(child, folding);
+                        }
+                        let in_tree =
+                            |member: ObjectId| materialized_by_id.values().any(|id| *id == member);
+                        entries = instant
+                            .entering
+                            .iter()
+                            .filter_map(|(source, unfolds)| {
+                                let child = id_map.get(source).copied()?;
+                                in_tree(child).then_some((child, *unfolds))
+                            })
+                            .collect();
+                        exits = instant
+                            .leaving
+                            .iter()
+                            .filter(|(child, _)| {
+                                builder
+                                    .states
+                                    .get(**child)
+                                    .and_then(|state| state.parent)
+                                    .is_some_and(in_tree)
+                            })
+                            .map(|(child, folds)| (*child, *folds))
+                            .collect();
+                        entries.sort_unstable_by_key(|(child, _)| *child);
+                        exits.sort_unstable_by_key(|(child, _)| *child);
+                        for (child, _) in &exits {
+                            if let (Some(start), Some(state)) =
+                                (instant.starts.get(child), builder.states.get_mut(*child))
+                                && state.transform.translation != start.translation
+                            {
+                                state.transform.translation = start.translation;
+                                restarted.insert(*child);
+                            }
+                        }
+                    }
+                    let unfold_starts: Vec<(ObjectId, DVec3)> = entries
+                        .iter()
+                        .filter(|(_, unfolds)| *unfolds)
+                        .map(|(child, _)| {
+                            let shift = Self::fold_shift(
+                                builder,
+                                &tree,
+                                &resolved,
+                                &materialized_by_id,
+                                &before,
+                                &targets,
+                                *child,
+                                true,
+                            );
+                            (*child, shift)
+                        })
+                        .collect();
+                    // A child that folds out travels with its neighbor; one
+                    // that fades out stays where it started.
+                    let exit_travels: Vec<(ObjectId, DVec3)> = exits
+                        .iter()
+                        .map(|(child, folds)| {
+                            let shift = if *folds {
+                                Self::fold_shift(
+                                    builder,
+                                    &tree,
+                                    &resolved,
+                                    &materialized_by_id,
+                                    &before,
+                                    &targets,
+                                    *child,
+                                    false,
+                                )
+                            } else {
+                                DVec3::ZERO
+                            };
+                            (*child, shift)
+                        })
+                        .collect();
                     // Arrangement writes the final transforms. Restore the
                     // layout visible at the current timeline cursor, then let
                     // the regular animation machinery interpolate to the new
@@ -6139,12 +6279,12 @@ impl SceneModel {
                             Self::place_layout_member(builder, entity, transform);
                         }
                     }
-                    if let Some((child, shift)) = unfold_start
-                        && let Some(state) = builder.states.get_mut(child)
-                    {
-                        state.transform.translation += shift;
-                        let (entity, transform) = (state.entity, state.transform);
-                        Self::place_layout_member(builder, entity, transform);
+                    for (child, shift) in unfold_starts {
+                        if let Some(state) = builder.states.get_mut(child) {
+                            state.transform.translation += shift;
+                            let (entity, transform) = (state.entity, state.transform);
+                            Self::place_layout_member(builder, entity, transform);
+                        }
                     }
                     let transition_duration = (*duration).unwrap_or(0.0);
                     // A member whose entry is a grow from scale zero, still to
@@ -6282,16 +6422,16 @@ impl SceneModel {
                             delay: if folding { transition_duration } else { 0.0 },
                         });
                     }
-                    if let Some((child, delta)) = fold_travel
-                        && delta.length_squared() > 1e-18
-                    {
-                        animations.push(AnimationBuilder {
-                            target: child,
-                            anim_type: AnimationType::TranslateBy { delta },
-                            duration: transition_duration,
-                            rate_func: RateFunc::Smooth,
-                            delay: 0.0,
-                        });
+                    for (child, delta) in exit_travels {
+                        if delta.length_squared() > 1e-18 || restarted.contains(&child) {
+                            animations.push(AnimationBuilder {
+                                target: child,
+                                anim_type: AnimationType::TranslateBy { delta },
+                                duration: transition_duration,
+                                rate_func: RateFunc::Smooth,
+                                delay: 0.0,
+                            });
+                        }
                     }
                     if !animations.is_empty() {
                         // The scene advances its own cursor (or not, with
@@ -25127,6 +25267,182 @@ mod tests {
         let (places, mesh) = at(&mut app, 0.25);
         assert!(close(&places, [0.0; 3]), "before {places:?}");
         assert_eq!(mesh, authored);
+    }
+
+    /// A centered column 300 high holding a, d, b and c (80 wide, 30, 50, 30
+    /// and 30 high) where, both at 0.5 s and over 1 s, d leaves and e (40
+    /// high) enters after c, d first when `leave_first`, folding and
+    /// unfolding when `fold` and fading otherwise, with another box laid
+    /// out in between: the app and the entities of a, b, c, d and e.
+    fn simultaneous_column(leave_first: bool, fold: bool) -> (bevy::prelude::App, [Entity; 5]) {
+        use bevy::prelude::App;
+        let mut canvas = SceneModel::new(640, 360);
+        let [a, d, b, c, e] =
+            [30.0, 50.0, 30.0, 30.0, 40.0].map(|height| canvas.rect(80.0, height));
+        let container = canvas.group(&[&a, &d, &b, &c]);
+        let member = |handle: &crate::canvas::DrawableHandle| crate::canvas::LayoutMemberSpec {
+            id: handle.id,
+            style: gaanim_layout::LayoutItemStyle::default(),
+        };
+        let spec = crate::canvas::LayoutSpec {
+            kind: gaanim_layout::LayoutNodeKind::Column { wrap: false },
+            style: gaanim_layout::LayoutStyle {
+                gap: DVec2::splat(20.0),
+                height: gaanim_layout::SizeRule::Fixed(300.0),
+                justify: gaanim_layout::Justify::Center,
+                ..Default::default()
+            },
+            within: LayoutWithin::Intrinsic,
+        };
+        let mut members = vec![&a, &d, &b, &c];
+        canvas.reflow_layout(
+            &container,
+            members.iter().map(|handle| member(handle)).collect(),
+            spec.clone(),
+            1,
+            None,
+            None,
+            None,
+        );
+        canvas.wait(0.5);
+        let changes = if leave_first {
+            [false, true]
+        } else {
+            [true, false]
+        };
+        for (version, entering) in (2..).zip(changes) {
+            if version == 3 {
+                // A box made between the two lays itself out at once, as
+                // `scene.layout.box(...)` does.
+                let note = canvas.rect(40.0, 20.0);
+                let other = canvas.group(&[&note]);
+                canvas.reflow_layout(
+                    &other,
+                    vec![member(&note)],
+                    spec.clone(),
+                    1,
+                    None,
+                    None,
+                    None,
+                );
+            }
+            if entering {
+                members.push(&e);
+            } else {
+                members.retain(|handle| handle.id != d.id);
+            }
+            canvas.set_group_members(&container, &members);
+            let specs = members.iter().map(|handle| member(handle)).collect();
+            let (enters, leaves) = if entering {
+                (Some(&e), None)
+            } else {
+                (None, Some(&d))
+            };
+            if fold {
+                canvas.reflow_layout_folding(
+                    &container,
+                    specs,
+                    spec.clone(),
+                    version,
+                    Some(1.0),
+                    enters,
+                    leaves,
+                );
+                let child = if entering { &e } else { &d };
+                canvas
+                    .fold_layout_child(child, crate::canvas::Direction::Down, entering, 1.0)
+                    .unwrap();
+            } else {
+                canvas.reflow_layout(
+                    &container,
+                    specs,
+                    spec.clone(),
+                    version,
+                    Some(1.0),
+                    enters,
+                    leaves,
+                );
+            }
+        }
+        canvas.wait(1.5);
+
+        let mut app = App::new();
+        app.add_plugins(bevy::prelude::MinimalPlugins)
+            .add_plugins(gaanim_scene::GaanimScenePlugin)
+            .add_plugins(gaanim_animation::GaanimAnimationPlugin)
+            .add_plugins(gaanim_timeline::GaanimTimelinePlugin)
+            .add_plugins(gaanim_text::GaanimTextPlugin)
+            .add_plugins(gaanim_renderer::GaanimDerivedGeometryPlugin);
+        app.finish();
+        app.cleanup();
+        app.update();
+        crate::runtime::replay_canvas_into(app.world_mut(), canvas);
+        app.update();
+        app.world_mut().resource_mut::<Timeline>().keyframes.clear();
+        gaanim_timeline::capture_reload_keyframe(app.world_mut());
+        let entities = [&a, &b, &c, &d, &e].map(|handle| entity_of(app.world_mut(), handle));
+        (app, entities)
+    }
+
+    /// Where `entities` stand in the world at `time`.
+    fn world_places_at(
+        app: &mut bevy::prelude::App,
+        time: f64,
+        entities: [Entity; 5],
+    ) -> [DVec3; 5] {
+        app.world_mut().resource_mut::<Timeline>().seek_request = Some(time);
+        app.update();
+        let world = app.world();
+        entities.map(|entity| {
+            world
+                .get::<gaanim_math::GlobalSpatialTransform>(entity)
+                .unwrap()
+                .mat4
+                .transform_point3(DVec3::ZERO)
+        })
+    }
+
+    /// Two changes of one box that start at the same instant run together,
+    /// whatever their order: the others slide from where they stood to the
+    /// layout both leave, the leaving child fades where it stood or folds
+    /// with the child before it, and the entering one unfolds with the
+    /// child before it.
+    #[test]
+    fn simultaneous_layout_changes_run_together_in_either_order() {
+        let times = [0.5, 0.6, 0.75, 1.0, 1.25, 1.5, 2.0];
+        for fold in [false, true] {
+            let (mut leave_first, entities) = simultaneous_column(true, fold);
+            let (mut enter_first, others) = simultaneous_column(false, fold);
+            let [a0, b0, _, d0, _] = world_places_at(&mut leave_first, 0.5, entities);
+            let [_, b1, c1, _, e1] = world_places_at(&mut leave_first, 1.5, entities);
+            assert!((b1 - b0).length() > 10.0, "{b0:?} {b1:?}");
+            for time in times {
+                let places = world_places_at(&mut leave_first, time, entities);
+                let reversed = world_places_at(&mut enter_first, time, others);
+                for (place, other) in places.iter().zip(&reversed) {
+                    assert!(
+                        place.distance(*other) < 1e-6,
+                        "fold {fold}, t={time}: {places:?} {reversed:?}"
+                    );
+                }
+                let [a, b, c, d, e] = places;
+                let progress = RateFunc::Smooth.evaluate(((time - 0.5) / 1.0).clamp(0.0, 1.0));
+                assert!(
+                    b.distance(b0.lerp(b1, progress)) < 1e-6,
+                    "fold {fold}, t={time}: {b:?} from {b0:?} to {b1:?}"
+                );
+                if time > 1.5 {
+                    continue;
+                }
+                if fold {
+                    assert!((d - a).distance(d0 - a0) < 1e-6, "t={time}: {d:?} {a:?}");
+                    assert!((e - c).distance(e1 - c1) < 1e-6, "t={time}: {e:?} {c:?}");
+                } else {
+                    assert!(d.distance(d0) < 1e-6, "t={time}: {d:?} {d0:?}");
+                    assert!(e.distance(e1) < 1e-6, "t={time}: {e:?} {e1:?}");
+                }
+            }
+        }
     }
 
     /// A column 300 high whose two 80 × 30 children are centered, where an

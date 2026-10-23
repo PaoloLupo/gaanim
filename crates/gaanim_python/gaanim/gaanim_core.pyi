@@ -1119,7 +1119,12 @@ class Box(Drawable):
 
     Structural changes (``add``, ``remove``, ``replace``, ``set``, a child's
     ``item``) accept ``duration=`` to animate the reflow, and ``advance=False``
-    to start the next change at the same time. The box's scale and rotation
+    to start the next change at the same time. Changes that start together,
+    in this box or another of its tree, run together whatever their order:
+    the children slide from where they stood to where all the changes leave
+    them, and each child that enters or leaves fades, unfolds or folds in
+    its slot.
+    The box's scale and rotation
     apply to its children on top of their own, as a CSS transform does. A
     box nested in another takes the room of the scale it was placed with,
     like any child.
