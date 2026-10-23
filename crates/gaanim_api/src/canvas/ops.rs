@@ -99,6 +99,8 @@ pub(crate) struct CanvasState {
     pub(crate) live_zones: Vec<super::live::LiveZoneRecord>,
     /// Draw layers named with `SceneModel::z_layers`.
     pub(crate) z_layers: Option<ZLayers>,
+    /// What each deformed drawable is deformed by, as authored so far.
+    pub(crate) deforms: HashMap<ObjectId, crate::canvas::deform::DeformState>,
 }
 
 /// The named draw layers of a scene, from the back to the front.
@@ -154,6 +156,7 @@ impl CanvasState {
             stop_gates: Vec::new(),
             live_zones: Vec::new(),
             z_layers: None,
+            deforms: HashMap::new(),
         }
     }
 
@@ -894,6 +897,14 @@ pub(crate) enum Op {
         endpoint: CanvasEndpoint,
         offset: DVec3,
         offset_space: FollowOffsetSpace,
+    },
+    /// Add a term to the displacement field `target` and everything in it
+    /// are deformed by: `lattice` weighed by `gate` and `scale`.
+    Deform {
+        target: ObjectId,
+        lattice: Arc<gaanim_animation::DeformLattice>,
+        gate: ScalarSource,
+        scale: ScalarSource,
     },
     /// Follow a drawable's position as it was `delay` seconds earlier.
     AttachDelayedFollow {

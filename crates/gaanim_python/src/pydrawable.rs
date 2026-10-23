@@ -98,6 +98,91 @@ pub(crate) fn parse_blend_mode(value: &str) -> PyResult<Option<gaanim_core::peni
     Ok(Some(mix.into()))
 }
 
+/// The grid options of `deform`: `samples` points along the longest side or
+/// along each of x, y and z, and a `region` given as two corners.
+fn deform_options(
+    samples: Option<&Bound<'_, PyAny>>,
+    region: Option<((f64, f64, f64), (f64, f64, f64))>,
+) -> PyResult<(
+    Option<gaanim_api::canvas::DeformSamples>,
+    Option<gaanim_math::Bounds3D>,
+)> {
+    let samples = match samples {
+        None => None,
+        Some(value) => Some(if let Ok(longest) = value.extract::<usize>() {
+            gaanim_api::canvas::DeformSamples::Longest(longest)
+        } else {
+            let (x, y, z) = value.extract::<(usize, usize, usize)>().map_err(|_| {
+                PyTypeError::new_err("samples must be a count or three counts (x, y, z)")
+            })?;
+            gaanim_api::canvas::DeformSamples::Counts([x, y, z])
+        }),
+    };
+    let region = region.map(|(low, high)| {
+        gaanim_math::Bounds3D::new(
+            gaanim_core::glam::DVec3::new(low.0, low.1, low.2),
+            gaanim_core::glam::DVec3::new(high.0, high.1, high.2),
+        )
+    });
+    Ok((samples, region))
+}
+
+/// `field` sampled at the points of `grid`: one displacement per point,
+/// from `field(x, y, z) -> (dx, dy, dz)`, or `field(x, y) -> (dx, dy)` in
+/// the plane; `None` for no field.
+fn sampled_field(
+    py: Python<'_>,
+    field: &Bound<'_, PyAny>,
+    grid: &gaanim_api::canvas::DeformGrid,
+) -> PyResult<Option<Vec<gaanim_core::glam::DVec3>>> {
+    use gaanim_core::glam::DVec3;
+    if field.is_none() {
+        return Ok(None);
+    }
+    if !field.is_callable() {
+        return Err(PyTypeError::new_err(
+            "field must be a callable (x, y, z) -> (dx, dy, dz) or (x, y) -> (dx, dy), or None",
+        ));
+    }
+    // A field of two arguments is a field of the plane.
+    let planar = py
+        .import("inspect")?
+        .call_method1("signature", (field,))
+        .and_then(|signature| signature.getattr("parameters"))
+        .and_then(|parameters| parameters.len())
+        .is_ok_and(|count| count == 2);
+    let mut values = Vec::with_capacity(grid.len());
+    for point in grid.points() {
+        let result = if planar {
+            field.call1((point.x, point.y))?
+        } else {
+            field.call1((point.x, point.y, point.z))?
+        };
+        let components: Vec<f64> = result.extract().map_err(|_| {
+            PyTypeError::new_err(
+                "a field returns a displacement: (dx, dy, dz), or (dx, dy) in the plane",
+            )
+        })?;
+        let value = match (planar, components.as_slice()) {
+            (true, [dx, dy]) => DVec3::new(*dx, *dy, 0.0),
+            (_, [dx, dy, dz]) => DVec3::new(*dx, *dy, *dz),
+            _ => {
+                return Err(PyValueError::new_err(
+                    "a field returns (dx, dy, dz), or (dx, dy) when it takes (x, y)",
+                ));
+            }
+        };
+        if !value.is_finite() {
+            return Err(PyValueError::new_err(format!(
+                "the field is not finite at {:?}",
+                point.to_array()
+            )));
+        }
+        values.push(value);
+    }
+    Ok(Some(values))
+}
+
 fn scalar_for_anim(value: &Bound<'_, PyAny>, anim: &PyCanvasAnim) -> PyResult<ScalarSource> {
     let drawable = anim.inner.property_drawable().ok_or_else(|| {
         PyTypeError::new_err("reactive sources require a Drawable animation proxy")
@@ -1092,6 +1177,38 @@ impl PyCanvasAnim {
         self.require_effect_slot("grow_from_point")?;
         Ok(Self {
             inner: self.inner.clone().grow_from_point(x, y),
+        })
+    }
+
+    /// Move the target's shape to a displacement field, or back with
+    /// `None`; see `gaanim_core.pyi`.
+    #[pyo3(signature = (field, *, samples=None, region=None))]
+    fn deform(
+        &self,
+        py: Python<'_>,
+        field: &Bound<'_, PyAny>,
+        samples: Option<&Bound<'_, PyAny>>,
+        region: Option<((f64, f64, f64), (f64, f64, f64))>,
+    ) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_native_animation()?;
+        if self.inner.property_target_is_text_selection() {
+            return Err(PyTypeError::new_err(
+                "deform() requires a Drawable animation proxy",
+            ));
+        }
+        let (samples, region) = deform_options(samples, region)?;
+        let grid = self
+            .inner
+            .deform_grid(samples, region)
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        let values = sampled_field(py, field, &grid)?;
+        Ok(Self {
+            inner: self
+                .inner
+                .clone()
+                .deform(values)
+                .map_err(|error| PyValueError::new_err(error.to_string()))?,
         })
     }
 
@@ -4134,6 +4251,33 @@ impl PyDrawable {
     ) -> PyResult<Bound<'py, PyAny>> {
         let result = slf.borrow().billboard_impl(offset, anchor);
         same_drawable(slf, result)
+    }
+    /// Deform this drawable and everything in it by a displacement field
+    /// from the cursor on; see `gaanim_core.pyi`.
+    #[pyo3(signature = (field, *, amount=None, samples=None, region=None))]
+    fn deform<'py>(
+        slf: &Bound<'py, Self>,
+        py: Python<'py>,
+        field: &Bound<'py, PyAny>,
+        amount: Option<&Bound<'py, PyAny>>,
+        samples: Option<&Bound<'py, PyAny>>,
+        region: Option<((f64, f64, f64), (f64, f64, f64))>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        crate::custom::ensure_authoring_allowed()?;
+        let handle = slf.borrow().0.clone();
+        let scale = match amount {
+            Some(amount) => extract_scalar_source_for_drawable(amount.clone(), &handle)?,
+            None => 1.0.into(),
+        };
+        let (samples, region) = deform_options(samples, region)?;
+        let grid = handle
+            .deform_grid(samples, region)
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        let values = sampled_field(py, field, &grid)?;
+        handle
+            .deform(values, scale)
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        Ok(slf.clone().into_any())
     }
     #[pyo3(signature = (material=None))]
     fn in_3d<'py>(

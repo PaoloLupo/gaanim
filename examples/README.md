@@ -227,6 +227,7 @@ Primitives, arrows and tubes, extrusion, axonometric drawings and 3D axes.
 | [Primitives 3d](3d/primitives_3d.py) | Cubes, spheres, cylinders, cones and planes as lit meshes, with their segments, rings and caps. |
 | [Materials 3d](3d/materials_3d.py) | Matte, metal and emissive materials, roughness, metallic and emission settings, and animated materials and fills. |
 | [Transforms 3d](3d/transforms_3d.py) | Turning, moving and scaling drawables in depth with the _3d methods, about their center or a pivot. |
+| [Deform 3d](3d/deform_3d.py) | A displacement field that bends a whole model: nodes, the 3D lines between them, slabs and a wall that curves, eased into a structural mode or swayed by a parameter. |
 | [Extrusion](3d/extrusion.py) | Text, equations, SVGs, shapes with holes and groups extruded into lit solids, with depth, bevel, tolerance and materials. |
 | [3D morphs](3d/morph_3d.py) | A mesh morphing into another with transform_to: spheres, tori and planes matched by their texture coordinates, cubes, cylinders and cones by rays from their center, and one mesh morphing through three targets in turn. |
 | [3D point clouds and copies](3d/points_3d.py) | One drawable that draws one mesh at many points: spheres at each point of a cloud, colored or not, voxels and an arrow field copied from a primitive, and clouds and fields moving copy by copy into another set with transform_to. |

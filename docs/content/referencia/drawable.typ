@@ -1532,6 +1532,32 @@ carga = scene.text("P").move_to_3d(0, 3, 0).billboard(offset=(0, 0.3), anchor="b
 ]
 
 #api-entry(
+  name: "Drawable.deform",
+  kind: "method",
+  params: (
+    (name: "field", type: "Callable | None", default: none, desc: [`field(x, y, z) -> (dx, dy, dz)`, o `field(x, y) -> (dx, dy)` en el plano, en coordenadas del mundo. `None` devuelve la forma original.]),
+    (name: "amount", type: "ScalarSource | None", default: "None", desc: [Cuánto del campo se aplica (1 por defecto). Un `Parameter` o un `Computed` mueve la forma con él: animarlo hace oscilar el modelo.]),
+    (name: "samples", type: "int | tuple[int, int, int] | None", default: "None", desc: [Puntos de la rejilla a lo largo del lado más largo (12 por defecto), o a lo largo de x, y y z.]),
+    (name: "region", type: "tuple[Vec3, Vec3] | None", default: "None", desc: [Las dos esquinas de la caja que cubre la rejilla; por defecto, la caja del objeto en el mundo, agrandada un cuarto de su lado más largo.]),
+  ),
+  desc: [Deforma el objeto y todo lo que contiene por un campo de desplazamientos desde el cursor. Cada miembro lo toma como se dibuja: los vértices de las mallas (primitivas, `mesh`, extrusiones, muros hechos con un `plane` subdividido) y de las líneas 3D se mueven uno a uno, así que un muro se curva; una `line_3d` cuyos extremos siguen a otros objetos los sigue; y cualquier otro miembro (un punto, un texto, un billboard, un dibujo 2D con `in_3d`) se mueve entero por el desplazamiento en su origen. Un grupo lo pasa a sus miembros a cualquier profundidad. Los valores escritos no cambian, y un seek muestra la misma forma que la reproducción. El campo se muestrea una vez, en una rejilla que fija la primera deformación del objeto, y se lee entre sus puntos de forma trilineal: dale más `samples` a un campo que cambia rápido. `animate.deform(campo)` pasa de la deformación actual a la nueva con la duración y la curva de la animación, y `animate.deform(None)` vuelve a la forma original. Un campo que no se puede llamar lanza `TypeError`; uno que devuelve otra longitud o un valor no finito, `samples` fuera de 1 a 64 o una `region` invertida, `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>import math
+>>>scene = Scene(frame=(16, 9))
+columna = scene.geometry.cylinder(0.2, 6.0).move_to_3d(0, 3, 0)
+nudo = scene.geometry.circle(0.1).move_to_3d(0, 6, 0)
+modelo = scene.geometry.group(columna, nudo)
+modo = lambda x, y, z: (math.sin(math.pi * y / 12), 0.0, 0.0)
+scene.play([modelo.animate.deform(modo).duration(1.2)])
+vaiven = scene.viz.parameter(0.0)
+modelo.deform(modo, amount=vaiven)
+scene.play([vaiven.animate.set(-0.8).duration(0.6)])
+```
+]
+
+#api-entry(
   name: "Drawable.in_3d",
   kind: "method",
   params: (

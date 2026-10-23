@@ -521,6 +521,10 @@ path = "3d/transforms_3d.py"
 description = "Turning, moving and scaling drawables in depth with the _3d methods, about their center or a pivot."
 
 [[example]]
+path = "3d/deform_3d.py"
+description = "A displacement field that bends a whole model: nodes, the 3D lines between them, slabs and a wall that curves, eased into a structural mode or swayed by a parameter."
+
+[[example]]
 path = "3d/extrusion.py"
 description = "Text, equations, SVGs, shapes with holes and groups extruded into lit solids, with depth, bevel, tolerance and materials."
 

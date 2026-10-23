@@ -1283,6 +1283,9 @@ pub struct SceneBuilder<'w, 's, 'a> {
     /// The endpoint each drawable follows (`follow`), with its offset, so
     /// camera moves can find where a follower is drawn as authored.
     pub(crate) authored_follows: HashMap<ObjectId, AuthoredFollow>,
+    /// The displacement field each deformed drawable is deformed by, its
+    /// terms so far (`Drawable.deform`).
+    pub(crate) deformations: HashMap<ObjectId, gaanim_animation::Deformation>,
     /// Camera holds on endpoints that only the run time moves, and where a
     /// probe of the scene found them.
     pub(crate) run_time_holds: RunTimeHolds,
@@ -1403,6 +1406,7 @@ pub(crate) struct SceneBuilderState {
     faded_opacities: HashMap<ObjectId, f32>,
     backdrop_orders: HashMap<ObjectId, u64>,
     authored_follows: HashMap<ObjectId, AuthoredFollow>,
+    deformations: HashMap<ObjectId, gaanim_animation::Deformation>,
     run_time_holds: RunTimeHolds,
 }
 
@@ -1461,6 +1465,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             rest_at: self.rest_at,
             faded_opacities: self.faded_opacities.clone(),
             authored_follows: self.authored_follows.clone(),
+            deformations: self.deformations.clone(),
             backdrop_orders: self.backdrop_orders.clone(),
             run_time_holds: self.run_time_holds.clone(),
         }
@@ -1528,6 +1533,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             faded_opacities,
             backdrop_orders,
             authored_follows,
+            deformations,
             run_time_holds,
         } = state;
         Self {
@@ -1598,6 +1604,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             faded_opacities,
             backdrop_orders,
             authored_follows,
+            deformations,
             run_time_holds,
         }
     }
@@ -2151,6 +2158,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             rest_at: None,
             faded_opacities: HashMap::new(),
             authored_follows: HashMap::new(),
+            deformations: HashMap::new(),
             backdrop_orders: HashMap::new(),
             run_time_holds: RunTimeHolds::default(),
         }

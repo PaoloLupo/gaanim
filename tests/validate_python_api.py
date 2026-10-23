@@ -1804,6 +1804,40 @@ def validate_fields_3d_contract(module: object) -> list[str]:
     return failures
 
 
+def validate_deform_contract(module: object) -> list[str]:
+    """A displacement field deforms a drawable and its members, eased or scaled by a parameter."""
+    failures: list[str] = []
+    scene = module.Scene(frame=(16, 9))
+    top = scene.geometry.circle(0.1).move_to_3d(0.0, 2.0, 0.0)
+    bottom = scene.geometry.circle(0.1).move_to_3d(0.0, 0.0, 0.0)
+    beam = scene.geometry.line_3d(top, bottom, 0.05)
+    column = scene.geometry.cylinder(0.2, 2.0).move_to_3d(2.0, 1.0, 0.0)
+    model = scene.geometry.group(top, bottom, beam, column)
+    if model.deform(lambda x, y, z: (0.1 * y, 0.0, 0.0)) is not model:
+        failures.append("Drawable.deform did not return the drawable")
+    sway = model.animate.deform(lambda x, y, z: (0.3 * y, 0.0, 0.0))
+    if not isinstance(sway, module.Anim):
+        failures.append("animate.deform did not return an Anim")
+    scene.play(sway.duration(0.5))
+    scene.play(model.animate.deform(None).duration(0.3))
+    amplitude = scene.viz.parameter(0.0)
+    model.deform(lambda x, y: (y, 0.0), amount=amplitude)
+    scene.play(amplitude.animate.set(0.5).duration(0.4))
+    fresh = scene.geometry.group(scene.geometry.circle(0.1))
+    fresh.deform(lambda x, y, z: (0.0, 0.0, 0.0), samples=(3, 3, 1), region=((-1, -1, 0), (1, 1, 0)))
+    for description, call, error in (
+        ("a field that is not callable", lambda: model.deform(5), TypeError),
+        ("a field of the wrong length", lambda: model.deform(lambda x, y, z: (1.0, 2.0)), ValueError),
+        ("a field that is not finite", lambda: model.deform(lambda x, y, z: (math.nan, 0.0, 0.0)), ValueError),
+        ("zero samples", lambda: scene.geometry.group(scene.geometry.circle(0.1)).deform(lambda x, y, z: (0, 0, 0), samples=0), ValueError),
+        ("two samples", lambda: scene.geometry.group(scene.geometry.circle(0.1)).deform(lambda x, y, z: (0, 0, 0), samples=(1, 2)), TypeError),
+        ("an inverted region", lambda: scene.geometry.group(scene.geometry.circle(0.1)).deform(lambda x, y, z: (0, 0, 0), region=((1, 1, 1), (0, 0, 0))), ValueError),
+    ):
+        if not raises_error(error, call):
+            failures.append(f"deform accepted {description}")
+    return failures
+
+
 def validate_in_3d_contract(module: object) -> list[str]:
     """Exercise 2D drawables placed in the 3D world."""
     failures: list[str] = []
@@ -4069,6 +4103,7 @@ def main() -> int:
     missing.extend(validate_mesh_copies_contract(module))
     missing.extend(validate_gltf_contract(module))
     missing.extend(validate_in_3d_contract(module))
+    missing.extend(validate_deform_contract(module))
     missing.extend(validate_transparency_3d_contract(module))
     missing.extend(validate_spot_light_contract(module))
     missing.extend(validate_fields_3d_contract(module))

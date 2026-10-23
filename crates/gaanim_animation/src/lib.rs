@@ -1,6 +1,8 @@
 pub mod camera;
 pub mod characters;
 pub mod custom;
+pub mod deform;
+pub use deform::{DeformLattice, DeformTerm, Deformation};
 pub mod delayed_follow;
 pub use delayed_follow::DelayedFollow;
 pub mod echo;
@@ -202,6 +204,28 @@ impl bevy::prelude::Plugin for GaanimAnimationPlugin {
             )
                 .in_set(SceneSet::Updaters),
         );
+        // A deformed drawable's members that move as a whole move before 3D
+        // lines read where their endpoints are, and are put back once
+        // propagation has carried them to the world; its meshes and line
+        // lists are deformed in the world and put back at the start of the
+        // next frame, before seeks, tweens and snapshots read them.
+        app.add_systems(
+            Update,
+            deform::apply_deformation_offsets_system
+                .after(reactive_3d_regen_system)
+                .before(tracking_line_system)
+                .in_set(SceneSet::Updaters),
+        );
+        app.add_systems(
+            Update,
+            (
+                deform::restore_deformation_offsets_system
+                    .after(gaanim_scene::transform_propagation_system)
+                    .in_set(SceneSet::Propagation),
+                deform::apply_deformation_vertices_system.in_set(SceneSet::DerivedGeometry),
+            ),
+        );
+        app.add_systems(First, deform::restore_deformation_vertices_system);
         // Drawables that follow a point on the screen move where the camera
         // of this frame draws it, once that camera is resolved.
         app.add_systems(
