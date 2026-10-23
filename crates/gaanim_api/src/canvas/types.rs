@@ -2718,7 +2718,13 @@ impl Anim {
         let state = self.owner.clone().ok_or(crate::canvas::InvalidWipe)?;
         let progress = super::visualization::parameter_in(&state, 0.0)
             .expect("a parameter starting at 0 is valid");
-        super::drawable::wipe_mask(&state, self.inner.target, progress.source(), direction)?;
+        super::drawable::wipe_mask(
+            &state,
+            self.inner.target,
+            progress.source(),
+            direction,
+            false,
+        )?;
         Ok(progress.animate().set(1.0))
     }
 

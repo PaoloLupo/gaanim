@@ -5037,6 +5037,7 @@ impl SceneModel {
                     duration,
                     entering,
                     leaving,
+                    fold,
                     resolve,
                     remeasure,
                 } => {
@@ -6014,6 +6015,44 @@ impl SceneModel {
                             );
                         }
                     }
+                    // A child that unfolds starts with the sibling before it
+                    // and one that folds goes with it, while their wipes open
+                    // or close the slot.
+                    let folding = *fold && duration.is_some();
+                    let entering_actual = entering
+                        .as_ref()
+                        .and_then(|member| id_map.get(member))
+                        .copied();
+                    let leaving_actual = leaving
+                        .as_ref()
+                        .and_then(|member| id_map.get(member))
+                        .copied();
+                    let unfold_start = entering_actual.filter(|_| folding).map(|child| {
+                        let shift = Self::fold_shift(
+                            builder,
+                            &tree,
+                            &resolved,
+                            &materialized_by_id,
+                            &before,
+                            &targets,
+                            child,
+                            true,
+                        );
+                        (child, shift)
+                    });
+                    let fold_travel = leaving_actual.filter(|_| folding).map(|child| {
+                        let shift = Self::fold_shift(
+                            builder,
+                            &tree,
+                            &resolved,
+                            &materialized_by_id,
+                            &before,
+                            &targets,
+                            child,
+                            false,
+                        );
+                        (child, shift)
+                    });
                     // Arrangement writes the final transforms. Restore the
                     // layout visible at the current timeline cursor, then let
                     // the regular animation machinery interpolate to the new
@@ -6024,6 +6063,13 @@ impl SceneModel {
                             let entity = state.entity;
                             Self::place_layout_member(builder, entity, transform);
                         }
+                    }
+                    if let Some((child, shift)) = unfold_start
+                        && let Some(state) = builder.states.get_mut(child)
+                    {
+                        state.transform.translation += shift;
+                        let (entity, transform) = (state.entity, state.transform);
+                        Self::place_layout_member(builder, entity, transform);
                     }
                     let transition_duration = (*duration).unwrap_or(0.0);
                     // A member whose entry is a grow from scale zero, still to
@@ -6141,27 +6187,32 @@ impl SceneModel {
                             delay: 0.0,
                         });
                     }
-                    if let Some(entering) = entering
-                        .as_ref()
-                        .and_then(|member| id_map.get(member))
-                        .copied()
-                    {
+                    // A folding child shows at once, its wipe hiding it, and
+                    // hides once its wipe has closed.
+                    if let Some(entering) = entering_actual {
                         animations.push(AnimationBuilder {
                             target: entering,
                             anim_type: AnimationType::FadeIn,
-                            duration: transition_duration,
+                            duration: if folding { 0.0 } else { transition_duration },
                             rate_func: RateFunc::Smooth,
                             delay: 0.0,
                         });
                     }
-                    if let Some(leaving) = leaving
-                        .as_ref()
-                        .and_then(|member| id_map.get(member))
-                        .copied()
-                    {
+                    if let Some(leaving) = leaving_actual {
                         animations.push(AnimationBuilder {
                             target: leaving,
                             anim_type: AnimationType::FadeOut,
+                            duration: if folding { 0.0 } else { transition_duration },
+                            rate_func: RateFunc::Smooth,
+                            delay: if folding { transition_duration } else { 0.0 },
+                        });
+                    }
+                    if let Some((child, delta)) = fold_travel
+                        && delta.length_squared() > 1e-18
+                    {
+                        animations.push(AnimationBuilder {
+                            target: child,
+                            anim_type: AnimationType::TranslateBy { delta },
                             duration: transition_duration,
                             rate_func: RateFunc::Smooth,
                             delay: 0.0,
@@ -13405,6 +13456,156 @@ impl SceneModel {
             Self::place_layout_member(builder, entity, transform);
         }
         baseline
+    }
+
+    /// Where a child that unfolds into its box starts, from its place
+    /// (`entering`), or how far one that folds out of it travels: with the
+    /// sibling before it, so its content keeps to the edge it enters from.
+    /// The first child keeps to the start of the box, where the next sibling
+    /// began or ends. In the parent's space; zero in a grid or a stack.
+    #[allow(clippy::too_many_arguments)]
+    fn fold_shift(
+        builder: &SceneBuilder,
+        tree: &CompiledLayoutTree,
+        resolved: &gaanim_layout::ResolvedLayout,
+        materialized_by_id: &BTreeMap<gaanim_layout::LayoutId, ObjectId>,
+        before: &HashMap<ObjectId, SpatialTransform>,
+        targets: &[(ObjectId, SpatialTransform)],
+        child: ObjectId,
+        entering: bool,
+    ) -> DVec3 {
+        fn main_axis(
+            node: &gaanim_layout::LayoutNode,
+            id: gaanim_layout::LayoutId,
+        ) -> Option<usize> {
+            if node.id == id {
+                return match node.kind {
+                    gaanim_layout::LayoutNodeKind::Row { .. } => Some(0),
+                    gaanim_layout::LayoutNodeKind::Column { .. } => Some(1),
+                    _ => None,
+                };
+            }
+            node.children
+                .iter()
+                .find_map(|child| main_axis(&child.node, id))
+        }
+        // The leading edge of a cell along the main axis: its left in a row,
+        // its top in a column (y up).
+        let lead = |cell: Bounds3D, axis: usize| if axis == 0 { cell.min.x } else { cell.max.y };
+        let travel = |member: ObjectId| -> Option<DVec3> {
+            let from = before.get(&member)?.translation;
+            let to = targets
+                .iter()
+                .find(|(target, _)| *target == member)?
+                .1
+                .translation;
+            Some(to - from)
+        };
+        let layout_id = |member: ObjectId| {
+            materialized_by_id
+                .iter()
+                .find(|(_, actual)| **actual == member)
+                .map(|(id, _)| *id)
+        };
+        if entering {
+            let Some(id) = layout_id(child) else {
+                return DVec3::ZERO;
+            };
+            let Some(parent) = tree.parent_by_id.get(&id).copied() else {
+                return DVec3::ZERO;
+            };
+            let Some(axis) = main_axis(&tree.root, parent) else {
+                return DVec3::ZERO;
+            };
+            let siblings = tree
+                .children_by_id
+                .get(&parent)
+                .cloned()
+                .unwrap_or_default();
+            let Some(index) = siblings.iter().position(|sibling| *sibling == id) else {
+                return DVec3::ZERO;
+            };
+            if index > 0 {
+                return materialized_by_id
+                    .get(&siblings[index - 1])
+                    .and_then(|previous| travel(*previous))
+                    .map_or(DVec3::ZERO, |moved| -moved);
+            }
+            let Some(next_id) = siblings.get(index + 1) else {
+                return DVec3::ZERO;
+            };
+            let (Some(moved), Some(cell), Some(next_cell)) = (
+                materialized_by_id
+                    .get(next_id)
+                    .and_then(|next| travel(*next)),
+                resolved.boxes.get(&id),
+                resolved.boxes.get(next_id),
+            ) else {
+                return DVec3::ZERO;
+            };
+            // It starts where the next child, the first one until now, began.
+            let mut shift = -moved;
+            shift[axis] = lead(next_cell.bounds, axis) - moved[axis] - lead(cell.bounds, axis);
+            return shift;
+        }
+        let Some(state) = builder.states.get(child) else {
+            return DVec3::ZERO;
+        };
+        let Some(parent) = state.parent.and_then(layout_id) else {
+            return DVec3::ZERO;
+        };
+        let Some(axis) = main_axis(&tree.root, parent) else {
+            return DVec3::ZERO;
+        };
+        let at = state.transform.translation[axis];
+        // Before its place along the main axis: to the left in a row, above
+        // in a column.
+        let ahead = |position: f64| {
+            if axis == 0 {
+                position < at
+            } else {
+                position > at
+            }
+        };
+        let siblings: Vec<(ObjectId, f64)> = tree
+            .children_by_id
+            .get(&parent)
+            .into_iter()
+            .flatten()
+            .filter_map(|id| materialized_by_id.get(id))
+            .filter_map(|member| Some((*member, before.get(member)?.translation[axis])))
+            .collect();
+        let nearest = |candidates: Vec<(ObjectId, f64)>| {
+            candidates
+                .into_iter()
+                .min_by(|left, right| (left.1 - at).abs().total_cmp(&(right.1 - at).abs()))
+        };
+        let (previous, next): (Vec<_>, Vec<_>) = siblings
+            .into_iter()
+            .partition(|(_, position)| ahead(*position));
+        if let Some((previous, _)) = nearest(previous) {
+            return travel(previous).unwrap_or(DVec3::ZERO);
+        }
+        let Some((next, _)) = nearest(next) else {
+            return DVec3::ZERO;
+        };
+        let (Some(next_id), Some(parent_box)) = (layout_id(next), resolved.boxes.get(&parent))
+        else {
+            return DVec3::ZERO;
+        };
+        let Some(next_cell) = resolved.boxes.get(&next_id) else {
+            return DVec3::ZERO;
+        };
+        // It ends where the next child, the first one from now on, begins.
+        let own_lead = at
+            + if axis == 0 {
+                state.bounds.min.x * state.transform.scale.x
+            } else {
+                state.bounds.max.y * state.transform.scale.y
+            };
+        let mut shift = travel(next).unwrap_or(DVec3::ZERO);
+        shift[axis] = lead(next_cell.bounds, axis) - parent_box.bounds.center()[axis] - own_lead;
+        shift
     }
 
     fn place_layout_member(
@@ -24546,6 +24747,157 @@ mod tests {
                 }
             ) if *from == 0.0 && *to == 1.0
         )));
+    }
+
+    /// A column 300 high whose two 80 × 30 children are centered, where an
+    /// 80 × 50 child unfolds at `index` at 0.5 s and folds out at 1.5 s, each
+    /// over 1 s: the app and the entities of the first of the two others and
+    /// of the folding child.
+    fn folding_column(index: usize) -> (bevy::prelude::App, Entity, Entity) {
+        use bevy::prelude::App;
+        let mut canvas = SceneModel::new(640, 360);
+        let first = canvas.rect(80.0, 30.0);
+        let folding = canvas.rect(80.0, 50.0);
+        let last = canvas.rect(80.0, 30.0);
+        let container = canvas.group(&[&first, &last]);
+        let member = |handle: &crate::canvas::DrawableHandle| crate::canvas::LayoutMemberSpec {
+            id: handle.id,
+            style: gaanim_layout::LayoutItemStyle::default(),
+        };
+        let spec = crate::canvas::LayoutSpec {
+            kind: gaanim_layout::LayoutNodeKind::Column { wrap: false },
+            style: gaanim_layout::LayoutStyle {
+                gap: DVec2::splat(20.0),
+                height: gaanim_layout::SizeRule::Fixed(300.0),
+                justify: gaanim_layout::Justify::Center,
+                ..Default::default()
+            },
+            within: LayoutWithin::Intrinsic,
+        };
+        canvas.reflow_layout(
+            &container,
+            vec![member(&first), member(&last)],
+            spec.clone(),
+            1,
+            None,
+            None,
+            None,
+        );
+        canvas.wait(0.5);
+        let mut unfolded = vec![&first, &last];
+        unfolded.insert(index, &folding);
+        canvas.set_group_members(&container, &unfolded);
+        canvas
+            .fold_layout_child(&folding, crate::canvas::Direction::Down, true, 1.0)
+            .unwrap();
+        canvas.reflow_layout_folding(
+            &container,
+            unfolded.iter().map(|handle| member(handle)).collect(),
+            spec.clone(),
+            2,
+            Some(1.0),
+            Some(&folding),
+            None,
+        );
+        canvas.wait(1.0);
+        canvas.set_group_members(&container, &[&first, &last]);
+        canvas
+            .fold_layout_child(&folding, crate::canvas::Direction::Down, false, 1.0)
+            .unwrap();
+        canvas.reflow_layout_folding(
+            &container,
+            vec![member(&first), member(&last)],
+            spec,
+            3,
+            Some(1.0),
+            None,
+            Some(&folding),
+        );
+        canvas.wait(1.0);
+
+        let mut app = App::new();
+        app.add_plugins(bevy::prelude::MinimalPlugins)
+            .add_plugins(gaanim_scene::GaanimScenePlugin)
+            .add_plugins(gaanim_animation::GaanimAnimationPlugin)
+            .add_plugins(gaanim_timeline::GaanimTimelinePlugin)
+            .add_plugins(gaanim_text::GaanimTextPlugin)
+            .add_plugins(gaanim_renderer::GaanimDerivedGeometryPlugin);
+        app.finish();
+        app.cleanup();
+        app.update();
+        crate::runtime::replay_canvas_into(app.world_mut(), canvas);
+        app.update();
+        app.world_mut().resource_mut::<Timeline>().keyframes.clear();
+        gaanim_timeline::capture_reload_keyframe(app.world_mut());
+        let first = entity_of(app.world_mut(), &first);
+        let folding = entity_of(app.world_mut(), &folding);
+        (app, first, folding)
+    }
+
+    /// The local translations of `entities` and the opacity of the last one
+    /// at `time`.
+    fn folding_at(
+        app: &mut bevy::prelude::App,
+        time: f64,
+        entities: [Entity; 2],
+    ) -> ([DVec3; 2], f32) {
+        app.world_mut().resource_mut::<Timeline>().seek_request = Some(time);
+        app.update();
+        let world = app.world();
+        let translation = |entity| world.get::<SpatialTransform>(entity).unwrap().translation;
+        let opacity = world
+            .get::<gaanim_scene::Opacity>(entities[1])
+            .map_or(1.0, |opacity| opacity.0);
+        (
+            [translation(entities[0]), translation(entities[1])],
+            opacity,
+        )
+    }
+
+    /// A child that unfolds between two others moves with the one before
+    /// it, shown at once behind its wipe; folding out, it goes with it and
+    /// hides when the fold ends.
+    #[test]
+    fn an_unfolding_child_moves_with_the_sibling_before_it() {
+        let (mut app, first, folding) = folding_column(1);
+        let ([start, _], _) = folding_at(&mut app, 0.5, [first, folding]);
+        let ([end, _], _) = folding_at(&mut app, 1.5, [first, folding]);
+        // The column is centered, so the child before it moves.
+        assert!((end - start).length() > 10.0, "{start:?} {end:?}");
+        let ([before, child], _) = folding_at(&mut app, 1.5, [first, folding]);
+        let rest = child - before;
+        for time in [0.5, 0.8, 1.2, 1.6, 2.0, 2.4] {
+            let ([before, child], opacity) = folding_at(&mut app, time, [first, folding]);
+            let offset = child - before;
+            assert!(offset.distance(rest) < 1e-6, "{time}: {offset:?} {rest:?}");
+            assert_eq!(opacity, 1.0, "{time}");
+        }
+        let (_, hidden) = folding_at(&mut app, 2.6, [first, folding]);
+        assert_eq!(hidden, 0.0);
+    }
+
+    /// A first child unfolds from where the box's content began, the top of
+    /// the child that was first, and folds out to where it begins again.
+    #[test]
+    fn a_first_child_unfolds_from_the_start_of_the_box() {
+        let (mut app, next, folding) = folding_column(0);
+        // Tops, y up: the child is 50 high and the next one 30.
+        let tops = |app: &mut bevy::prelude::App, time: f64| {
+            let ([next_center, child_center], _) = folding_at(app, time, [next, folding]);
+            (next_center.y + 15.0, child_center.y + 25.0)
+        };
+        let (next_top, child_top) = tops(&mut app, 0.5);
+        assert!(
+            (child_top - next_top).abs() < 1e-6,
+            "{child_top} {next_top}"
+        );
+        let (next_top, child_top) = tops(&mut app, 1.5);
+        assert!(child_top - next_top > 60.0, "{child_top} {next_top}");
+        let (next_top, child_top) = tops(&mut app, 2.5);
+        assert!(
+            (child_top - next_top).abs() < 1e-6,
+            "{child_top} {next_top}"
+        );
     }
 
     #[test]

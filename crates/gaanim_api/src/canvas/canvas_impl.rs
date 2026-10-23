@@ -5584,6 +5584,7 @@ impl SceneModel {
             duration: None,
             entering: None,
             leaving: None,
+            fold: false,
             resolve: false,
             remeasure: None,
         });
@@ -5603,8 +5604,102 @@ impl SceneModel {
         leaving: Option<&DrawableHandle>,
     ) {
         self.push_reflow(
-            container, members, spec, version, duration, entering, leaving, None,
+            container, members, spec, version, duration, entering, leaving, None, false,
         );
+    }
+
+    /// [`Self::reflow_layout`] where `entering` unfolds into its slot and
+    /// `leaving` folds out of it instead of fading: each moves with the
+    /// sibling before it while the wipe [`Self::fold_layout_child`] launched
+    /// opens or closes it.
+    #[allow(clippy::too_many_arguments)]
+    pub fn reflow_layout_folding(
+        &mut self,
+        container: &DrawableHandle,
+        members: Vec<LayoutMemberSpec>,
+        spec: LayoutSpec,
+        version: u64,
+        duration: Option<f64>,
+        entering: Option<&DrawableHandle>,
+        leaving: Option<&DrawableHandle>,
+    ) {
+        self.push_reflow(
+            container, members, spec, version, duration, entering, leaving, None, true,
+        );
+    }
+
+    /// Clip `child` behind an edge that travels in `direction`, the main
+    /// axis of its box, and open it (`opening`) or close it over `duration`
+    /// seconds with the smooth easing layout transitions use, without moving
+    /// the cursor. A child keeps one such clip all along its timeline, given
+    /// by its first fold, which replaces any clip it had: hidden before an
+    /// opening, whole before a closing. Later folds move its edge, and
+    /// [`Self::unfolded_layout_child`] makes a closed child whole again.
+    pub fn fold_layout_child(
+        &mut self,
+        child: &DrawableHandle,
+        direction: super::Direction,
+        opening: bool,
+        duration: f64,
+    ) -> Result<(), super::InvalidWipe> {
+        let existing = self
+            .state
+            .lock()
+            .expect("canvas state poisoned")
+            .fold_wipes
+            .get(&child.id)
+            .cloned();
+        let progress = match existing {
+            Some((progress, closed)) => {
+                // A child whole since its last fold opens from closed.
+                if opening && !closed {
+                    progress.set(0.0).expect("0 is a valid parameter value");
+                }
+                progress
+            }
+            None => {
+                let progress = super::visualization::parameter_in(
+                    &self.state,
+                    if opening { 0.0 } else { 1.0 },
+                )
+                .expect("a parameter starting at 0 or 1 is valid");
+                super::drawable::wipe_mask(
+                    &self.state,
+                    child.id,
+                    progress.source(),
+                    direction,
+                    !opening,
+                )?;
+                progress
+            }
+        };
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .fold_wipes
+            .insert(child.id, (progress.clone(), !opening));
+        let edge = progress
+            .animate()
+            .set(if opening { 1.0 } else { 0.0 })
+            .duration(duration)
+            .rate_func(RateFunc::Smooth);
+        self.launch_composition_configured(Composition::leaf(edge), None, None)
+            .expect("a scene parameter's animations belong to this scene");
+        Ok(())
+    }
+
+    /// Make `child` whole again if it folded out of a box, so a fade-in or an
+    /// instant add shows all of it.
+    pub fn unfolded_layout_child(&mut self, child: &DrawableHandle) {
+        let mut state = self.state.lock().expect("canvas state poisoned");
+        let Some((progress, closed)) = state.fold_wipes.get_mut(&child.id) else {
+            return;
+        };
+        if std::mem::take(closed) {
+            let progress = progress.clone();
+            drop(state);
+            progress.set(1.0).expect("1 is a valid parameter value");
+        }
     }
 
     /// [`Self::reflow_layout`] measuring the children of `within` (the
@@ -5630,6 +5725,7 @@ impl SceneModel {
             None,
             None,
             Some(within.id),
+            false,
         );
     }
 
@@ -5644,6 +5740,7 @@ impl SceneModel {
         entering: Option<&DrawableHandle>,
         leaving: Option<&DrawableHandle>,
         remeasure: Option<gaanim_core::ObjectId>,
+        fold: bool,
     ) {
         let mut state = self.state.lock().expect("canvas state poisoned");
         let snapshot = LayoutTreeSnapshot {
@@ -5659,6 +5756,7 @@ impl SceneModel {
             duration: duration.filter(|value| value.is_finite() && *value > 0.0),
             entering: entering.map(|member| member.id),
             leaving: leaving.map(|member| member.id),
+            fold,
             resolve: true,
             remeasure,
         });

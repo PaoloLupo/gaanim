@@ -1631,13 +1631,62 @@ impl PyBox {
         entering: Option<DrawableHandle>,
         leaving: Option<DrawableHandle>,
     ) {
-        Self::resolve_chain(inner, duration, entering, leaving, false);
+        Self::resolve_chain(inner, duration, entering, leaving, false, false);
+    }
+
+    /// [`Self::reflow_inner`] where `entering` unfolds into its slot and
+    /// `leaving` folds out of it, over `duration` seconds, instead of fading.
+    fn fold_inner(
+        inner: &Arc<Mutex<LayoutState>>,
+        duration: f64,
+        entering: Option<DrawableHandle>,
+        leaving: Option<DrawableHandle>,
+    ) {
+        let (canvas, direction) = {
+            let state = inner.lock().expect("layout poisoned");
+            // The edge travels along the box's main axis, from the side its
+            // children start on.
+            let direction = match state.spec.kind {
+                LayoutNodeKind::Row { .. } => Direction::Right,
+                _ => Direction::Down,
+            };
+            (state.canvas.clone(), direction)
+        };
+        Self::resolve_chain(
+            inner,
+            Some(duration),
+            entering.clone(),
+            leaving.clone(),
+            false,
+            true,
+        );
+        // After the reflow, at the same instant: a clip given before the box
+        // takes the child is lost when it does.
+        for (child, opening) in [(&entering, true), (&leaving, false)] {
+            if let Some(child) = child {
+                canvas
+                    .lock()
+                    .expect("scene canvas poisoned")
+                    .fold_layout_child(child, direction, opening, duration)
+                    .expect("a box's main axis is a direction with length");
+            }
+        }
+    }
+
+    /// Make `child` whole again if it folded out of a box before, so it
+    /// enters whole.
+    fn unfolded(inner: &Arc<Mutex<LayoutState>>, child: &DrawableHandle) {
+        let canvas = inner.lock().expect("layout poisoned").canvas.clone();
+        canvas
+            .lock()
+            .expect("scene canvas poisoned")
+            .unfolded_layout_child(child);
     }
 
     /// [`Self::reflow_inner`] that also measures this box's children with
     /// the scale and rotation they have now (`box.reflow()`).
     fn remeasure_inner(inner: &Arc<Mutex<LayoutState>>, duration: Option<f64>) {
-        Self::resolve_chain(inner, duration, None, None, true);
+        Self::resolve_chain(inner, duration, None, None, true, false);
     }
 
     fn resolve_chain(
@@ -1646,6 +1695,7 @@ impl PyBox {
         entering: Option<DrawableHandle>,
         leaving: Option<DrawableHandle>,
         remeasure: bool,
+        fold: bool,
     ) {
         let asking = inner.lock().expect("layout poisoned").root.clone();
         let mut chain = vec![inner.clone()];
@@ -1688,6 +1738,16 @@ impl PyBox {
             canvas.set_group_members(&root, &refs);
             if position == last && remeasure {
                 canvas.remeasure_layout(&root, snapshots, spec, version, duration, &asking);
+            } else if position == last && fold {
+                canvas.reflow_layout_folding(
+                    &root,
+                    snapshots,
+                    spec,
+                    version,
+                    duration,
+                    entering.as_ref(),
+                    leaving.as_ref(),
+                );
             } else if position == last {
                 canvas.reflow_layout(
                     &root,
@@ -1991,6 +2051,18 @@ const DEFAULT_EDGE_SIZE: &str = "6px";
 
 /// Points per side of a box's rough `edge` by default.
 const DEFAULT_EDGE_DETAIL: u32 = 10;
+
+/// Whether `value`, given as the `name` argument, is `folding` rather than
+/// `"fade"`.
+fn motion_value(value: &str, name: &str, folding: &str) -> PyResult<bool> {
+    match value {
+        "fade" => Ok(false),
+        value if value == folding => Ok(true),
+        _ => Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "{name} must be 'fade' or '{folding}'"
+        ))),
+    }
+}
 
 fn duration_value(duration: Option<f64>) -> PyResult<Option<f64>> {
     match duration {
@@ -2325,8 +2397,9 @@ impl PyBox {
     }
 
     /// Insert a child (a Drawable, box or string) at `at`, or at the end.
-    /// With `duration`, the others slide to make room and it fades in.
-    #[pyo3(signature = (child, *, at=None, duration=None, advance=true))]
+    /// With `duration`, the others slide to make room and it fades in, or
+    /// unfolds into its slot with `enter="unfold"`.
+    #[pyo3(signature = (child, *, at=None, duration=None, advance=true, enter="fade"))]
     fn add(
         &self,
         py: Python<'_>,
@@ -2334,9 +2407,11 @@ impl PyBox {
         at: Option<usize>,
         duration: Option<f64>,
         advance: bool,
+        enter: &str,
     ) -> PyResult<Py<PyAny>> {
         crate::custom::ensure_authoring_allowed()?;
         let duration = duration_value(duration)?;
+        let unfold = motion_value(enter, "enter", "unfold")?;
         let (scene, text) = {
             let state = self.inner.lock().expect("layout poisoned");
             (state.scene.clone_ref(py), state.text.clone_ref(py))
@@ -2357,21 +2432,30 @@ impl PyBox {
             state.members.insert(index, member);
         }
         self.restacked();
-        Self::reflow_inner(&self.inner, duration, Some(handle), None);
+        match duration {
+            Some(duration) if unfold => Self::fold_inner(&self.inner, duration, Some(handle), None),
+            _ => {
+                Self::unfolded(&self.inner, &handle);
+                Self::reflow_inner(&self.inner, duration, Some(handle), None)
+            }
+        }
         Self::finish(&self.inner, duration, advance);
         Ok(object)
     }
 
-    /// Remove a child: it fades out while the others close the gap.
-    #[pyo3(signature = (child, *, duration=None, advance=true))]
+    /// Remove a child: it fades out while the others close the gap, or
+    /// folds out of its slot with `exit="fold"`.
+    #[pyo3(signature = (child, *, duration=None, advance=true, exit="fade"))]
     fn remove(
         &self,
         child: &Bound<'_, PyAny>,
         duration: Option<f64>,
         advance: bool,
+        exit: &str,
     ) -> PyResult<()> {
         crate::custom::ensure_authoring_allowed()?;
         let duration = duration_value(duration)?;
+        let fold = motion_value(exit, "exit", "fold")?;
         let index = self.position(child)?;
         let removed = {
             let mut state = self.inner.lock().expect("layout poisoned");
@@ -2380,7 +2464,12 @@ impl PyBox {
             removed
         };
         self.orphan(&removed);
-        Self::reflow_inner(&self.inner, duration, None, Some(removed.handle));
+        match duration {
+            Some(duration) if fold => {
+                Self::fold_inner(&self.inner, duration, None, Some(removed.handle))
+            }
+            _ => Self::reflow_inner(&self.inner, duration, None, Some(removed.handle)),
+        }
         Self::finish(&self.inner, duration, advance);
         Ok(())
     }
@@ -2445,6 +2534,7 @@ impl PyBox {
         self.orphan(&old);
         let old = old.handle;
         self.restacked();
+        Self::unfolded(&self.inner, &handle);
         Self::reflow_inner(&self.inner, duration, Some(handle), Some(old));
         Self::finish(&self.inner, duration, advance);
         Ok(object)

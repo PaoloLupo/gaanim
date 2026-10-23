@@ -1,8 +1,8 @@
 """Animated structure: boxes that gain, lose, reorder and resize their children.
 
 Every structural change accepts ``duration=``: the children slide to their
-new places, what enters fades in and what leaves fades out, and the change
-advances the cursor like ``scene.play``. Each step shows its code under the
+new places, what enters fades in (or unfolds) and what leaves fades out (or
+folds), and the change advances the cursor like ``scene.play``. Each step shows its code under the
 box, then makes the change.
 """
 
@@ -123,6 +123,27 @@ row = L.row(card("One"), card("Two"), card("Three"), gap="32px")
 steps(row, [
     ("scene.play([row[1].animate.scale_to(1.4)])", lambda: scene.play([row[1].animate.scale_to(1.4)])),
     ("row.reflow(duration=0.6)", lambda: row.reflow(duration=0.6)),
+])
+
+# enter="unfold" grows a child's slot from nothing while the others slide,
+# its content clipped to the slot and kept on the edge it enters from;
+# exit="fold" closes the slot the same way.
+scene.segment("unfold")
+detail_style = BoxStyle(padding=("16px", "32px"), background=panel, border=rule, radius="12px", font_size="44px")
+
+
+def detail(text):
+    return L.box(text, style=detail_style)
+
+
+index = L.column(card("Methods"), card("Results"), gap="24px", align="center")
+steps(index, [
+    ('index.add(detail("Six walls, two sensors"), at=1, duration=0.6, enter="unfold")',
+     lambda: index.add(detail("Six walls, two sensors"), at=1, duration=0.6, enter="unfold")),
+    ('index.remove(index[1], duration=0.6, exit="fold")', lambda: index.remove(index[1], duration=0.6, exit="fold")),
+    ('index.add(detail("Cracks found in five"), duration=0.6, enter="unfold")',
+     lambda: index.add(detail("Cracks found in five"), duration=0.6, enter="unfold")),
+    ('index.remove(index[1], duration=0.6, exit="fold")', lambda: index.remove(index[1], duration=0.6, exit="fold")),
 ])
 
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
