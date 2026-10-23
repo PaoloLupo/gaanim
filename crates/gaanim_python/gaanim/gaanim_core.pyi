@@ -11,6 +11,7 @@ from typing import Any, Callable, ClassVar, Iterator, Literal, Mapping, Optional
 from .live import Player, Pose, State
 from .questions import Question
 from .matrix import Matrix
+from .pointer import Pointer
 from .timeline import Timeline
 from .sections import SceneSections
 from .animation_types import AnimationChannel, CustomAnimationValues
@@ -1275,16 +1276,35 @@ class Box(Drawable):
             strip = scene.layout.box("Breaking", background="#f5e6c8", edge=True)
         """
         ...
-    def add(self, child: Drawable | str, *, at: Optional[int] = None, duration: Optional[float] = None, advance: bool = True) -> Any:
+    def add(self, child: Drawable | str, *, at: Optional[int] = None, duration: Optional[float] = None, advance: bool = True, enter: Literal["fade", "unfold"] = "fade") -> Any:
         """Insert a child (at ``at`` or at the end) and return it.
 
         With ``duration`` the others slide to make room while it fades in. A
         child that comes from another box (taken out with ``detach``) slides
         from where it stands instead, and follows its former box until then.
+
+        ``enter="unfold"`` opens its slot instead, as a CSS ``height``
+        transition with ``overflow: hidden``: the slot grows from nothing
+        along the box's main axis (down a column, right along a row) with the
+        same duration and easing as the others slide, and the child is
+        clipped to it, its content on the edge it enters from, moving with
+        the sibling before it. Nothing overlaps while the slot opens. The
+        clip replaces any ``clip`` the child had; in a grid or a stack the
+        slot opens in place. An unknown value raises ``ValueError``.
+
+        Example:
+            index.add(detail, at=1, duration=0.45, enter="unfold")
         """
         ...
-    def remove(self, child: Drawable, *, duration: Optional[float] = None, advance: bool = True) -> None:
-        """Remove a child: it fades out while the others close the gap."""
+    def remove(self, child: Drawable, *, duration: Optional[float] = None, advance: bool = True, exit: Literal["fade", "fold"] = "fade") -> None:
+        """Remove a child: it fades out while the others close the gap.
+
+        ``exit="fold"`` closes its slot instead, the reverse of
+        ``add(enter="unfold")``: the child moves with the sibling before it,
+        clipped to the shrinking slot, and is hidden once it has closed (whole
+        again, so a later ``add`` shows all of it). An unknown value raises
+        ``ValueError``.
+        """
         ...
     def detach(self, child: Drawable, *, duration: Optional[float] = None, advance: bool = True) -> None:
         """Take a child out of the box without hiding it: it stays where it is and can move freely again.
@@ -1375,6 +1395,19 @@ class Zone:
         ...
     def inset(self, padding: Padding) -> Zone:
         """The zone shrunk by ``padding``."""
+        ...
+    def crop(self, *, top: Optional[float] = None, bottom: Optional[float] = None, left: Optional[float] = None, right: Optional[float] = None) -> Zone:
+        """The zone with the given edges moved to scene coordinates.
+
+        Edges not given stay where they are; an edge that would cross its
+        opposite one leaves the zone empty on that axis. Unlike ``inset``,
+        the values are positions in the scene (y up), not distances, so the
+        result does not depend on the margin or the design resolution.
+
+        Example:
+            index = scene.layout.safe.crop(top=0.95, right=-1.5)
+            scene.layout.column(*entries, within=index, width="fill", height="fill", justify="start")
+        """
         ...
     def split(self, template: Zones) -> ZoneSet:
         """Apply a template inside this zone."""
@@ -10647,7 +10680,9 @@ class LayoutBuilder:
     - Container: ``direction``, ``gap``, ``row_gap``, ``column_gap``,
       ``padding``, ``width``, ``height``, ``min_width``, ``max_width``,
       ``min_height``, ``max_height``, ``aspect_ratio``, ``align``,
-      ``justify``, ``wrap``, ``columns``, ``rows``, ``auto_flow``, ``within``.
+      ``justify``, ``wrap``, ``columns``, ``rows``, ``auto_flow``, ``within``
+      (root boxes only: ``"safe"``, ``"frame"``, a ``Zone`` or a ``Drawable``;
+      a zone or a drawable gives the region it covers when the box is built).
     - Item (how the box sits in its parent): ``grow``, ``shrink``, ``basis``,
       ``align_self``, ``row``, ``column``, ``row_span``, ``column_span``,
       ``margin`` (``"auto"`` takes the free space), ``fit``, ``anchor``,
@@ -10727,6 +10762,49 @@ class LayoutBuilder:
         Unsatisfied weak constraints, text composition errors, and decorated
         boxes with zero width or height, each prefixed with the box's path
         such as ``column[2] > row[1]``. ``gaanim check`` reports them too.
+        """
+        ...
+
+class UI:
+    """Scene-owned interface elements for software demonstrations."""
+    def pointer(
+        self,
+        *,
+        style: Literal["arrow", "hand", "text"] = "arrow",
+        size: float = 1.0,
+        color: Optional[ColorLike] = None,
+        at: tuple[float, float] | tuple[float, float, float] = (0.0, 0.0),
+    ) -> Pointer:
+        """A mouse pointer whose tip is its pivot, for showing how a program is used.
+
+        ``style`` is ``"arrow"``, ``"hand"`` or ``"text"`` (an I-beam), ``size``
+        scales it and ``color`` fills it (the theme's foreground by default,
+        with the background as its outline). The pointer is an ordinary group
+        (``pointer.drawable``): fade it in, style it or give it effects as
+        any drawable. It keeps track of where its tip is, so its moves chain:
+
+        - ``pointer.animate.to(target)``: move the tip to a point, a
+          ``Drawable`` (its ``anchor``) or a ``Zone``; ``arc`` bends the way.
+        - ``pointer.animate.click()``: a ripple at the tip and a small press
+          (0.44 s).
+        - ``pointer.animate.drag(target, obj, duration=1.0)``: the tip and
+          ``obj`` travel together.
+        - ``pointer.jump(target)``: place the tip without animating.
+
+        A pointer made at a 3D point (``at=(x, y, z)``) faces the camera as a
+        billboard and moves between 3D points; one made at a 2D point stays in
+        the plane, so a demonstration that crosses from a menu to a 3D model
+        uses one of each. ``click`` and ``drag`` raise the press by scaling,
+        so a size given to ``pointer.drawable`` is kept.
+
+        An unknown style or anchor, a non-positive size, or a target in the
+        other space raise ``ValueError``; a target that is not a point, a
+        drawable or a zone raises ``TypeError``.
+
+        Example:
+            cursor = scene.ui.pointer(style="arrow", at=(-5, 3))
+            scene.play(cursor.animate.to(menu_item).duration(0.8))
+            scene.play(cursor.animate.click())
         """
         ...
 
@@ -13048,6 +13126,11 @@ class Scene:
     @property
     def media(self) -> MediaLibrary:
         """Return the scene-owned media capability."""
+        ...
+
+    @property
+    def ui(self) -> UI:
+        """Return the scene-owned interface capability: ``pointer``."""
         ...
 
     @property

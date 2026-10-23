@@ -351,7 +351,8 @@ impl ImageOptions {
     pub(crate) fn media_frame(self, view: ImageView) -> gaanim_scene::MediaFrame {
         // With both sizes the destination is that frame, as `frame()` keeps it,
         // so a later crop fits its region to the frame rather than to the
-        // `contain`-fitted size of the whole source.
+        // `contain`-fitted size of the whole source. Without them (an image
+        // that fits the safe area) the frame is the fitted size.
         let (width, height) = match (self.width, self.height) {
             (Some(width), Some(height)) => (width, height),
             _ => (view.display_width, view.display_height),
@@ -859,12 +860,14 @@ pub enum LayoutOp {
 }
 
 /// Containing block used by a root layout.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum LayoutWithin {
     #[default]
     Intrinsic,
     Safe,
     Frame,
+    /// A rectangle of the scene, in scene units, fixed when the box is built.
+    Region(Bounds3D),
 }
 
 /// Complete rule set for one persistent Layout v2 container.
@@ -2715,7 +2718,13 @@ impl Anim {
         let state = self.owner.clone().ok_or(crate::canvas::InvalidWipe)?;
         let progress = super::visualization::parameter_in(&state, 0.0)
             .expect("a parameter starting at 0 is valid");
-        super::drawable::wipe_mask(&state, self.inner.target, progress.source(), direction)?;
+        super::drawable::wipe_mask(
+            &state,
+            self.inner.target,
+            progress.source(),
+            direction,
+            false,
+        )?;
         Ok(progress.animate().set(1.0))
     }
 

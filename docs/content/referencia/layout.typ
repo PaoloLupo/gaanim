@@ -151,7 +151,9 @@ Las mismas propiedades valen para `box`, `row`, `column`, `grid`, `stack`,
   `around`, `evenly`.
 - `wrap` (filas y columnas), `columns`, `rows`, `auto_flow` (grids).
 - `within`: solo en la raíz; `"safe"` (el fotograma menos el margen, por
-  defecto) o `"frame"` (a sangre).
+  defecto), `"frame"` (a sangre), una `Zone` o un objeto (la región que
+  cubren al construir la caja). Con `Zone.crop` una columna puede empezar a
+  una altura de la escena sin calcular rellenos.
 
 *Hijo* (también en `Drawable.item`)
 
@@ -266,13 +268,14 @@ sitio, no mueven a sus hermanos y conservan su desplazamiento cuando la caja
 se reorganiza.
 Los cambios de estructura se registran en la línea de tiempo; con
 `duration=` se animan (los hijos se deslizan, lo que entra aparece con un
-fundido y lo que sale se desvanece) y avanzan el cursor como `scene.play`.
+fundido o se despliega y lo que sale se desvanece o se pliega) y avanzan el
+cursor como `scene.play`.
 Con `advance=False` el siguiente cambio empieza a la vez.
 
 #api-entry(
   name: "Box.add / remove / replace",
   kind: "method",
-  desc: [`add(hijo, at=None)` inserta un hijo (o una cadena) y lo devuelve; con `duration`, entra con un fundido, salvo un hijo que viene de otra caja (sacado con `detach`), que se desliza desde donde está. `remove(hijo)` lo quita con un fundido; `replace(viejo, nuevo)` pone `nuevo` en su lugar, heredando sus reglas de `item` si no trae las suyas. Un índice fuera de rango lanza `IndexError`.],
+  desc: [`add(hijo, at=None)` inserta un hijo (o una cadena) y lo devuelve; con `duration`, entra con un fundido, salvo un hijo que viene de otra caja (sacado con `detach`), que se desliza desde donde está. `remove(hijo)` lo quita con un fundido. Con `add(..., enter="unfold")` el hueco del hijo crece desde cero en el eje principal de la caja (hacia abajo en una columna, a la derecha en una fila), con la misma duración y curva con que se deslizan los demás, y el hijo se recorta a ese hueco con el contenido pegado al borde por el que entra, moviéndose con el hermano anterior: nada se encima mientras se abre, como una transición de `height` con `overflow: hidden` en CSS. `remove(..., exit="fold")` lo cierra igual y oculta el hijo al terminar. El recorte reemplaza el `clip` que tuviera el hijo; en un grid o una pila el hueco se abre en su sitio. `replace(viejo, nuevo)` pone `nuevo` en su lugar, heredando sus reglas de `item` si no trae las suyas. Un índice fuera de rango lanza `IndexError`.],
 )[
 ```python
 >>>from gaanim import *
@@ -282,6 +285,9 @@ Con `advance=False` el siguiente cambio empieza a la vez.
 board.add(scene.layout.box("Nueva", style=chip), at=1, duration=0.6)
 board.remove(board[3], duration=0.6)
 board.replace(board[0], scene.layout.box("Otra", style=chip), duration=0.6)
+indice = scene.layout.column("Métodos", "Resultados", gap="12px")
+detalle = indice.add(scene.layout.box("Seis muros", style=chip), at=1, duration=0.45, enter="unfold")
+indice.remove(detalle, duration=0.45, exit="fold")
 ```
 ]
 
@@ -488,15 +494,26 @@ title = scene.text("Título", size=0.5).place(z["cabecera"], anchor="left")
 )
 
 #api-entry(
-  name: "Zone.point / inset / split / arrange",
+  name: "Zone.point / inset / crop / split / arrange",
   kind: "method",
-  desc: [Una `Zone` expone `left`, `right`, `top`, `bottom`, `width`, `height` y `center` en unidades de escena. `point(anchor)` da uno de sus puntos; `inset(padding)` la encoge; `split(plantilla)` aplica otra plantilla dentro; `arrange(*objetos, direction="row", gap=..., align=..., justify=...)` alinea objetos libres sin adoptarlos; `direction` es `"row"`, `"column"` o `"wrap"` (filas que saltan a la siguiente cuando el objeto no cabe).],
+  desc: [Una `Zone` expone `left`, `right`, `top`, `bottom`, `width`, `height` y `center` en unidades de escena. `point(anchor)` da uno de sus puntos; `inset(padding)` la encoge; `crop(top=, bottom=, left=, right=)` lleva cada borde dado a esa coordenada de la escena (y arriba) y deja los demás, de modo que no depende del margen ni de la resolución de diseño; `split(plantilla)` aplica otra plantilla dentro; `arrange(*objetos, direction="row", gap=..., align=..., justify=...)` alinea objetos libres sin adoptarlos; `direction` es `"row"`, `"column"` o `"wrap"` (filas que saltan a la siguiente cuando el objeto no cabe).],
 )[
 ```python
 >>>from gaanim import *
 >>>scene = Scene(frame=(16, 9), theme="paper")
 dots = [scene.geometry.circle(0.3) for _ in range(4)]
 scene.layout.safe.inset("80px").arrange(*dots, gap="24px")
+```
+
+Una zona recortada también es la región de una caja raíz con `within=`. La
+caja se centra en ella como en el área segura; con `height="fill"` y
+`justify="start"`, la columna empieza en el borde superior de la zona:
+
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9), theme="paper")
+index = scene.layout.safe.crop(top=0.95, right=-1.5)
+scene.layout.column("Uno", "Dos", "Tres", within=index, width="fill", height="fill", justify="start")
 ```
 ]
 
