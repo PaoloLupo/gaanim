@@ -3706,23 +3706,32 @@ fn world_up_or(canvas: &ApiCanvas, up: Option<(f64, f64, f64)>) -> gaanim_core::
     })
 }
 
+/// The region `within` names: the safe area (also without one), the frame,
+/// a zone or a drawable's box.
+pub(crate) fn within_region(
+    canvas: &Arc<Mutex<ApiCanvas>>,
+    within: Option<&Bound<'_, PyAny>>,
+) -> PyResult<gaanim_math::Bounds3D> {
+    let canvas = canvas.lock().expect("scene canvas poisoned");
+    let Some(within) = within else {
+        return Ok(canvas.safe_frame());
+    };
+    if let Ok(name) = within.extract::<String>() {
+        return match name.as_str() {
+            "safe" => Ok(canvas.safe_frame()),
+            "frame" => Ok(canvas.frame.bounds()),
+            _ => Err(pyo3::exceptions::PyValueError::new_err(
+                "within must be 'safe', 'frame', a Zone or a Drawable",
+            )),
+        };
+    }
+    drop(canvas);
+    crate::pyzones::target_bounds(within)
+}
+
 impl PyLayoutBuilder {
     fn region(&self, within: Option<&Bound<'_, PyAny>>) -> PyResult<gaanim_math::Bounds3D> {
-        let canvas = self.inner.lock().expect("scene canvas poisoned");
-        let Some(within) = within else {
-            return Ok(canvas.safe_frame());
-        };
-        if let Ok(name) = within.extract::<String>() {
-            return match name.as_str() {
-                "safe" => Ok(canvas.safe_frame()),
-                "frame" => Ok(canvas.frame.bounds()),
-                _ => Err(pyo3::exceptions::PyValueError::new_err(
-                    "within must be 'safe', 'frame', a Zone or a Drawable",
-                )),
-            };
-        }
-        drop(canvas);
-        crate::pyzones::target_bounds(within)
+        within_region(&self.inner, within)
     }
 
     #[allow(clippy::too_many_arguments)]

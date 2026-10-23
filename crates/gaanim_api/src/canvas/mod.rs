@@ -85,11 +85,14 @@ mod magic_move;
 pub use magic_move::{
     KeyedPairs, MagicMoveError, MagicMoveFailure, MagicMoveKey, MagicMoveUnmatched, pair_by_key,
 };
+mod geo_map;
 mod view_ticks;
 mod visualization;
 pub use gaanim_visualization::{
-    Cartesian3DVisibility, CartesianVisibility, NumberLineVisibility, PolarVisibility,
+    Cartesian3DVisibility, CartesianVisibility, GeoError, GeoLine, GeoPolygon, GraticuleOptions,
+    Longitudes, MapSide, MapView, NumberLineVisibility, PolarVisibility, Projection,
 };
+pub use geo_map::{GeoMapError, GeoMapHandle, MapFeature, MapFeatures, MapGraticule};
 pub use visualization::{
     ArrowFieldOptions, ArrowVectorFieldHandle, ChartHandle, CoordinateRef, CoordinateSpace3DHandle,
     CoordinateSpaceHandle, FlowParticleOptions, FlowParticlesHandle, NumberLineHandle, Parameter,

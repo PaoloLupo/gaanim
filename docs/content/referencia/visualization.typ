@@ -985,6 +985,156 @@ z = scene.geometry.dot(0.1).fill(GOLD).at_coordinate(plane.coord(1, 1))
 ```
 ]
 
+== Mapas
+
+Un mapa pone longitud y latitud sobre un rectángulo de la escena. No es un
+dibujable: dibuja polígonos, líneas, archivos GeoJSON y retículas como
+dibujables comunes en coordenadas de escena, con su estilo y sus animaciones de
+siempre, y coloca otros objetos en una longitud y una latitud. Lo que se sale
+de su marco se recorta.
+
+```python
+# show-code: true
+from gaanim import Scene
+
+scene = Scene(frame=(16, 9))
+atlas = scene.viz.map(lat=(-19, 1), center_lon=-72)
+grid = atlas.graticule(5, every=(10, 5))
+countries = atlas.geojson("andes.geojson", key="name")
+trench = atlas.polyline([(-81.2, 1.0), (-82.0, -5.0), (-78.2, -12.3), (-71.2, -19.0)])
+lima = atlas.place(scene.geometry.dot(0.08), -77.03, -12.05)
+scene.play([grid.animate.create(), countries.animate.create()], duration=1.0)
+scene.play([countries["Peru"].animate.fill(scene.canvas.color("accent")), trench.animate.create(), lima.animate.fade_in()])
+# output: preview.webp
+scene.render()
+```
+
+Las dos proyecciones separan longitud y latitud (un meridiano es una línea
+vertical y un paralelo, una horizontal) y usan una sola escala para ambas, así
+que el mapa conserva sus proporciones. Mercator mantiene la forma de las áreas
+pequeñas y las estira hacia los polos; la equirectangular espacia los
+paralelos por igual.
+
+Las longitudes valen en cualquier vuelta: cada punto toma la copia más cercana
+al centro del mapa (`-170` y `190` son el mismo meridiano), y un anillo o una
+línea que cruza el antimeridiano sigue entero y aparece en los dos bordes de un
+mapa que lo alcanza.
+
+Sin un estilo propio, las áreas se rellenan con el color `header` del tema y un
+borde fino `rule`, las líneas toman su color de primer plano, la retícula el
+color `rule` y sus rótulos el apagado a tamaño de pie de foto. Los selectores
+de tema `map/area`, `map/line`, `map/graticule`, `map/labels` y `map/frame` los
+cambian.
+
+#api-entry(
+  name: "Visualization.map",
+  kind: "factory",
+  params: (
+    (name: "lat", type: "tuple[float, float]", default: none, desc: [Bordes sur y norte en grados, en cualquier orden.]),
+    (name: "lon", type: "tuple[float, float] | None", default: "None", desc: [Bordes oeste y este. El este puede pasar de 180 para un mapa que cruza el Pacífico.]),
+    (name: "center_lon", type: "float | None", default: "None", desc: [Longitud del centro cuando no se da `lon`; 0 si se omiten ambos.]),
+    (name: "projection", type: "\"mercator\" | \"equirectangular\"", default: "\"mercator\"", desc: [Proyección.]),
+    (name: "within", type: "\"safe\" | \"frame\" | Zone | Drawable | None", default: "None", desc: [Región del mapa; el área segura por defecto.]),
+  ),
+  desc: [Mapa de las latitudes `lat` en la región `within`. Con `center_lon`, el mapa llena la región: las latitudes fijan la escala y el ancho de la región fija los bordes oeste y este alrededor de esa longitud. Con `lon`, el mapa es tan grande como cabe en la región, centrado. El marco de Mercator llega a 85,05° como mucho; el equirectangular, hasta los polos. Latitudes iguales o fuera de esos límites, un `lon` cuyo oeste no queda antes de su este o que abarca más de 360°, un mapa que abarcaría más de 360° (una franja estrecha de latitudes en una región ancha: da `lon`), `lon` junto con `center_lon` u otra proyección lanzan `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+zones = scene.layout.zones(Zones.columns(2, padding="page_padding"))
+andes = scene.viz.map(lat=(-19, 1), center_lon=-72, within=zones[0])
+world = scene.viz.map(lat=(-60, 75), lon=(-180, 180), projection="equirectangular", within=zones[1])
+print(andes.lon, world.scale)
+```
+]
+
+#api-entry(
+  name: "GeoMap.point / place",
+  kind: "method",
+  signature: "point(lon, lat) -> tuple[float, float] · place(drawable, lon, lat, *, anchor=None, offset=None) -> Drawable",
+  desc: [`point` da dónde se dibuja `(lon, lat)`, en unidades de escena. `place` mueve el dibujable allí y lo devuelve: su centro, o el punto `anchor` de su caja, y luego `offset` más allá en unidades de escena. Una coordenada no finita lanza `ValueError`; un dibujable que posee un layout, `LayoutOwnershipError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>atlas = scene.viz.map(lat=(-19, 1), center_lon=-72)
+x, y = atlas.point(-77.03, -12.05)
+label = atlas.place(scene.text("Lima", role="label"), -77.03, -12.05, anchor="left", offset=(0.12, 0))
+```
+]
+
+#api-entry(
+  name: "GeoMap.polygon / polyline",
+  kind: "method",
+  signature: "polygon(rings) -> Drawable · polyline(points, *, closed=False) -> Drawable",
+  desc: [`polygon` rellena un anillo de puntos `(lon, lat)`, o varios: el primero es el contorno, uno posterior dentro de él abre un agujero y uno aparte añade una parte (una isla), giren como giren. Un anillo puede repetir su primer punto al final, como en GeoJSON. Los vecinos comparten el borde exacto: el trazo va centrado en él. `polyline` traza una línea por puntos `(lon, lat)` con tramos rectos en el mapa (en Mercator, de rumbo constante); `closed=True` une el último con el primero. Un anillo de menos de tres puntos, una línea de menos de dos o una coordenada no finita lanzan `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>atlas = scene.viz.map(lat=(-19, 1), center_lon=-72)
+outline = [(-80.0, -4.0), (-70.0, -4.0), (-70.0, -18.0), (-80.0, -18.0)]
+lake = [(-70.5, -14.5), (-69.0, -14.5), (-69.0, -16.5), (-70.5, -16.5)]
+region = atlas.polygon([outline, lake]).fill(GOLD).opacity(0.5)
+route = atlas.polyline([(-77.0, -12.0), (-72.0, -13.5), (-68.2, -16.5)]).stroke(WHITE, 0.03)
+```
+]
+
+#api-entry(
+  name: "GeoMap.geojson",
+  kind: "method",
+  params: (
+    (name: "source", type: "str | os.PathLike | Mapping | __geo_interface__", default: none, desc: [Ruta de un archivo, que se busca como los demás recursos, un mapeo GeoJSON o un objeto con `__geo_interface__` (una geometría de Shapely, un marco de GeoPandas).]),
+    (name: "key", type: "str | None", default: "None", desc: [Propiedad que encuentra cada entidad por nombre; `"id"` también lee el `id` de cada entidad.]),
+  ),
+  desc: [Dibuja las entidades de un documento GeoJSON (una colección, una entidad o una geometría sola) y devuelve un `GeoFeatures`, un grupo con un dibujable por entidad en el orden del documento. Los polígonos y multipolígonos se rellenan como `polygon`, las líneas se trazan como `polyline`, los puntos son círculos, una colección de geometrías es un grupo y una entidad sin geometría, un grupo vacío. Las posiciones son `[longitud, latitud]` y se ignora una elevación detrás. Se quitan los puntos que mueven la línea dibujada menos de un cuarto de píxel y las partes que el mapa nunca muestra. Con `key`, cada entidad necesita esa propiedad como texto o número y ninguna puede repetirla. Un archivo que falta lanza `FileNotFoundError`; un GeoJSON inválido, un anillo o una clave mal dados, `ValueError`, y no se dibuja nada.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>atlas = scene.viz.map(lat=(-19, 1), center_lon=-72)
+countries = atlas.geojson("andes.geojson", key="name")
+countries["Peru"].fill(scene.canvas.color("accent"))
+print(len(countries), countries.keys[:3], countries.properties[0]["iso"])
+```
+]
+
+#api-entry(
+  name: "GeoFeatures.keys / properties",
+  kind: "property",
+  signature: "keys -> list[str] | None · properties -> list[dict]",
+  desc: [`GeoFeatures` es un `Drawable`: sus setters y animaciones actúan sobre todas las entidades. Se indexa por posición o, con `key=`, por clave, y también se recorre y admite `in`. `keys` da la clave de cada entidad, en orden, o `None` sin `key=`; `properties`, las propiedades de cada una como diccionarios nuevos. Una clave desconocida lanza `KeyError` y una posición fuera de rango, `IndexError`.],
+  none,
+)
+
+#api-entry(
+  name: "GeoMap.graticule",
+  kind: "method",
+  params: (
+    (name: "step", type: "float | tuple[float, float] | None", default: "None", desc: [Grados entre líneas, o un par (longitud, latitud). Por defecto, un paso redondo que traza unas ocho líneas a lo ancho del mapa.]),
+    (name: "every", type: "float | tuple[float, float] | None", default: "None", desc: [Rotula solo las líneas en sus múltiplos; por defecto, todas.]),
+    (name: "labels", type: "str | Sequence[str] | None", default: "None", desc: [Lados con rótulos, como nombres o un texto separado por comas: meridianos en `"top"` y `"bottom"`, paralelos en `"left"` y `"right"`. `None` rotula la izquierda y abajo; `()`, ninguno.]),
+    (name: "hemispheres", type: "str", default: "\"NSEW\"", desc: [Letras de norte, sur, este y oeste: `"NSEO"` en español.]),
+  ),
+  desc: [Traza meridianos y paralelos y los rotula. Devuelve un `Graticule`, un grupo con `lines` (todas las líneas en un trazado) y `labels` (un grupo de textos). Se omiten las líneas sobre los bordes del marco. Los rótulos van dentro del marco junto a su línea y se leen `"15°S"`, `"75°W"`, `"0°"` y `"180°"`; se omite el que taparía a otro o saldría del marco. Pasos no positivos, lados desconocidos o un `hemispheres` que no sean cuatro letras lanzan `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>atlas = scene.viz.map(lat=(-19, 1), center_lon=-72)
+grid = atlas.graticule(5, every=(10, 5), labels="left,bottom", hemispheres="NSEO")
+grid.lines.opacity(0.5)
+```
+]
+
+#api-entry(
+  name: "GeoMap.frame / projection / lon / lat / scale",
+  kind: "property",
+  signature: "frame -> Drawable · projection -> str · lon -> tuple[float, float] · lat -> tuple[float, float] · scale -> float",
+  desc: [`frame` es el rectángulo donde está el mapa y que recorta sus dibujos: no dibuja nada hasta darle relleno (el mar) o trazo (un marco), y queda debajo de los dibujos del mapa. `lon` y `lat` son los bordes `(oeste, este)` y `(sur, norte)` en grados, y `scale`, las unidades de escena por grado de longitud.],
+  none,
+)
+
 == Gráficos declarativos
 
 `ChartSpec` es una receta inmutable: datos, marca, codificaciones, ejes y guías.

@@ -11097,6 +11097,209 @@ class MediaLibrary:
         """
         ...
 
+class GeoMap:
+    """A map: longitude and latitude laid on a rectangle of the scene.
+
+    Made by ``scene.viz.map``. The map is not a drawable: ``polygon``,
+    ``polyline``, ``geojson`` and ``graticule`` draw ordinary drawables in
+    scene coordinates, styled and animated like any other, and ``point`` and
+    ``place`` put other objects at a longitude and latitude. Drawings that
+    reach past the map's ``frame`` are clipped to it; ``no_clip()`` lets one
+    overflow. Moving a drawing does not move the map: group the drawings to
+    move them together.
+
+    Longitudes may be given in any turn: each point takes the copy nearest
+    the middle of the map (``-170`` and ``190`` are one meridian), and a ring
+    or line that crosses the antimeridian stays whole and shows on both
+    edges of a map that reaches it.
+
+    Without a theme style of their own, areas fill with the theme's
+    ``header`` color and a thin ``rule`` border, lines take its foreground,
+    and the graticule its ``rule`` color; the theme selectors ``map/area``,
+    ``map/line``, ``map/graticule``, ``map/labels`` and ``map/frame`` restyle them.
+    """
+    @property
+    def projection(self) -> Literal["mercator", "equirectangular"]:
+        """The projection the map was made with."""
+        ...
+    @property
+    def lon(self) -> tuple[float, float]:
+        """The west and east edges, in degrees, as ``(west, east)``."""
+        ...
+    @property
+    def lat(self) -> tuple[float, float]:
+        """The south and north edges, in degrees, as ``(south, north)``."""
+        ...
+    @property
+    def scale(self) -> float:
+        """Scene units per degree of longitude, which a degree of latitude also measures at the equator."""
+        ...
+    @property
+    def frame(self) -> Drawable:
+        """The rectangle where the map lies, which clips its drawings.
+
+        It draws nothing until it is given a fill or a stroke: fill it to
+        color the sea, or stroke it for a neat line. It was made with the
+        map, so it draws below the map's drawings.
+
+        Example:
+            atlas.frame.fill(scene.canvas.color("panel"))
+        """
+        ...
+    def point(self, lon: float, lat: float) -> tuple[float, float]:
+        """Return where ``(lon, lat)`` is drawn, in scene units.
+
+        A non-finite coordinate raises ``ValueError``.
+
+        Example:
+            path = [atlas.point(lon, lat) for lon, lat in trench]
+        """
+        ...
+    def place(
+        self,
+        drawable: Drawable,
+        lon: float,
+        lat: float,
+        *,
+        anchor: Optional[AnchorName | Anchor] = None,
+        offset: Optional[tuple[float, float]] = None,
+    ) -> Drawable:
+        """Move ``drawable`` to ``(lon, lat)`` and return the same object.
+
+        Without ``anchor`` its center goes there (a group made about an
+        origin, its origin); with one, that point of its box. ``offset``
+        moves it further, in scene units. A drawable a layout owns raises
+        ``LayoutOwnershipError``; a non-finite coordinate, ``ValueError``.
+
+        Example:
+            atlas.place(scene.text("Lima", role="label"), -77.0, -12.0, anchor="left", offset=(0.12, 0))
+        """
+        ...
+    def polygon(self, rings: Sequence[tuple[float, float]] | Sequence[Sequence[tuple[float, float]]]) -> Drawable:
+        """Draw a filled polygon of ``(lon, lat)`` points and return it.
+
+        ``rings`` is one ring or several: the first is the outline, a later
+        ring inside it cuts a hole and one apart from it adds a part (an
+        island), whichever way each ring winds. A ring may repeat its first
+        point at its end, as GeoJSON rings do. Neighbors drawn this way share
+        their border exactly: the stroke is centered on it. A ring of fewer
+        than three points or a non-finite coordinate raises ``ValueError``.
+
+        Example:
+            lake = atlas.polygon([(-70.0, -15.2), (-68.8, -15.2), (-68.8, -16.4), (-70.0, -16.4)])
+        """
+        ...
+    def polyline(self, points: Sequence[tuple[float, float]], *, closed: bool = False) -> Drawable:
+        """Draw a line through ``(lon, lat)`` points and return it.
+
+        Segments are straight on the map: on a Mercator map, lines of
+        constant bearing. ``closed=True`` joins the last point to the first.
+        Fewer than two points or a non-finite coordinate raise ``ValueError``.
+
+        Example:
+            trench = atlas.polyline([(-81.2, 1.0), (-81.8, -3.5), (-78.2, -12.3), (-71.2, -19.0)])
+        """
+        ...
+    def geojson(
+        self,
+        source: str | os.PathLike[str] | Mapping[str, Any] | Any,
+        *,
+        key: Optional[str] = None,
+    ) -> GeoFeatures:
+        """Draw the features of a GeoJSON document and return them.
+
+        ``source`` is a file path, found like other assets, a GeoJSON
+        mapping, or an object with ``__geo_interface__`` (a Shapely geometry,
+        a GeoPandas frame). A feature collection, a single feature and a bare
+        geometry are read. Each feature becomes one drawable, in the
+        document's order: polygons and multipolygons fill like ``polygon``,
+        lines stroke like ``polyline``, points become dots, a geometry
+        collection becomes a group, and a feature without geometry an empty
+        group. Positions are ``[longitude, latitude]``; an elevation after
+        them is ignored. Points that move a drawn line less than a quarter
+        of a pixel are dropped, and parts the map never shows are left out.
+
+        ``key`` names the property that finds features by name
+        (``features["Peru"]``); ``"id"`` also reads each feature's ``id``.
+        Every feature needs it, as a string or a number, and no two may share
+        it. A missing file raises ``FileNotFoundError``; invalid GeoJSON, a
+        bad ring or key, ``ValueError``, and nothing is drawn.
+
+        Example:
+            countries = atlas.geojson("andes.geojson", key="name")
+            countries["Peru"].fill(scene.canvas.color("accent"))
+        """
+        ...
+    def graticule(
+        self,
+        step: Optional[float | tuple[float, float]] = None,
+        *,
+        every: Optional[float | tuple[float, float]] = None,
+        labels: Optional[Literal["left", "right", "top", "bottom"] | str | Sequence[str]] = None,
+        hemispheres: str = "NSEW",
+    ) -> Graticule:
+        """Draw meridians and parallels, label them and return them.
+
+        Lines are drawn every ``step`` degrees, or a ``(longitude,
+        latitude)`` pair of steps; the default is a round step that draws
+        about eight lines across the map. Lines on the frame's edges are left
+        out. ``every`` labels only the lines at its multiples (by default,
+        every line). ``labels`` lists the sides that carry them, as names or
+        one comma-separated string: meridians are labeled on ``"top"`` and
+        ``"bottom"``, parallels on ``"left"`` and ``"right"``; ``None`` labels
+        the left and bottom sides and ``()`` none. Labels sit inside the frame
+        beside their line, in the theme's muted color at caption size, and a
+        label that would cover another or leave the frame is left out.
+        ``hemispheres`` gives the letters of north, south, east and west
+        (``"NSEO"`` in Spanish): labels read ``"15°S"``, ``"75°W"``, ``"0°"``
+        and ``"180°"``. Invalid steps, sides or letters raise ``ValueError``.
+
+        Example:
+            grid = atlas.graticule(5, every=(10, 5), hemispheres="NSEO")
+            scene.play(grid.lines.animate.create())
+        """
+        ...
+
+class Graticule(Drawable):
+    """The meridians and parallels of a map: a group of ``lines`` and ``labels``."""
+    @property
+    def lines(self) -> Drawable:
+        """Every meridian and parallel, as one path."""
+        ...
+    @property
+    def labels(self) -> Drawable:
+        """The labels, as a group of texts."""
+        ...
+
+class GeoFeatures(Drawable):
+    """The features of a GeoJSON document drawn on a map, as a group.
+
+    Setters and animations act on every feature; index it by position, or by
+    key when ``geojson`` was given ``key=``, for one feature's drawable.
+
+    Example:
+        countries = atlas.geojson("andes.geojson", key="name")
+        for feature, properties in zip(countries, countries.properties):
+            feature.opacity(0.4 + properties["share"])
+    """
+    def __len__(self) -> int: ...
+    def __getitem__(self, key: int | str) -> Drawable:
+        """The drawable of the feature at a position or, with ``key=``, of that key.
+
+        An unknown key raises ``KeyError`` and a position out of range ``IndexError``.
+        """
+        ...
+    def __contains__(self, key: int | str) -> bool: ...
+    def __iter__(self) -> Iterator[Drawable]: ...
+    @property
+    def keys(self) -> Optional[list[str]]:
+        """Each feature's key, in order, or ``None`` when ``geojson`` had no ``key=``."""
+        ...
+    @property
+    def properties(self) -> list[dict[str, Any]]:
+        """Each feature's properties, in order, as new dicts."""
+        ...
+
 class Visualization:
     """Scene-owned API for reactive values, coordinate spaces, charts, and matrices."""
     def progress_ring(
@@ -11342,6 +11545,41 @@ class Visualization:
         ``rings`` and ``spokes`` inherit ``grid`` when omitted. ``labels``
         controls the radial title from ``Axis.label``; ``numbers`` controls
         radial tick text.
+        """
+        ...
+    def map(
+        self,
+        lat: tuple[float, float],
+        lon: Optional[tuple[float, float]] = None,
+        *,
+        center_lon: Optional[float] = None,
+        projection: Literal["mercator", "equirectangular"] = "mercator",
+        within: Optional[Literal["safe", "frame"] | Zone | Drawable] = None,
+    ) -> GeoMap:
+        """Create a map of the latitudes ``lat`` in a region of the scene.
+
+        ``within`` is the region: the safe area (the default), the frame, a
+        zone or a drawable's box. ``lat`` gives the south and north edges in
+        degrees, in either order. With ``center_lon`` (0 by default), the map
+        fills the region: its latitudes fix the scale and the region's width
+        sets the west and east edges around that longitude. With ``lon=(west,
+        east)`` instead, the map is as large as fits in the region, centered;
+        ``east`` may pass 180 for a map across the Pacific.
+
+        ``"mercator"`` keeps the shapes of small areas and stretches them
+        toward the poles; its frame reaches 85.05° at most.
+        ``"equirectangular"`` spaces parallels evenly, up to the poles. Both
+        use one scale for longitude and latitude, so the map keeps its
+        proportions. Latitudes that are equal or past those limits, a ``lon``
+        whose west is not below its east or that spans more than 360°, a map
+        that would span more than 360° (a thin band of latitude in a wide
+        region: give ``lon``), both ``lon`` and ``center_lon``, or another
+        projection raise ``ValueError``.
+
+        Example:
+            atlas = scene.viz.map(lat=(-19, 1), center_lon=-75.5, within=zones["map"])
+            countries = atlas.geojson("andes.geojson", key="name")
+            scene.play(countries.animate.create())
         """
         ...
     def complex(

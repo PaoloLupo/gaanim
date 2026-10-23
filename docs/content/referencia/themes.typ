@@ -1003,7 +1003,9 @@ divider = scene.geometry.line(-5, 0, 5, 0).stroke(theme.color("rule"), 0.025)
 
 Las claves de `styles` seleccionan una familia (`shape`, `line`, `text`,
 `glyph` para las llaves, `axes`, `plot`), el nombre exacto de una fábrica (`circle`, `rounded_rect`,
-`arrow`), una parte semántica como `axes/grid` o `axes/labels`, o una clase
+`arrow`), una parte semántica como `axes/grid`, `axes/labels` o las de los
+#link("/referencia/visualization/#mapas")[mapas] (`map/area`, `map/line`,
+`map/graticule`, `map/labels`, `map/frame`), o una clase
 propia como `.warning`, que se asigna con
 #link("/referencia/drawable/#api-drawable-style-class")[`Drawable.style_class`].
 La precedencia es: tema base, familia, tipo exacto o parte semántica, clases

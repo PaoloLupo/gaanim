@@ -4,6 +4,7 @@ pub mod axis;
 pub mod bar_race;
 pub mod chart;
 pub mod data;
+pub mod geo;
 pub mod sampling;
 pub mod space;
 pub mod statistics;
@@ -24,6 +25,10 @@ pub use chart::{
     TransitionKind,
 };
 pub use data::{Column, DataError, DataSource, DataTable, DataValue};
+pub use geo::{
+    GeoError, GeoLine, GeoPolygon, Graticule, GraticuleLabel, GraticuleOptions, Longitudes,
+    MERCATOR_MAX_LATITUDE, MapSide, MapView, Projection,
+};
 pub use sampling::{
     SampledPath, Sampling, SamplingError, SurfaceMesh, VectorGlyph, implicit_contours,
     sample_function, sample_parametric, sample_parametric_surface, sample_surface,
