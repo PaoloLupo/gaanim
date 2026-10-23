@@ -203,6 +203,7 @@ from .templates import (
 from .animation_types import AnimationChannel, CustomAnimationValues, Playable, ScalarSource
 from .questions import Question, QuestionError, load_questions
 from .pointer import Pointer, PointerAnimator
+from .timeline import Timeline, TimelineEvent
 from .matrix import (
     Matrix,
     MatrixAlgebraError,
@@ -266,6 +267,9 @@ __all__ = [
     "Matrix",
     "Pointer",
     "PointerAnimator",
+
+    "Timeline",
+    "TimelineEvent",
     "MatrixEntry",
     "MatrixSelection",
     "MatrixSelectionAnimation",

@@ -650,6 +650,10 @@ path = "visualization/bar_race.py"
 description = "Ranked bars that grow, overtake each other and leave the top, with value formats, colors and a rolling ticker."
 
 [[example]]
+path = "visualization/timeline.py"
+description = "Timelines whose labelled events stack in lanes that do not overlap: sides chosen automatically, scale breaks, labels that grow left near the end and reserved spans."
+
+[[example]]
 path = "visualization/vector_fields.py"
 description = "Vector fields as arrows and streamlines with their options, flowing highlights, particles, advection and color maps."
 

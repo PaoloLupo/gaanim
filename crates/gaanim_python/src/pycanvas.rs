@@ -5396,6 +5396,24 @@ impl PyVisualization {
             .call((self.scene.bind(py), values), options)?
             .unbind())
     }
+
+    /// An axis of dates whose labelled events stack in lanes; see
+    /// `gaanim_core.pyi`.
+    #[pyo3(signature = (start, end, **options))]
+    fn timeline<'py>(
+        &self,
+        py: Python<'py>,
+        start: &Bound<'py, PyAny>,
+        end: &Bound<'py, PyAny>,
+        options: Option<&Bound<'py, PyDict>>,
+    ) -> PyResult<Py<PyAny>> {
+        crate::custom::ensure_authoring_allowed()?;
+        let module = py.import("gaanim.timeline")?;
+        Ok(module
+            .getattr("_build_timeline")?
+            .call((self.scene.bind(py), start, end), options)?
+            .unbind())
+    }
 }
 
 /// `scene.ui`: interface elements built in Python from the scene's public API.
