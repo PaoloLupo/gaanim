@@ -2141,6 +2141,16 @@ struct LayoutInstant {
     leaving: HashMap<ObjectId, bool>,
 }
 
+impl LayoutInstant {
+    /// Whether a change at `time` starts at this instant. At a stop, what
+    /// changes the frame at once comes [`crate::builder::STOP_REST`] later
+    /// (a box made between two changes, for one), and the changes after it
+    /// with it: they still start at the stop's instant.
+    fn holds(&self, time: f64) -> bool {
+        (self.time..=self.time + crate::builder::STOP_REST).contains(&time)
+    }
+}
+
 struct CompiledLayoutTree {
     root: gaanim_layout::LayoutNode,
     source_by_id: BTreeMap<gaanim_layout::LayoutId, ObjectId>,
@@ -5181,7 +5191,7 @@ impl SceneModel {
                     // move them from there.
                     if layout_instant
                         .as_ref()
-                        .is_some_and(|instant| instant.time != builder.current_time)
+                        .is_some_and(|instant| !instant.holds(builder.current_time))
                     {
                         layout_instant = None;
                     }
@@ -25273,8 +25283,13 @@ mod tests {
     /// and 30 high) where, both at 0.5 s and over 1 s, d leaves and e (40
     /// high) enters after c, d first when `leave_first`, folding and
     /// unfolding when `fold` and fading otherwise, with another box laid
-    /// out in between: the app and the entities of a, b, c, d and e.
-    fn simultaneous_column(leave_first: bool, fold: bool) -> (bevy::prelude::App, [Entity; 5]) {
+    /// out in between and, with `stop`, a stop just before: the app and the
+    /// entities of a, b, c, d and e.
+    fn simultaneous_column(
+        leave_first: bool,
+        fold: bool,
+        stop: bool,
+    ) -> (bevy::prelude::App, [Entity; 5]) {
         use bevy::prelude::App;
         let mut canvas = SceneModel::new(640, 360);
         let [a, d, b, c, e] =
@@ -25305,6 +25320,11 @@ mod tests {
             None,
         );
         canvas.wait(0.5);
+        if stop {
+            // The box made between the changes then comes a moment after
+            // the stop, and the second change with it.
+            canvas.stop(None).unwrap();
+        }
         let changes = if leave_first {
             [false, true]
         } else {
@@ -25403,33 +25423,41 @@ mod tests {
     }
 
     /// Two changes of one box that start at the same instant run together,
-    /// whatever their order: the others slide from where they stood to the
-    /// layout both leave, the leaving child fades where it stood or folds
-    /// with the child before it, and the entering one unfolds with the
-    /// child before it.
+    /// whatever their order and even at a stop: the others slide from where
+    /// they stood to the layout both leave, the leaving child fades where it
+    /// stood or folds with the child before it, and the entering one unfolds
+    /// with the child before it.
     #[test]
     fn simultaneous_layout_changes_run_together_in_either_order() {
         let times = [0.5, 0.6, 0.75, 1.0, 1.25, 1.5, 2.0];
-        for fold in [false, true] {
-            let (mut leave_first, entities) = simultaneous_column(true, fold);
-            let (mut enter_first, others) = simultaneous_column(false, fold);
+        for (fold, stop) in [(false, false), (true, false), (false, true), (true, true)] {
+            let (mut leave_first, entities) = simultaneous_column(true, fold, stop);
+            let (mut enter_first, others) = simultaneous_column(false, fold, stop);
             let [a0, b0, _, d0, _] = world_places_at(&mut leave_first, 0.5, entities);
             let [_, b1, c1, _, e1] = world_places_at(&mut leave_first, 1.5, entities);
             assert!((b1 - b0).length() > 10.0, "{b0:?} {b1:?}");
-            for time in times {
+            // After a stop the second change starts a moment later: at the
+            // stop's own frame the child it brings in, still hidden, may
+            // stand elsewhere, and the slide lags by that moment.
+            let (times, slack) = if stop {
+                (&times[1..], 1e-3)
+            } else {
+                (&times[..], 1e-6)
+            };
+            for &time in times {
                 let places = world_places_at(&mut leave_first, time, entities);
                 let reversed = world_places_at(&mut enter_first, time, others);
                 for (place, other) in places.iter().zip(&reversed) {
                     assert!(
                         place.distance(*other) < 1e-6,
-                        "fold {fold}, t={time}: {places:?} {reversed:?}"
+                        "fold {fold}, stop {stop}, t={time}: {places:?} {reversed:?}"
                     );
                 }
                 let [a, b, c, d, e] = places;
                 let progress = RateFunc::Smooth.evaluate(((time - 0.5) / 1.0).clamp(0.0, 1.0));
                 assert!(
-                    b.distance(b0.lerp(b1, progress)) < 1e-6,
-                    "fold {fold}, t={time}: {b:?} from {b0:?} to {b1:?}"
+                    b.distance(b0.lerp(b1, progress)) < slack,
+                    "fold {fold}, stop {stop}, t={time}: {b:?} from {b0:?} to {b1:?}"
                 );
                 if time > 1.5 {
                     continue;
