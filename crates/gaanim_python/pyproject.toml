@@ -6,9 +6,28 @@ build-backend = "hatchling.build"
 name = "gaanim"
 version = "0.17.0"
 description = "Authoring helpers and type information for the Gaanim application"
+readme = "README.md"
 license = "MIT OR Apache-2.0"
 requires-python = ">=3.15"
 dependencies = []
+authors = [{ name = "Gaanim contributors" }]
+keywords = ["animation", "vector graphics", "manim", "presentations", "typst"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Education",
+  "Programming Language :: Python :: 3",
+  "Topic :: Multimedia :: Graphics",
+  "Topic :: Multimedia :: Video",
+  "Typing :: Typed",
+]
+
+[project.urls]
+Homepage = "https://paololupo.github.io/gaanim/"
+Documentation = "https://paololupo.github.io/gaanim/"
+Download = "https://github.com/PaoloLupo/gaanim/releases/latest"
+Source = "https://github.com/PaoloLupo/gaanim"
+Issues = "https://github.com/PaoloLupo/gaanim/issues"
 
 [project.optional-dependencies]
 algebra = ["sympy>=1.14,<2"]
