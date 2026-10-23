@@ -2714,13 +2714,12 @@ fn parse_within(value: &Bound<'_, PyAny>) -> PyResult<LayoutWithin> {
             )),
         };
     }
-    crate::pyzones::target_bounds(value)
-        .map(LayoutWithin::Region)
-        .map_err(|_| {
-            pyo3::exceptions::PyTypeError::new_err(
-                "within must be None, 'safe', 'frame', a Zone or a Drawable",
-            )
-        })
+    if !value.is_instance_of::<crate::pyzones::PyZone>() && !value.is_instance_of::<PyDrawable>() {
+        return Err(pyo3::exceptions::PyTypeError::new_err(
+            "within must be None, 'safe', 'frame', a Zone or a Drawable",
+        ));
+    }
+    crate::pyzones::target_bounds(value).map(LayoutWithin::Region)
 }
 
 fn finite_non_negative(value: f64, name: &str) -> PyResult<()> {

@@ -501,13 +501,15 @@ dots = [scene.geometry.circle(0.3) for _ in range(4)]
 scene.layout.safe.inset("80px").arrange(*dots, gap="24px")
 ```
 
-Una zona recortada también es la región de una caja raíz con `within=`:
+Una zona recortada también es la región de una caja raíz con `within=`. La
+caja se centra en ella como en el área segura; con `height="fill"` y
+`justify="start"`, la columna empieza en el borde superior de la zona:
 
 ```python
 >>>from gaanim import *
 >>>scene = Scene(frame=(16, 9), theme="paper")
 index = scene.layout.safe.crop(top=0.95, right=-1.5)
-scene.layout.column("Uno", "Dos", "Tres", within=index, width="fill", justify="start")
+scene.layout.column("Uno", "Dos", "Tres", within=index, width="fill", height="fill", justify="start")
 ```
 ]
 

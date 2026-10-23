@@ -1385,7 +1385,7 @@ class Zone:
 
         Example:
             index = scene.layout.safe.crop(top=0.95, right=-1.5)
-            scene.layout.column(*entries, within=index, width="fill")
+            scene.layout.column(*entries, within=index, width="fill", height="fill", justify="start")
         """
         ...
     def split(self, template: Zones) -> ZoneSet:
