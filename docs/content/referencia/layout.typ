@@ -270,7 +270,11 @@ Los cambios de estructura se registran en la línea de tiempo; con
 `duration=` se animan (los hijos se deslizan, lo que entra aparece con un
 fundido o se despliega y lo que sale se desvanece o se pliega) y avanzan el
 cursor como `scene.play`.
-Con `advance=False` el siguiente cambio empieza a la vez.
+Con `advance=False` el siguiente cambio empieza a la vez, y los cambios que
+empiezan juntos, en la misma caja o en otra del mismo árbol, se animan juntos
+sea cual sea su orden: los hijos se deslizan desde donde estaban hasta donde
+los dejan todos los cambios, y cada hijo que entra o sale aparece, se
+desvanece, se despliega o se pliega en su hueco.
 
 #api-entry(
   name: "Box.add / remove / replace",

@@ -1119,7 +1119,12 @@ class Box(Drawable):
 
     Structural changes (``add``, ``remove``, ``replace``, ``set``, a child's
     ``item``) accept ``duration=`` to animate the reflow, and ``advance=False``
-    to start the next change at the same time. The box's scale and rotation
+    to start the next change at the same time. Changes that start together,
+    in this box or another of its tree, run together whatever their order:
+    the children slide from where they stood to where all the changes leave
+    them, and each child that enters or leaves fades, unfolds or folds in
+    its slot.
+    The box's scale and rotation
     apply to its children on top of their own, as a CSS transform does. A
     box nested in another takes the room of the scale it was placed with,
     like any child.
@@ -4557,8 +4562,11 @@ class Drawable:
         the parameter sways the model). ``None`` puts the shape back.
         Each member takes it the way it is drawn: the vertices of meshes
         (primitives, ``mesh``, extrusions, subdivided ``plane`` walls) and
-        of 3D line lists move one by one, so a wall bends; a ``line_3d``
-        whose ends follow other objects follows them; and any other member
+        of 3D line lists move one by one, so a wall bends; each copy of
+        ``instances`` or ``points_3d`` moves as a whole by the displacement
+        at its place, whatever its scale and turn, and keeps the shape of
+        the mesh the copies share; a ``line_3d`` whose ends follow other
+        objects follows them; and any other member
         (a point, a text, a billboard, a 2D drawable in the 3D world) moves
         as a whole by the displacement at its origin. A group passes it to
         its members at any depth. The authored values never change, and a

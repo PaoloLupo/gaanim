@@ -8,13 +8,15 @@
 //! may be a parameter too), so a seek finds the same shape as playback.
 //!
 //! Each frame the displacement is applied to the drawable's members the way
-//! each is drawn: the vertices of meshes and line lists move one by one, a
-//! 3D line that follows other objects follows them, and any other member (a
-//! point, a text, a billboard, a 2D drawable in the 3D world) moves as a
-//! whole by the displacement at its origin. Members move before 3D lines
-//! read where their endpoints are and are put back after propagation;
-//! meshes and lines are deformed after propagation and put back at the
-//! start of the next frame, so authored values never change.
+//! each is drawn: the vertices of meshes and line lists move one by one, the
+//! copies of a mesh drawn at many points move each as a whole by the
+//! displacement at its place, a 3D line that follows other objects follows
+//! them, and any other member (a point, a text, a billboard, a 2D drawable
+//! in the 3D world) moves as a whole by the displacement at its origin.
+//! Members move before 3D lines read where their endpoints are and are put
+//! back after propagation; meshes, copies and lines are deformed after
+//! propagation and put back at the start of the next frame, so authored
+//! values never change.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -22,7 +24,9 @@ use std::sync::Arc;
 use bevy::prelude::*;
 use gaanim_core::glam::{DMat3, DVec3};
 use gaanim_math::{GlobalSpatialTransform, SpatialTransform};
-use gaanim_scene::{Billboard, GroupMarker, InWorld3D, LineListData, TriangleMeshData};
+use gaanim_scene::{
+    Billboard, GroupMarker, InWorld3D, LineListData, MeshCopies, MeshInstances, TriangleMeshData,
+};
 
 use crate::updaters::{TrackingEndpoint, TrackingLine3D, TrackingScalar, entity_world_matrix};
 
@@ -172,14 +176,17 @@ enum Member {
     Rigid(Entity),
     /// Its vertices move one by one.
     Vertices(Entity),
+    /// Its mesh keeps its shape and each copy of it moves as a whole, by
+    /// the displacement at the copy's place.
+    Copies(Entity),
 }
 
 /// The members of `root` and how each takes its deformation. A group passes
 /// it to its members; a 3D line that follows other objects follows them;
 /// what such a line follows moves as a whole, as a node of a frame does, so
-/// the line stays on it; another mesh or line list takes it per vertex and
-/// passes it to its children; anything else moves as a whole, with its
-/// children.
+/// the line stays on it; the copies of a mesh drawn at many points move one
+/// by one; another mesh or line list takes it per vertex; either passes it
+/// to its children; anything else moves as a whole, with its children.
 fn members(root: Entity, world: &World, followed: &HashSet<Entity>, out: &mut Vec<Member>) {
     let follows = world.get::<TrackingLine3D>(root).is_some_and(|line| {
         [&line.from, &line.to]
@@ -192,6 +199,13 @@ fn members(root: Entity, world: &World, followed: &HashSet<Entity>, out: &mut Ve
     }
     if followed.contains(&root) {
         out.push(Member::Rigid(root));
+    } else if world.get::<MeshInstances>(root).is_some() {
+        // The copies' scales and turns would scale and turn a displacement
+        // of the mesh they share.
+        out.push(Member::Copies(root));
+        for child in children() {
+            members(child, world, followed, out);
+        }
     } else if world.get::<TriangleMeshData>(root).is_some()
         || world.get::<LineListData>(root).is_some()
     {
@@ -256,11 +270,12 @@ fn active(world: &mut World) -> Vec<(Deformation, Vec<f64>, Vec<Member>)> {
 #[derive(Resource, Default)]
 pub struct DeformedTranslations(Vec<(Entity, DVec3)>);
 
-/// Meshes and line lists deformed this frame, as authored, to put back at
-/// the start of the next frame.
+/// Meshes, copies and line lists deformed this frame, as authored, to put
+/// back at the start of the next frame.
 #[derive(Resource, Default)]
 pub struct DeformedGeometry {
     meshes: Vec<(Entity, TriangleMeshData)>,
+    copies: Vec<(Entity, Arc<MeshCopies>)>,
     lines: Vec<(Entity, LineListData)>,
 }
 
@@ -316,12 +331,13 @@ pub fn restore_deformation_offsets_system(world: &mut World) {
 }
 
 /// Deform the vertices of the meshes and line lists of deformed drawables,
-/// in the world, once their world transforms are known.
+/// and move the copies of meshes drawn at many points, in the world, once
+/// their world transforms are known.
 pub fn apply_deformation_vertices_system(world: &mut World) {
     let mut geometry = DeformedGeometry::default();
     for (deformation, weights, found) in active(world) {
         for member in found {
-            let Member::Vertices(entity) = member else {
+            let (Member::Vertices(entity) | Member::Copies(entity)) = member else {
                 continue;
             };
             let Some(global) = world
@@ -331,6 +347,30 @@ pub fn apply_deformation_vertices_system(world: &mut World) {
                 continue;
             };
             let inverse = global.inverse();
+            if matches!(member, Member::Copies(_)) {
+                let Some(copies) = world
+                    .get::<MeshInstances>(entity)
+                    .map(|instances| Arc::clone(&instances.copies))
+                else {
+                    continue;
+                };
+                // Each copy's place moves by the displacement there, in the
+                // drawable's coordinates, where the places live.
+                let mut moved = (*copies).clone();
+                for position in &mut moved.positions {
+                    let point = global.transform_point3(DVec3::from_array(position.map(f64::from)));
+                    let (offset, _) = deformation.displacement(&weights, point);
+                    let local = inverse.transform_point3(point + offset);
+                    if local.is_finite() {
+                        *position = local.as_vec3().to_array();
+                    }
+                }
+                if let Some(mut instances) = world.get_mut::<MeshInstances>(entity) {
+                    instances.copies = Arc::new(moved);
+                    geometry.copies.push((entity, copies));
+                }
+                continue;
+            }
             // A local point's place in the world after the displacement,
             // back in local space; normals follow the map's derivative.
             let linear = gaanim_core::glam::DMat3::from_mat4(global);
@@ -374,15 +414,15 @@ pub fn apply_deformation_vertices_system(world: &mut World) {
             }
         }
     }
-    if !(geometry.meshes.is_empty() && geometry.lines.is_empty())
+    if !(geometry.meshes.is_empty() && geometry.copies.is_empty() && geometry.lines.is_empty())
         || world.contains_resource::<DeformedGeometry>()
     {
         world.insert_resource(geometry);
     }
 }
 
-/// Put back the meshes and line lists deformed last frame, before seeks,
-/// tweens and snapshots read them.
+/// Put back the meshes, copies and line lists deformed last frame, before
+/// seeks, tweens and snapshots read them.
 pub fn restore_deformation_vertices_system(world: &mut World) {
     let Some(mut geometry) = world.get_resource_mut::<DeformedGeometry>() else {
         return;
@@ -391,6 +431,11 @@ pub fn restore_deformation_vertices_system(world: &mut World) {
     for (entity, mesh) in geometry.meshes {
         if let Ok(mut target) = world.get_entity_mut(entity) {
             target.insert(mesh);
+        }
+    }
+    for (entity, copies) in geometry.copies {
+        if let Some(mut instances) = world.get_mut::<MeshInstances>(entity) {
+            instances.copies = copies;
         }
     }
     for (entity, lines) in geometry.lines {
