@@ -262,6 +262,7 @@ Axes, plots, charts, vector fields and live readouts.
 | [Chart encodings](visualization/chart_encodings.py) | Color, size, opacity and label channels, scales, categorical palettes, legends and color bars, and explicit axes. |
 | [Chart transitions](visualization/chart_transitions.py) | Charts that morph between specs by key or index, change mark family or data, grow from 2D into 3D, and pies that share out their slices anew. |
 | [Bar race](visualization/bar_race.py) | Ranked bars that grow, overtake each other and leave the top, with value formats, colors and a rolling ticker. |
+| [Timeline](visualization/timeline.py) | Timelines whose labelled events stack in lanes that do not overlap: sides chosen automatically, scale breaks, labels that grow left near the end and reserved spans. |
 | [Vector fields](visualization/vector_fields.py) | Vector fields as arrows and streamlines with their options, flowing highlights, particles, advection and color maps. |
 | [Readouts](visualization/readouts.py) | Rolling counters in every format and mode, live readouts of parameters, functions and time, progress rings and countdowns. |
 

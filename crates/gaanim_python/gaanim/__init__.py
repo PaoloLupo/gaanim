@@ -201,6 +201,7 @@ from .templates import (
 )
 from .animation_types import AnimationChannel, CustomAnimationValues, Playable, ScalarSource
 from .questions import Question, QuestionError, load_questions
+from .timeline import Timeline, TimelineEvent
 from .matrix import (
     Matrix,
     MatrixAlgebraError,
@@ -261,6 +262,8 @@ __all__ = [
     "label",
     "magic_move",
     "Matrix",
+    "Timeline",
+    "TimelineEvent",
     "MatrixEntry",
     "MatrixSelection",
     "MatrixSelectionAnimation",

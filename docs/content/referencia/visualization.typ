@@ -833,6 +833,59 @@ scene.render()
   none,
 )
 
+== Línea de tiempo
+
+Un eje de fechas con hitos rotulados. Cada rótulo va al primer carril libre de
+su lado, así que los vecinos no se pisan, y crece hacia el lado en que cabe
+dentro del eje. Las fechas son números, como años.
+
+#api-entry(
+  name: "Visualization.timeline",
+  kind: "factory",
+  params: (
+    (name: "start / end", type: "float", default: none, desc: [Primera y última fecha del eje.]),
+    (name: "x_range / y", type: "tuple[float, float] / float", default: "(-6.5, 6.5) / 0", desc: [Dónde va el eje, en unidades de escena.]),
+    (name: "breaks", type: "Sequence[tuple[float, float]]", default: "()", desc: [Cortes de escala `(fecha, fracción)`: esa fecha cae en esa fracción del eje y las fechas se reparten linealmente entre cortes. Cada corte se dibuja como un hueco con dos barras inclinadas.]),
+    (name: "lane_height / gap", type: "float", default: "0.6 / 0.2", desc: [Distancia entre carriles y separación mínima entre rótulos.]),
+    (name: "label_width", type: "float | None", default: "None", desc: [Ancho al que se parten títulos y cuerpos; sin él van en una línea.]),
+    (name: "color", type: "ColorLike | None", default: "None", desc: [Color de puntos y tallos; por defecto el `accent` del tema.]),
+  ),
+  returns: (type: "Timeline", desc: [El eje (`axis`), `x(fecha)`, `event(...)`, `reserve(...)` y la lista `events`.]),
+  desc: [Un final que no va después del inicio, cortes que no avanzan, una fecha fuera del eje, un lado desconocido o tamaños no positivos lanzan `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+line = scene.viz.timeline(1980, 2026, breaks=[(2016, 0.55)])
+for year, title in [(1985, "Primeros ensayos"), (1992, "Norma E.070"), (2004, "Muros confinados")]:
+    line.event(year, title, "albañilería", side="above")
+line.event(2019, "Visión artificial", "automatización", side="below")
+scene.play([line.axis.animate.create()])
+```
+]
+
+#api-entry(
+  name: "Timeline.event",
+  kind: "method",
+  params: (
+    (name: "date / title / body", type: "float / str / str | None", default: "— / — / None", desc: [La fecha y el rótulo: el título en negrita sobre el cuerpo, alineados con el tallo.]),
+    (name: "side", type: "str", default: "\"auto\"", desc: [`"above"`, `"below"` o `"auto"`, que toma el lado con el carril libre más cercano al eje y alterna cuando están igual de cerca.]),
+    (name: "color", type: "ColorLike | None", default: "None", desc: [Color del punto y del tallo.]),
+    (name: "knockout", type: "bool", default: "True", desc: [Una placa del color del fondo detrás del rótulo tapa los tallos que pasan por debajo.]),
+  ),
+  returns: (type: "TimelineEvent", desc: [`dot`, `stem` y `label` (y `title`, `body`, `side`, `lane`), objetos normales que se animan por separado; `parts` los da en orden para revelarlos.]),
+  desc: [El rótulo crece a la derecha del tallo, o a la izquierda cuando pasaría del final del eje, y ocupa el primer carril de su lado donde guarda `gap` con los rótulos y reservas que ya hay; uno alto ocupa los carriles que necesite. `timeline.reserve(desde, hasta, side=, lane=None)` aparta esas fechas en un carril o en todos, para lo que se dibuja aparte: un rótulo que choca con una reserva de todos los carriles crece hacia el otro lado, y si tampoco cabe así, `"auto"` lo lleva al otro lado del eje y un lado fijo lanza `ValueError`. `timeline.x(fecha)` da la x de una fecha.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+line = scene.viz.timeline(2000, 2030)
+line.reserve(2010, 2018, side="above")
+hito = line.event(2014, "Reserva arriba: va abajo")
+scene.play([part.animate.fade_in() for part in hito.parts])
+```
+]
+
 == Recta numérica, plano polar y plano complejo
 
 Espacios tipados de una dimensión, polares y complejos.

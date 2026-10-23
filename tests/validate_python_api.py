@@ -2124,7 +2124,7 @@ def validate_python_module_stubs() -> list[str]:
         return names
 
     failures: list[str] = []
-    for module_name in ("sections", "templates", "matrix", "colors"):
+    for module_name in ("sections", "templates", "matrix", "colors", "timeline"):
         stub = STUB.with_name(f"{module_name}.pyi")
         tree = ast.parse(stub.read_text(encoding="utf-8"), filename=str(stub))
         code = importlib.import_module(f"gaanim.{module_name}")
@@ -3063,6 +3063,51 @@ def validate_copy_and_offset_contract(module):
         failures.append("keyframes accepted position and offset together")
     if "#h(0pt)" not in module.quantity(1600, "kg/m^3"):
         failures.append("quantity leaves a gap around the unit slash")
+    return failures
+
+
+def validate_timeline_contract(module):
+    """Timeline dates map through their breaks and labels stack in lanes that do not overlap."""
+    failures = []
+    scene = module.Scene(frame=(16, 9))
+    line = scene.viz.timeline(1980, 2026, x_range=(-6, 6), y=-0.5, breaks=[(2016, 0.5)])
+    if (line.x(1980), line.x(2016), line.x(2026)) != (-6.0, 0.0, 6.0):
+        failures.append(f"timeline dates did not map through the break: {line.x(1980), line.x(2016), line.x(2026)}")
+    if not isinstance(line.axis, module.Drawable):
+        failures.append("the timeline axis is not a drawable")
+    first = line.event(1990, "First", "a body line", side="above")
+    second = line.event(1991, "Second", side="above")
+    if second.lane <= first.lane:
+        failures.append(f"a label that would touch the one before did not go to a further lane: {first.lane, second.lane}")
+    a, b = first.label.bounds(), second.label.bounds()
+    if not (b.bottom >= a.top or b.top <= a.bottom):
+        failures.append("two labels on the same side overlap")
+    if first.title.bounds().left < line.x(1990) - 0.1 or first.side != "above":
+        failures.append("a label did not grow to the right of its stem")
+    late = line.event(2025, "Near the end", side="below")
+    if abs(late.title.bounds().right - line.x(2025)) > 0.1:
+        failures.append("a label near the end of the axis did not grow to the left")
+    alternate = [line.event(year, str(year)).side for year in (2000, 2008)]
+    if alternate[0] == alternate[1]:
+        failures.append(f"auto events as near on both sides did not alternate: {alternate}")
+    line.reserve(2017, 2024, side="above")
+    if line.event(2020, "Reserved above").side != "below":
+        failures.append("an auto event took a side whose lanes were reserved")
+    if not all(isinstance(part, module.Drawable) for part in first.parts):
+        failures.append("the parts of an event are not drawables")
+    scene.play([line.axis.animate.create(), *[part.animate.fade_in() for part in first.parts]])
+    for description, operation in (
+        ("an end before the start", lambda: scene.viz.timeline(2000, 1990)),
+        ("a break that goes back", lambda: scene.viz.timeline(1980, 2026, breaks=[(2016, 0.5), (2010, 0.7)])),
+        ("a break at the end", lambda: scene.viz.timeline(1980, 2026, breaks=[(2026, 0.9)])),
+        ("a date outside the timeline", lambda: line.event(1970, "Too early")),
+        ("an unknown side", lambda: line.event(2000, "x", side="left")),
+        ("a negative lane", lambda: line.reserve(2000, 2001, side="above", lane=-1)),
+        ("a side reserved in every lane", lambda: line.event(2021, "Blocked", side="above")),
+        ("a zero lane height", lambda: scene.viz.timeline(0, 1, lane_height=0)),
+    ):
+        if not raises_error(ValueError, operation):
+            failures.append(f"timeline accepted {description}")
     return failures
 
 
@@ -4093,6 +4138,7 @@ def main() -> int:
     missing.extend(validate_audio_signals_contract(module))
     missing.extend(validate_copy_and_offset_contract(module))
     missing.extend(validate_audio_viz_contract(module))
+    missing.extend(validate_timeline_contract(module))
     missing.extend(validate_shader_effect_contract(module))
     missing.extend(validate_shader_uniform_mappings(module, tree))
     missing.extend(validate_matte_metaballs_glass_contract(module))

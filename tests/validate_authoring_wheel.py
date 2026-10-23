@@ -45,6 +45,8 @@ def validate_archive(wheel: Path) -> list[str]:
         "gaanim/matrix.py",
         "gaanim/matrix.pyi",
         "gaanim/audio_viz.py",
+        "gaanim/timeline.py",
+        "gaanim/timeline.pyi",
         "gaanim/py.typed",
         "gaanim/_docs/index.typ",
         "gaanim/_docs/referencia/scene.typ",

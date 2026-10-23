@@ -11,6 +11,7 @@ from typing import Any, Callable, ClassVar, Iterator, Literal, Mapping, Optional
 from .live import Player, Pose, State
 from .questions import Question
 from .matrix import Matrix
+from .timeline import Timeline
 from .sections import SceneSections
 from .animation_types import AnimationChannel, CustomAnimationValues
 
@@ -11322,6 +11323,51 @@ class Visualization:
             bars = scene.viz.equalizer(music.spectrum(32), shape="capsule",
                                        fill=Falloff.index().gradient(BLUE, GOLD))
             ring = scene.viz.equalizer(music.spectrum(48), layout="radial", shape="dot")
+        """
+        ...
+    def timeline(
+        self,
+        start: float,
+        end: float,
+        *,
+        x_range: tuple[float, float] = (-6.5, 6.5),
+        y: float = 0.0,
+        breaks: Sequence[tuple[float, float]] = (),
+        lane_height: float = 0.6,
+        gap: float = 0.2,
+        label_width: Optional[float] = None,
+        color: Optional[ColorLike] = None,
+    ) -> Timeline:
+        """Draw an axis of dates from ``start`` to ``end`` whose events stack in lanes.
+
+        The axis runs along ``y`` over ``x_range`` in the theme's
+        foreground. ``breaks`` are scale breaks, ``(date, fraction)``: that
+        date lies at that fraction of the axis, dates are spread linearly
+        between breaks, and each break is drawn as a gap with two slanted
+        bars. Dates are numbers, such as years.
+
+        ``timeline.event(date, title, body)`` adds a dot, a stem and a
+        label in the first lane of its side (``"above"``, ``"below"`` or
+        ``"auto"``) where it does not touch the labels already there; lanes
+        are ``lane_height`` apart and labels keep ``gap`` between them. A
+        label grows to the right, or to the left when it would pass the end
+        of the axis, and a plate of the background color behind it hides
+        the stems that pass under it (``knockout=False`` leaves it out).
+        ``label_width`` wraps titles and bodies at that width.
+        ``timeline.reserve(start, end, side=...)`` keeps dates free for
+        what is drawn apart, and ``timeline.x(date)`` gives the scene x of a
+        date. Every part (``timeline.axis``, ``event.dot``, ``event.stem``,
+        ``event.label``) is an ordinary drawable.
+
+        An end not after the start, breaks that do not go forward, a date
+        outside the timeline, an unknown side, a label whose side is
+        reserved in every lane over it, or non-positive sizes raise
+        ``ValueError``.
+
+        Example:
+            line = scene.viz.timeline(1980, 2026, breaks=[(2016, 0.55)])
+            first = line.event(1985, "Masonry", "First tests", side="above")
+            scene.play([line.axis.animate.create(), *[part.animate.fade_in() for part in first.parts]])
         """
         ...
     def matrix(
