@@ -1880,12 +1880,14 @@ impl PyBox {
         Ok(slf)
     }
 
-    #[pyo3(signature = (material=None))]
+    #[pyo3(signature = (material=None, *, plane=None, origin=None))]
     fn in_3d<'py>(
         slf: PyRef<'py, Self>,
         material: Option<crate::py3d::PyMaterial3D>,
+        plane: Option<&Bound<'py, PyAny>>,
+        origin: Option<(f64, f64, f64)>,
     ) -> PyResult<PyRef<'py, Self>> {
-        crate::pydrawable::PyDrawable(slf.handle()).in_3d_impl(material)?;
+        crate::pydrawable::PyDrawable(slf.handle()).in_3d_impl(material, plane, origin)?;
         Ok(slf)
     }
 

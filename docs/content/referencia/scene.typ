@@ -37,16 +37,18 @@ exportar un script, consulta la #link("/referencia/cli/")[línea de comandos].
 #api-entry(
   name: "Scene",
   kind: "class",
-  signature: "Scene(*, frame: tuple[float, float] = (16.0, 9.0), background: BackgroundLike | None = None, margin: float | None = None, theme: ThemeName | Theme | None = \"technical\", post: PostProcess | None = None)",
+  signature: "Scene(*, frame: tuple[float, float] = (16.0, 9.0), background: BackgroundLike | None = None, margin: float | None = None, theme: ThemeName | Theme | None = \"technical\", post: PostProcess | None = None, design_resolution: float = 1080.0, up: Literal[\"y\", \"z\"] = \"y\")",
   params: (
     (name: "frame", type: "tuple[float, float]", default: "(16.0, 9.0)", desc: [Ancho y alto del marco lógico, centrado en el origen. Toda la geometría, los márgenes, los tamaños de texto y los trazos usan esta unidad.]),
     (name: "background", type: "BackgroundLike | None", default: "None", desc: [Color, `Brush` o `Background`. Tiene prioridad sobre el fondo del tema.]),
     (name: "margin", type: "float | None", default: "None", desc: [Margen uniforme en unidades lógicas; reduce el área segura.]),
     (name: "theme", type: "ThemeName | Theme | None", default: "\"technical\"", desc: [Nombre o alias de un tema incluido, o un `Theme`. `None` crea la escena sin tema.]),
     (name: "post", type: "PostProcess | None", default: "None", desc: [Postprocesado WGSL aplicado a todos los segmentos que no lo sustituyan.]),
+    (name: "design_resolution", type: "float", default: "1080.0", desc: [Alto del marco en píxeles de diseño, a los que se refieren longitudes de layout como `"24px"`.]),
+    (name: "up", type: "str", default: "\"y\"", desc: [Eje vertical del mundo 3D. Con `"z"`, como en los modelos de ingeniería y arquitectura, las coordenadas 3D se leen con z hacia arriba y la planta en x/y: `state_3d`, `state_orbit`, `look_at`, `bind_3d` y `camera_view_3d` toman z como vertical por defecto, el azimut de una órbita gira alrededor de z desde el lado −y (la fachada que mira a la cámara), cilindros, conos y toros quedan de pie sobre z y los planos tendidos en x/y, y la luz fija y el cielo iluminan desde arriba de z. Las coordenadas no se convierten: `move_to_3d`, `line_3d`, `camera.project` y el resto las toman como se escriben. La cámara 2D y el contenido 2D no cambian.]),
   ),
   returns: (type: "Scene", desc: [Una escena vacía, lista para crear objetos.]),
-  desc: [Los píxeles de salida no se eligen aquí sino al previsualizar o exportar, así que la composición es la misma a cualquier resolución. Un marco no finito o no positivo, WGSL inválido o un tema desconocido lanzan `ValueError`; un `theme` de otro tipo lanza `TypeError`. La antigua forma `Scene(width, height)` en píxeles ya no se acepta.],
+  desc: [Los píxeles de salida no se eligen aquí sino al previsualizar o exportar, así que la composición es la misma a cualquier resolución. Un marco no finito o no positivo, WGSL inválido, un tema desconocido o un `up` que no es `"y"` ni `"z"` lanzan `ValueError`; un `theme` de otro tipo lanza `TypeError`. La antigua forma `Scene(width, height)` en píxeles ya no se acepta.],
 )[
 ```python
 from gaanim import Scene
@@ -1925,7 +1927,7 @@ introducción, consulta la guía #link("/guias/camara-y-3d/")[Cámara y 3D].
   params: (
     (name: "eye", type: "tuple[float, float, float]", default: none, desc: [Posición de la cámara.]),
     (name: "target", type: "tuple[float, float, float]", default: none, desc: [Punto al que mira.]),
-    (name: "up", type: "tuple[float, float, float]", default: "(0.0, 1.0, 0.0)", desc: [Dirección vertical del mundo.]),
+    (name: "up", type: "tuple[float, float, float] | None", default: "None", desc: [Dirección vertical; por defecto, el eje vertical de la escena (`Scene(up=)`).]),
     (name: "fov_y", type: "float", default: "0.785…", desc: [Campo de visión vertical en radianes (π/4).]),
     (name: "near, far", type: "float", default: "0.1, 1000.0", desc: [Planos de recorte, con `0 < near < far`.]),
     (name: "screen_offset", type: "tuple[float, float]", default: "(0.0, 0.0)", desc: [Dónde dibuja `target`, en unidades de escena desde el centro del encuadre (ver `CameraAnimation.screen_offset`).]),
@@ -1943,7 +1945,7 @@ introducción, consulta la guía #link("/guias/camara-y-3d/")[Cámara y 3D].
     (name: "elevation", type: "float", default: none, desc: [Altura del ojo sobre el plano perpendicular a `up`, en radianes, hasta un cuarto de vuelta: ahí mira en planta y el azimut gira la vista.]),
     (name: "distance", type: "float | None", default: "None", desc: [Distancia del ojo al objetivo, en unidades del mundo.]),
     (name: "scale", type: "float | None", default: "None", desc: [Unidades de escena que mide una unidad del mundo en el plano del objetivo, en lugar de `distance`: la distancia sale de `fov_y` y del alto del encuadre.]),
-    (name: "up", type: "tuple[float, float, float]", default: "(0.0, 1.0, 0.0)", desc: [Dirección vertical del mundo.]),
+    (name: "up", type: "tuple[float, float, float] | None", default: "None", desc: [Dirección vertical; por defecto, el eje vertical de la escena (`Scene(up=)`).]),
     (name: "fov_y, near, far", type: "float", default: "0.785…, 0.1, 1000.0", desc: [Como en `state_3d`.]),
     (name: "screen_offset", type: "tuple[float, float]", default: "(0.0, 0.0)", desc: [Como en `state_3d`.]),
   ),

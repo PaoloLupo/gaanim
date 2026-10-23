@@ -2530,6 +2530,33 @@ impl DrawableHandle {
         self.update_spec(|spec| spec.in_3d = Some(gaanim_scene::InWorld3D { material }))
     }
 
+    /// [`Self::in_3d`] on a plane of the model: the drawing's x axis along
+    /// `x_axis`, its y axis along `y_axis` (squared to it), and its scene
+    /// origin at `origin`, so each point `p` of the drawing as it stands
+    /// lands at `origin + rotation * p`. The drawing's origin becomes its
+    /// pivot, which it turns about from then on.
+    pub fn in_3d_on_plane(
+        self,
+        material: Option<gaanim_scene::Material3D>,
+        x_axis: DVec3,
+        y_axis: DVec3,
+        origin: DVec3,
+    ) -> Result<Self, InvalidOrientation> {
+        let rotation =
+            gaanim_math::orientation_from_axes(x_axis, y_axis).ok_or(InvalidOrientation)?;
+        if !origin.is_finite() {
+            return Err(InvalidOrientation);
+        }
+        // The shift takes each point p to origin + p, and turning about
+        // `origin` then takes it to origin + rotation * p, at declaration and
+        // at the cursor alike.
+        Ok(self
+            .in_3d(material)
+            .shift_by_3d(origin.x, origin.y, origin.z)
+            .with_pivot_3d(origin.x, origin.y, origin.z)
+            .rotate_by_rotation(rotation))
+    }
+
     /// Makes this drawable a fixed HUD overlay (screen-space, not affected by 3D camera).
     /// Chainable: `scene.text("title").hud().move_to(0, 300)`
     pub fn hud(self) -> Self {
@@ -2620,6 +2647,12 @@ impl DrawableHandle {
             }
         };
         Ok(self.push_layout(LayoutOp::RotateBy(delta)))
+    }
+
+    /// Turn the drawable by `rotation` about its pivot, after the rotation
+    /// it has.
+    pub fn rotate_by_rotation(self, rotation: DQuat) -> Self {
+        self.push_layout(LayoutOp::RotateBy(rotation))
     }
 
     /// Set XYZ Euler rotation in radians.

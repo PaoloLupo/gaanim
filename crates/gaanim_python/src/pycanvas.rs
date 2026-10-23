@@ -2387,27 +2387,26 @@ impl PyCamera {
     }
 
     /// Create a concrete perspective look-at camera state.
-    #[pyo3(signature = (eye, target, up=(0.0, 1.0, 0.0), fov_y=std::f64::consts::FRAC_PI_4, near=0.1, far=1000.0, *, screen_offset=(0.0, 0.0)))]
+    #[pyo3(signature = (eye, target, up=None, fov_y=std::f64::consts::FRAC_PI_4, near=0.1, far=1000.0, *, screen_offset=(0.0, 0.0)))]
     #[allow(clippy::too_many_arguments)]
     fn state_3d(
         &self,
         eye: (f64, f64, f64),
         target: (f64, f64, f64),
-        up: (f64, f64, f64),
+        up: Option<(f64, f64, f64)>,
         fov_y: f64,
         near: f64,
         far: f64,
         screen_offset: (f64, f64),
     ) -> PyResult<PyCameraState> {
         crate::custom::ensure_authoring_allowed()?;
-        let inner = self
-            .inner
-            .lock()
-            .expect("scene canvas poisoned")
+        let canvas = self.inner.lock().expect("scene canvas poisoned");
+        let up = world_up_or(&canvas, up);
+        let inner = canvas
             .camera_state_3d_shifted(
                 gaanim_core::glam::DVec3::new(eye.0, eye.1, eye.2),
                 gaanim_core::glam::DVec3::new(target.0, target.1, target.2),
-                gaanim_core::glam::DVec3::new(up.0, up.1, up.2),
+                up,
                 fov_y,
                 near,
                 far,
@@ -2421,7 +2420,7 @@ impl PyCamera {
     /// `azimuth` and `elevation` radians around `up`, `distance` away or as
     /// far as shows `scale` scene units per world unit across the target's
     /// plane.
-    #[pyo3(signature = (target, azimuth, elevation, *, distance=None, scale=None, up=(0.0, 1.0, 0.0), fov_y=std::f64::consts::FRAC_PI_4, near=0.1, far=1000.0, screen_offset=(0.0, 0.0)))]
+    #[pyo3(signature = (target, azimuth, elevation, *, distance=None, scale=None, up=None, fov_y=std::f64::consts::FRAC_PI_4, near=0.1, far=1000.0, screen_offset=(0.0, 0.0)))]
     #[allow(clippy::too_many_arguments)]
     fn state_orbit(
         &self,
@@ -2430,7 +2429,7 @@ impl PyCamera {
         elevation: f64,
         distance: Option<f64>,
         scale: Option<f64>,
-        up: (f64, f64, f64),
+        up: Option<(f64, f64, f64)>,
         fov_y: f64,
         near: f64,
         far: f64,
@@ -2457,16 +2456,15 @@ impl PyCamera {
                 ));
             }
         };
-        let inner = self
-            .inner
-            .lock()
-            .expect("scene canvas poisoned")
+        let canvas = self.inner.lock().expect("scene canvas poisoned");
+        let up = world_up_or(&canvas, up);
+        let inner = canvas
             .camera_state_orbit(
                 gaanim_core::glam::DVec3::new(target.0, target.1, target.2),
                 azimuth,
                 elevation,
                 reach,
-                gaanim_core::glam::DVec3::new(up.0, up.1, up.2),
+                up,
                 fov_y,
                 near,
                 far,
@@ -2862,8 +2860,7 @@ impl PyCameraAnimation {
         {
             return Err(pyo3::exceptions::PyValueError::new_err("up must be finite"));
         }
-        let up_tuple = up.unwrap_or((0.0, 1.0, 0.0));
-        let up_vec = gaanim_core::glam::DVec3::new(up_tuple.0, up_tuple.1, up_tuple.2);
+        let up_vec = world_up_or(&self.inner.lock().expect("scene canvas poisoned"), up);
         if up_vec.length_squared() <= f64::EPSILON {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "up must be non-zero",
@@ -3299,7 +3296,9 @@ impl PyCamera {
             .transpose()?;
         let up = match up.as_ref() {
             Some(up) => resolve_reactive_endpoint_3d(up, &self.inner)?,
-            None => CanvasEndpoint::Static(gaanim_core::glam::DVec3::Y),
+            None => {
+                CanvasEndpoint::Static(self.inner.lock().expect("scene canvas poisoned").world_up)
+            }
         };
         let screen_offset = screen_offset
             .map(|(x, y)| {
@@ -3468,7 +3467,9 @@ impl PyScene {
         theme=Some(PyThemeInput::Default),
         post=None,
         design_resolution=1080.0,
+        up="y",
     ))]
+    #[allow(clippy::too_many_arguments)]
     fn new(
         py: Python<'_>,
         frame: (f64, f64),
@@ -3477,8 +3478,18 @@ impl PyScene {
         theme: Option<PyThemeInput>,
         post: Option<&Bound<'_, PyAny>>,
         design_resolution: f64,
+        up: &str,
     ) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
+        let world_up = match up {
+            "y" => gaanim_core::glam::DVec3::Y,
+            "z" => gaanim_core::glam::DVec3::Z,
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "up must be 'y' or 'z'",
+                ));
+            }
+        };
         if !design_resolution.is_finite() || design_resolution <= 0.0 {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "design_resolution must be a positive number of pixels",
@@ -3498,6 +3509,7 @@ impl PyScene {
             canvas.margin = gaanim_api::canvas::Margin::all(margin);
         }
         canvas.design_resolution = design_resolution;
+        canvas.world_up = world_up;
         // Without an asset folder, a relative path missing from the working
         // directory is found next to the script or in its `assets` folder.
         if let Ok(directory) = caller_directory(py) {
@@ -3685,6 +3697,13 @@ impl PySlideKit {
             .set_talk_target(seconds)
             .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
     }
+}
+
+/// `up`, or the scene's up axis (`Scene(up=)`) without one.
+fn world_up_or(canvas: &ApiCanvas, up: Option<(f64, f64, f64)>) -> gaanim_core::glam::DVec3 {
+    up.map_or(canvas.world_up, |(x, y, z)| {
+        gaanim_core::glam::DVec3::new(x, y, z)
+    })
 }
 
 impl PyLayoutBuilder {

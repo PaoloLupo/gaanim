@@ -153,7 +153,9 @@ class Contract(ast.NodeVisitor):
             for keyword in node.keywords:
                 if keyword.arg in SCENE_OPTIONS:
                     self.problem(node, keyword.arg, f"Scene({keyword.arg}=...) changes the shared look")
-                elif keyword.arg is not None and keyword.arg != "design_resolution":
+                # Neither the design resolution nor the 3D world's up axis
+                # changes the look examples share.
+                elif keyword.arg is not None and keyword.arg not in ("design_resolution", "up"):
                     self.problem(node, keyword.arg, f"Scene({keyword.arg}=...) is not a known option")
         if name == "segment":
             for keyword in node.keywords:

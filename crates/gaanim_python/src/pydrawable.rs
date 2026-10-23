@@ -297,6 +297,36 @@ pub(crate) fn text_marker_style(
     Ok(style)
 }
 
+/// The directions a drawing's x and y axes take on a model plane: `"xy"`,
+/// `"xz"`, `"yz"` or a pair of directions `(u, v)`.
+fn model_plane(
+    plane: &Bound<'_, PyAny>,
+) -> PyResult<(gaanim_core::glam::DVec3, gaanim_core::glam::DVec3)> {
+    use gaanim_core::glam::DVec3;
+    let (u, v) = if let Ok(name) = plane.extract::<String>() {
+        match name.as_str() {
+            "xy" => (DVec3::X, DVec3::Y),
+            "xz" => (DVec3::X, DVec3::Z),
+            "yz" => (DVec3::Y, DVec3::Z),
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "plane must be 'xy', 'xz', 'yz' or two directions (u, v)",
+                ));
+            }
+        }
+    } else {
+        let (u, v) = plane
+            .extract::<((f64, f64, f64), (f64, f64, f64))>()
+            .map_err(|_| {
+                pyo3::exceptions::PyTypeError::new_err(
+                    "plane must be 'xy', 'xz', 'yz' or two directions (u, v)",
+                )
+            })?;
+        (DVec3::new(u.0, u.1, u.2), DVec3::new(v.0, v.1, v.2))
+    };
+    Ok((u, v))
+}
+
 #[pymethods]
 impl PyCanvasAnim {
     #[pyo3(signature = (x, y, width, height, *, normalized=false))]
@@ -2751,9 +2781,44 @@ impl PyDrawable {
         )))
     }
 
-    pub(crate) fn in_3d_impl(&self, material: Option<PyMaterial3D>) -> PyResult<Self> {
+    pub(crate) fn in_3d_impl(
+        &self,
+        material: Option<PyMaterial3D>,
+        plane: Option<&Bound<'_, PyAny>>,
+        origin: Option<(f64, f64, f64)>,
+    ) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
-        Ok(Self(self.0.clone().in_3d(material.map(|value| value.0))))
+        let placed = plane.is_some() || origin.is_some();
+        if placed {
+            self.require_free_position("in_3d(plane=, origin=)")?;
+        }
+        let material = material.map(|value| value.0);
+        if !placed {
+            return Ok(Self(self.0.clone().in_3d(material)));
+        }
+        let (x_axis, y_axis) = match plane {
+            Some(plane) => model_plane(plane)?,
+            None => (gaanim_core::glam::DVec3::X, gaanim_core::glam::DVec3::Y),
+        };
+        let origin = origin.unwrap_or((0.0, 0.0, 0.0));
+        if ![origin.0, origin.1, origin.2]
+            .iter()
+            .all(|value| value.is_finite())
+        {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "origin must be finite",
+            ));
+        }
+        let origin = gaanim_core::glam::DVec3::new(origin.0, origin.1, origin.2);
+        self.0
+            .clone()
+            .in_3d_on_plane(material, x_axis, y_axis, origin)
+            .map(Self)
+            .map_err(|_| {
+                pyo3::exceptions::PyValueError::new_err(
+                    "the plane's directions must be finite, non-zero and not parallel",
+                )
+            })
     }
 
     pub(crate) fn hud_impl(&self) -> PyResult<Self> {
@@ -4135,12 +4200,14 @@ impl PyDrawable {
         let result = slf.borrow().billboard_impl(offset, anchor);
         same_drawable(slf, result)
     }
-    #[pyo3(signature = (material=None))]
+    #[pyo3(signature = (material=None, *, plane=None, origin=None))]
     fn in_3d<'py>(
         slf: &Bound<'py, Self>,
         material: Option<PyMaterial3D>,
+        plane: Option<&Bound<'py, PyAny>>,
+        origin: Option<(f64, f64, f64)>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let result = slf.borrow().in_3d_impl(material);
+        let result = slf.borrow().in_3d_impl(material, plane, origin);
         same_drawable(slf, result)
     }
     fn hud<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, PyAny>> {
@@ -4683,12 +4750,14 @@ macro_rules! media_drawable_methods {
         Ok(slf)
     }
 
-    #[pyo3(signature = (material=None))]
+    #[pyo3(signature = (material=None, *, plane=None, origin=None))]
     fn in_3d<'py>(
         slf: PyRef<'py, Self>,
         material: Option<PyMaterial3D>,
+        plane: Option<&Bound<'py, PyAny>>,
+        origin: Option<(f64, f64, f64)>,
     ) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.handle()).in_3d_impl(material)?;
+        PyDrawable(slf.handle()).in_3d_impl(material, plane, origin)?;
         Ok(slf)
     }
 

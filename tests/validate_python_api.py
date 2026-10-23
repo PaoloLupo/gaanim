@@ -1817,6 +1817,35 @@ def validate_in_3d_contract(module: object) -> list[str]:
     group = scene.geometry.group([scene.geometry.square(1.0), scene.geometry.circle(0.5)]).in_3d()
     if not isinstance(group, module.Drawable):
         failures.append("a group cannot be placed in 3D")
+    # A drawing laid on a plane of the model.
+    plan = scene.geometry.square(1.0)
+    if plan.in_3d(plane="xz", origin=(0.0, 5.0, 0.0)) is not plan:
+        failures.append("Drawable.in_3d(plane=, origin=) did not return the same drawable")
+    scene.geometry.square(1.0).in_3d(plane=((0, 1, 0), (0, 0, 1)), origin=(2.0, 0.0, 0.0))
+    for call, error in (
+        (lambda: scene.geometry.square(1.0).in_3d(plane="xw"), ValueError),
+        (lambda: scene.geometry.square(1.0).in_3d(plane=((1, 0, 0), (2, 0, 0))), ValueError),
+        (lambda: scene.geometry.square(1.0).in_3d(plane=3), TypeError),
+        (lambda: scene.geometry.square(1.0).in_3d(origin=(math.nan, 0.0, 0.0)), ValueError),
+    ):
+        if not raises_error(error, call):
+            failures.append(f"in_3d(plane=, origin=) did not raise {error.__name__} for a bad value")
+    # A world with z up: camera states and orbits take z as their up.
+    upright = module.Scene(frame=(16, 9), up="z")
+    front = upright.camera.state_orbit((0.0, 0.0, 0.0), 0.0, 0.0, distance=10.0)
+    above, right = upright.camera.project((0.0, 0.0, 1.0), front), upright.camera.project((1.0, 0.0, 0.0), front)
+    if not (above[1] > 0.1 and abs(above[0]) < 1e-6 and right[0] > 0.1):
+        failures.append(f"an orbit with z up does not look at the -y front with z up: {above}, {right}")
+    look = upright.camera.state_3d((0.0, -10.0, 0.0), (0.0, 0.0, 0.0))
+    if not upright.camera.project((0.0, 0.0, 1.0), look)[1] > 0.1:
+        failures.append("state_3d in a z-up scene does not take z as its up")
+    level = scene.camera.state_orbit((0.0, 0.0, 0.0), 0.0, 0.0, distance=10.0)
+    if not scene.camera.project((0.0, 1.0, 0.0), level)[1] > 0.1:
+        failures.append("an orbit with y up no longer takes y as its up")
+    upright.geometry.cylinder(0.5, 2.0)
+    upright.geometry.plane(2.0, 2.0)
+    if not raises_error(ValueError, lambda: module.Scene(up="x")):
+        failures.append("Scene accepted up='x'")
     tag = scene.text("load").move_to_3d(1.0, 2.0, -3.0)
     if tag.billboard(offset=(0.0, 0.3), anchor="bottom") is not tag:
         failures.append("Drawable.billboard(offset=, anchor=) did not return the same drawable")

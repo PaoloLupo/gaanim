@@ -1355,6 +1355,7 @@ fn write_three_d(
     w.bool(three_d.lighting.enabled);
     w.f32(three_d.lighting.intensity);
     w.bool(three_d.lighting.shadows);
+    w.bool(three_d.lighting.z_up);
     w.len(three_d.lights.len());
     for light in &three_d.lights {
         for value in light.position.to_array() {
@@ -1782,6 +1783,8 @@ fn read_three_d(
         enabled: r.bool()?,
         intensity: r.f32()?,
         shadows: r.bool()?,
+        // The world's up axis (version 15 on).
+        z_up: tables.version >= 15 && r.bool()?,
     };
     let count = r.len()?;
     let mut lights = Vec::with_capacity(count.min(256));
@@ -3541,6 +3544,44 @@ mod tests {
         assert_eq!(read, camera);
         camera.lens_shift = gaanim_core::glam::DVec2::ZERO;
         assert_eq!(read_camera(&mut Reader::new(&centered)).unwrap(), camera);
+    }
+
+    /// A frame's 3D block keeps whether the world's up axis is z; a block
+    /// of version 14, written before the flag, reads as y up.
+    #[test]
+    fn three_d_lighting_keeps_the_world_up_axis() {
+        let block = |z_up: bool| {
+            let three_d = CapturedThreeD {
+                lighting: gaanim_scene::Lighting3D {
+                    z_up,
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            let mut w = Writer::new();
+            write_three_d(
+                &mut w,
+                &mut Tables::default(),
+                &mut EntityKeys::default(),
+                &three_d,
+                &[],
+            );
+            w.into_bytes()
+        };
+        let read = |bytes: &[u8], version: u32| {
+            let tables = DecodedTables::new(&[], version);
+            read_three_d(&mut Reader::new(bytes), &tables)
+                .unwrap()
+                .0
+                .lighting
+        };
+        assert!(read(&block(true), crate::VERSION).z_up);
+        assert!(!read(&block(false), crate::VERSION).z_up);
+        // Version 14 had no flag: drop it and the block still reads.
+        let mut old = block(false);
+        let flag = 1 + 4 + 1;
+        old.remove(flag);
+        assert!(!read(&old, 14).z_up);
     }
 
     fn triangle(indices: Vec<u32>) -> gaanim_scene::TriangleMeshData {

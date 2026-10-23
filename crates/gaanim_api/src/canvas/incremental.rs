@@ -129,6 +129,7 @@ impl SceneModel {
             branding,
             talk_target,
             camera_position,
+            world_up,
             lighting_3d,
             transparency_3d,
             // Authored state, fingerprinted per segment by `fingerprints`.
@@ -164,6 +165,7 @@ impl SceneModel {
         global.add(branding);
         global.add(talk_target);
         global.add(camera_position);
+        global.add(world_up);
         global.add(lighting_3d);
         global.add(transparency_3d);
         global
