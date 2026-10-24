@@ -166,12 +166,23 @@ impl<'a> Reader<'a> {
         Err(corrupt("varint too long"))
     }
 
+    /// How many items follow: no more than the bytes left could hold, so a
+    /// damaged count fails here instead of reserving memory for it.
     pub fn len(&mut self) -> Result<usize> {
         let value = self.var()?;
         usize::try_from(value)
             .ok()
             .filter(|len| *len <= self.data.len().saturating_sub(self.pos).saturating_mul(8) + 64)
             .ok_or_else(|| corrupt("length out of range"))
+    }
+
+    /// Which item, or which byte, a value names: an earlier item a base is
+    /// predicted from, the 3D source a change applies to, an offset into
+    /// draw data. The bytes left say nothing about it (the 200th source can
+    /// be named in the last bytes of a frame), so unlike [`Self::len`] it is
+    /// not bounded by them; its caller checks it against what it indexes.
+    pub fn index(&mut self) -> Result<usize> {
+        usize::try_from(self.var()?).map_err(|_| corrupt("index out of range"))
     }
 
     pub fn ivar(&mut self) -> Result<i64> {
@@ -614,7 +625,7 @@ fn read_storage_tagged<'a, T>(
     let mut bases = Vec::new();
     if predicted {
         for _ in 0..2 {
-            let back = r.len()?;
+            let back = r.index()?;
             if back == 0 && !bases.is_empty() {
                 break;
             }
@@ -1558,9 +1569,9 @@ pub fn read_scene(r: &mut Reader<'_>, tables: &impl Resolver) -> Result<vello::S
     for _ in 0..patches {
         let patch = match r.u8()? {
             0 => {
-                let draw_data_offset = r.len()?;
-                let start = r.len()?;
-                let end = r.len()?;
+                let draw_data_offset = r.index()?;
+                let start = r.index()?;
+                let end = r.index()?;
                 if start > end || end > color_stops.len() {
                     return Err(corrupt("gradient stops out of range"));
                 }
@@ -1571,7 +1582,7 @@ pub fn read_scene(r: &mut Reader<'_>, tables: &impl Resolver) -> Result<vello::S
                 }
             }
             1 => Patch::Image {
-                draw_data_offset: r.len()?,
+                draw_data_offset: r.index()?,
                 image: tables.image(r.u32()?)?,
             },
             _ => return Err(corrupt("unknown scene resource")),
