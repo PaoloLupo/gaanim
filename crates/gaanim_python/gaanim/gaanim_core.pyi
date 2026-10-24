@@ -4867,6 +4867,19 @@ class Drawable:
             dialog = scene.geometry.rect(4, 2).fill(WHITE).covers_on_purpose()
         """
         ...
+    def outside_safe_on_purpose(self) -> Self:
+        """Let this drawable, and its members, leave the safe area on purpose.
+
+        ``gaanim check`` warns about a text that reaches past the safe area
+        where the presentation rests; it skips the texts of this drawable,
+        such as the labels of a progress rail, a footer or a slide number in
+        the margin. Other warnings about them stay. Nothing changes in the
+        drawing, and it holds for the whole scene.
+
+        Example:
+            rail.root.shift_by(0, -4.46).hud().outside_safe_on_purpose()
+        """
+        ...
     @overload
     def move_to(self, reference: Drawable, /) -> Self: ...
     @overload

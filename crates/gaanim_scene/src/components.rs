@@ -260,6 +260,13 @@ pub struct ZLayer(pub i32);
 #[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct CoversOnPurpose;
 
+/// Marks an entity, and its descendants, that leaves the safe area on
+/// purpose, like a progress rail in the bottom margin: `gaanim check` does
+/// not warn about its texts that reach past the safe area. It changes
+/// nothing in the drawing.
+#[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct OutsideSafeOnPurpose;
+
 /// Marks an entity that belongs to one segment of the timeline. In a scene
 /// with segments, a drawable whose chain of parents carries no marker is
 /// persistent (`scene.persist`) and draws above segment content with the

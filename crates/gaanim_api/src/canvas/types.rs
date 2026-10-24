@@ -994,6 +994,9 @@ pub struct ObjectSpec {
     pub z_layer: Option<(String, i32)>,
     /// Hides texts on purpose; see `Drawable::covers_on_purpose`.
     pub covers_on_purpose: bool,
+    /// Leaves the safe area on purpose; see
+    /// `Drawable::outside_safe_on_purpose`.
+    pub outside_safe_on_purpose: bool,
     /// If true, this object is a HUD overlay (screen-space, fixed).
     pub hud: bool,
     /// Depth of a parallax layer (`SceneModel::parallax_layer`).
@@ -1216,6 +1219,7 @@ impl ObjectSpec {
             z_index: 0,
             z_layer: None,
             covers_on_purpose: false,
+            outside_safe_on_purpose: false,
             billboard: false,
             billboard_shift: None,
             coordinate_view_role: None,

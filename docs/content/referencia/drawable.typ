@@ -220,6 +220,18 @@ dialogo = scene.geometry.rect(4, 2).fill(WHITE).covers_on_purpose()
 ]
 
 #api-entry(
+  name: "Drawable.outside_safe_on_purpose",
+  kind: "method",
+  desc: [Marca que el objeto, y sus miembros si es un grupo, sale del área segura a propósito, como un riel de avance, un pie o el número de lámina en el margen: el aviso del área segura de `gaanim check` deja de contar sus textos. Los demás avisos sobre ellos se mantienen. No cambia nada del dibujo y vale para toda la escena.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+pie = scene.text("Capítulo 2 · Problemática", role="caption").move_to(0, -4.3).hud().outside_safe_on_purpose()
+```
+]
+
+#api-entry(
   name: "Drawable.named",
   kind: "method",
   params: ((name: "name", type: "str", default: none, desc: [Nombre no vacío; no hace falta que sea único.]),),

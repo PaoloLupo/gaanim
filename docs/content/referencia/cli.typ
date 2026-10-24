@@ -299,7 +299,10 @@ termina con `pass` o `fail`:
   del área segura (el marco menos `margin`): dice cuánto se sale y dónde. Un
   texto `hud()` cuenta donde está fijado, y uno del lienzo 2D donde lo pone la
   cámara. Un texto que queda entero fuera del marco, porque la cámara mira a
-  otro lado, o uno colocado en el mundo 3D, no cuenta.
+  otro lado, uno colocado en el mundo 3D o uno recortado, como una cinta que
+  corre por su franja, no cuenta, ni el de un objeto marcado con
+  `outside_safe_on_purpose()`: un riel de avance, un pie o el número de
+  lámina en el margen.
 - Que una fila de un layout (`row`) no parta en varias líneas sus textos por
   no darles el ancho de una línea; un aviso por fila, con cuántos textos y el
   primero. Suele ser una fila con demasiados elementos: dale sitio, o elige el

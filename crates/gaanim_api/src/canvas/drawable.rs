@@ -2448,6 +2448,17 @@ impl DrawableHandle {
         self
     }
 
+    /// Let this drawable, and its members, leave the safe area on purpose:
+    /// the safe-area warning of `gaanim check` skips their texts. Nothing
+    /// changes in the drawing; it holds for the whole scene.
+    pub fn outside_safe_on_purpose(self) -> Self {
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .set_outside_safe_on_purpose(&self.spec);
+        self
+    }
+
     pub fn move_to(self, x: impl Into<ScalarSource>, y: impl Into<ScalarSource>) -> Self {
         let x = x.into();
         let y = y.into();
