@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "gaanim"
-version = "0.17.0"
+version = "0.17.1"
 description = "Authoring helpers and type information for the Gaanim application"
 readme = "README.md"
 license = "MIT OR Apache-2.0"
