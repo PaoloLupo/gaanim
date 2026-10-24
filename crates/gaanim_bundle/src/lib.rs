@@ -2778,7 +2778,11 @@ mod tests {
             assert_eq!(three_d.sources.len(), SOURCES as usize, "frame {index}");
             for (source, raw) in three_d.sources.iter().zip(1..=SOURCES) {
                 let back = source.instances.as_ref().unwrap();
-                assert_eq!(*back.copies, *copies(index, raw), "frame {index}, source {raw}");
+                assert_eq!(
+                    *back.copies,
+                    *copies(index, raw),
+                    "frame {index}, source {raw}"
+                );
             }
         }
     }
