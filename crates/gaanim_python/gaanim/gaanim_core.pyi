@@ -2418,21 +2418,40 @@ class Anim:
             scene.play(card.animate.shadow(BLACK, 0, -0.25, 0.4).scale_to(1.04))
         """
         ...
-    def points(self, points: Sequence[tuple[float, float]]) -> Anim:
-        """Move every vertex of a polygon or polyline straight to ``points``.
+    def points(
+        self,
+        points: Sequence[tuple[float, float]],
+        *,
+        path: Literal["linear", "rigid"] = "linear",
+        about: Optional[tuple[float, float]] = None,
+    ) -> Anim:
+        """Move every vertex of a polygon or polyline to ``points``.
 
         Vertex ``i`` travels to ``points[i]``, in the coordinates the shape was
         declared in (later ``move_to``/``shift`` still apply on top). Unlike
-        ``transform_to`` nothing is resampled, so every frame is the exact blend
-        of both outlines and pixel-art or technical shapes keep their corners.
-        The shape keeps its number of vertices: a different count, a shape that
-        is not a polygon or polyline (or is one with reactive coordinates), or
-        a non-finite point raises ``ValueError``. Combine with ``fill``, ``move_to`` and the other
-        property targets in one ``Anim``.
+        ``transform_to`` nothing is resampled, so pixel-art or technical shapes
+        keep their corners. With ``path="linear"`` each vertex goes in a straight
+        line and every frame is the exact blend of both outlines. With
+        ``path="rigid"`` the outline turns, scales evenly and moves as one piece,
+        by the turn, scale and move that best carry the old vertices onto the
+        new ones, and what that leaves over goes straight: a target that is the
+        shape turned (up to half a turn, which goes counterclockwise), scaled and
+        moved keeps its form all the way instead of shrinking at the middle.
+        ``about`` is the point that travels straight while the outline turns
+        around it, as ``about_point`` does; by default the center of the
+        vertices. With another number of points the shape with fewer vertices
+        repeats some of them, spread evenly (vertex ``i`` of the longer list
+        pairs with vertex ``i * shorter // longer`` of the other), so a triangle
+        opens into a square from its corners and ends with four vertices. An
+        empty or non-finite list, a shape that is not a polygon or polyline (or
+        is one with reactive coordinates), an unknown ``path``, or ``about``
+        without ``path="rigid"`` raises ``ValueError``. Combine with ``fill``,
+        ``move_to`` and the other property targets in one ``Anim``.
 
         Example:
             tri = scene.geometry.polygon([(-1, -1), (1, -1), (0, 1)])
-            scene.play([tri.animate.points([(-1, 1), (1, 1), (0, -1)]).duration(1.0)])
+            scene.play([tri.animate.points([(1, 1), (-1, 1), (0, -1)], path="rigid", about=(0, 0))])
+            scene.play([tri.animate.points([(-1, -1), (1, -1), (1, 1), (-1, 1)]).duration(1.0)])
         """
         ...
     def burst(self, count: int) -> Anim:
@@ -4430,11 +4449,11 @@ class Drawable:
         """Set every vertex of a polygon or polyline, in its declared coordinates.
 
         Before the first ``scene.play`` it replaces the declared shape; later it
-        changes the shape at the cursor. ``animate.points`` then moves the
-        vertices on from there; a ``closed=True`` polyline stays closed. It
-        needs one finite point per vertex; another count, a non-finite value,
-        a drawable that is not a polygon or polyline, or a polyline with
-        reactive coordinates raises ``ValueError``.
+        changes the shape at the cursor. The shape takes one vertex per point,
+        however many it had, and ``animate.points`` then moves the vertices on
+        from there; a ``closed=True`` polyline stays closed. An empty list, a
+        non-finite value, a drawable that is not a polygon or polyline, or a
+        polyline with reactive coordinates raises ``ValueError``.
 
         Example:
             frame = scene.geometry.polygon([(0, 0), (1, 0), (0, 1)]).points([(0, 0), (1, 0), (1, 1)])

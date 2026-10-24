@@ -21160,8 +21160,19 @@ mod tests {
         let mut canvas = SceneModel::new(640, 360);
         let square = canvas.polygon(vec![(0.0, 0.0), (2.0, 0.0), (2.0, 2.0), (0.0, 2.0)]);
         let target = vec![(1.0, -1.0), (3.0, 1.0), (1.0, 3.0), (-1.0, 1.0)];
-        assert!(square.animate().points(vec![(0.0, 0.0)]).is_err());
+        assert!(square.animate().points(Vec::new()).is_err());
         assert!(square.animate().points(vec![(f64::NAN, 0.0); 4]).is_err());
+        assert!(
+            square
+                .animate()
+                .points_along(
+                    target.clone(),
+                    crate::canvas::VertexPath::Rigid {
+                        about: Some(Point::new(f64::INFINITY, 0.0))
+                    }
+                )
+                .is_err()
+        );
         assert!(canvas.circle(1.0).animate().points(target.clone()).is_err());
         canvas.play(vec![
             square
@@ -21205,6 +21216,69 @@ mod tests {
             vertices_at(0.0),
             [(0.0, 0.0), (2.0, 0.0), (2.0, 2.0), (0.0, 2.0)]
         );
+    }
+
+    #[test]
+    fn points_change_the_vertex_count_and_turn_rigidly() {
+        use crate::canvas::VertexPath;
+        let mut canvas = SceneModel::new(640, 360);
+        let corners = [(-1.0, -0.6), (1.0, -0.6), (0.3, 1.0)];
+        let triangle = canvas.polygon(corners.to_vec());
+        let turned: Vec<(f64, f64)> = corners.iter().map(|&(x, y)| (-x, -y)).collect();
+        canvas.play(vec![
+            triangle
+                .animate()
+                .points_along(turned.clone(), VertexPath::Rigid { about: None })
+                .unwrap()
+                .duration(1.0)
+                .rate_func(gaanim_math::RateFunc::Linear),
+        ]);
+        let square = vec![(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)];
+        canvas.play(vec![
+            triangle
+                .animate()
+                .points(square.clone())
+                .unwrap()
+                .duration(1.0)
+                .rate_func(gaanim_math::RateFunc::Linear),
+        ]);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        let id = ObjectId::from_raw(triangle.id.as_raw() - 1);
+        let mut vertices_at = |time: f64| {
+            timeline.seek(&mut world, time);
+            let path = world
+                .query::<(&MobjectId, &gaanim_scene::Path2D)>()
+                .iter(&world)
+                .find(|(object, _)| object.0 == id)
+                .unwrap()
+                .1
+                .0
+                .clone();
+            path.elements()
+                .iter()
+                .filter_map(|element| match element {
+                    gaanim_core::kurbo::PathEl::MoveTo(point)
+                    | gaanim_core::kurbo::PathEl::LineTo(point) => Some(*point),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        // Halfway through the half turn the triangle is turned a quarter,
+        // not collapsed: its sides keep their length.
+        let half = vertices_at(0.5);
+        assert_eq!(half.len(), 3);
+        assert!(((half[1] - half[0]).hypot() - 2.0).abs() < 1e-9);
+        let end = vertices_at(2.0);
+        let expected: Vec<Point> = square.iter().map(|&point| point.into()).collect();
+        assert_eq!(end, expected);
+        // The first corner splits in two on the way to the square.
+        let opening = vertices_at(1.5);
+        assert_eq!(opening.len(), 4);
+        assert!((opening[0] - Point::new(0.0, -0.2)).hypot() < 1e-9);
+        assert!((opening[1] - Point::new(1.0, -0.2)).hypot() < 1e-9);
+        let start = vertices_at(0.0);
+        let declared: Vec<Point> = corners.iter().map(|&point| point.into()).collect();
+        assert_eq!(start, declared);
     }
 
     #[test]
@@ -21301,7 +21375,7 @@ mod tests {
     fn points_setter_declares_the_shape_then_cuts_at_the_cursor() {
         let mut canvas = SceneModel::new(640, 360);
         let shape = canvas.polygon(vec![(0.0, 0.0), (2.0, 0.0), (2.0, 2.0), (0.0, 2.0)]);
-        assert!(shape.clone().points(vec![(0.0, 0.0)]).is_err());
+        assert!(shape.clone().points(Vec::new()).is_err());
         assert!(canvas.circle(1.0).points(vec![(0.0, 0.0)]).is_err());
         let declared = vec![(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)];
         let shape = shape.points(declared.clone()).unwrap();

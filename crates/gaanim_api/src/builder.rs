@@ -3809,8 +3809,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             if let Some(to) = properties.dash_offset {
                 channels.push(AnimationType::DashOffsetTo { to });
             }
-            if let Some(points) = properties.points.clone() {
-                channels.push(AnimationType::PathPointsTo { points });
+            if let Some((points, path)) = properties.points.clone() {
+                channels.push(AnimationType::PathPointsTo { points, path });
             }
             if let Some((from, to)) = properties.count {
                 channels.push(AnimationType::CountTo { from, to });
@@ -7745,23 +7745,24 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     }
 
     fn play_path_points_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
-        let AnimationType::PathPointsTo { points } = anim.anim_type else {
+        let AnimationType::PathPointsTo { points, path } = anim.anim_type else {
             return;
         };
         let Some(state) = self.states.get_mut(anim.target) else {
             return;
         };
-        let Some(to) = crate::stroke_lens::with_vertices(&state.path, &points) else {
+        let points: Vec<kurbo::Point> = points.into_iter().map(kurbo::Point::from).collect();
+        let Some(lens) = crate::stroke_lens::PathPointsLens::new(state.path.clone(), &points, path)
+        else {
             tracing::warn!(
-                "points() skipped: {} points do not match the vertices of {:?}",
+                "points() skipped: {} points do not fit the outline of {:?}",
                 points.len(),
                 anim.target
             );
             return;
         };
-        let from = std::mem::replace(&mut state.path, std::sync::Arc::new(to));
-        let to = state.path.clone();
-        let rect = kurbo::Shape::bounding_box(&*to);
+        state.path = lens.to.clone();
+        let rect = kurbo::Shape::bounding_box(&*state.path);
         state.bounds = Bounds3D::new_2d(rect.x0, rect.y0, rect.x1, rect.y1);
         self.timeline.add_clip(
             parent_track,
@@ -7770,7 +7771,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             ClipPayload::Animation(AnimationSpec {
                 target: anim.target,
                 lens: PropertyLensSpec::Dynamic(gaanim_animation::tween::DynamicLens(
-                    std::sync::Arc::new(crate::stroke_lens::PathPointsLens { from, to }),
+                    std::sync::Arc::new(lens),
                 )),
                 rate_func: anim.rate_func.clone(),
                 delay: 0.0,

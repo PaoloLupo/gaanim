@@ -130,8 +130,9 @@ pub struct PropertyAnimation {
     pub shadow: Option<Option<gaanim_renderer::effects::DropShadow>>,
     /// Target dash offset of every stroke, in scene units.
     pub dash_offset: Option<f64>,
-    /// Target vertices of a polygon or polyline, reached vertex by vertex.
-    pub points: Option<Vec<(f64, f64)>>,
+    /// Target vertices of a polygon or polyline, reached vertex by vertex
+    /// along the path.
+    pub points: Option<(Vec<(f64, f64)>, crate::stroke_lens::VertexPath)>,
     /// Copies of a repeater shown, `(from, to)`; a fraction fades the last.
     pub count: Option<(f64, f64)>,
     /// Weights morph targets of imported models' primitives reach: each
@@ -459,10 +460,11 @@ pub enum AnimationType {
     MorphWeightsTo {
         weights: Vec<(ObjectId, usize, f32)>,
     },
-    /// Move each vertex of a polygon or polyline straight to its new
+    /// Move each vertex of a polygon or polyline along `path` to its new
     /// position, in the coordinates the shape was declared in.
     PathPointsTo {
         points: Vec<(f64, f64)>,
+        path: crate::stroke_lens::VertexPath,
     },
     /// Rotate, scale and skew about the scene point `pivot` from now on,
     /// without moving the drawable.
