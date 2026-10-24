@@ -1,0 +1,8 @@
+andes.geojson: country outlines from Natural Earth, 1:10m Cultural Vectors,
+Admin 0 - Countries, https://www.naturalearthdata.com/
+
+License: public domain, https://www.naturalearthdata.com/about/terms-of-use/
+
+Outer rings only (no lakes), cut to longitudes 104.5° W to 45.5° W and
+latitudes 20° S to 1.6° N, simplified (Douglas-Peucker, 0.012°) and without
+islands under 0.004 square degrees. Coordinates are rounded to 0.001°.

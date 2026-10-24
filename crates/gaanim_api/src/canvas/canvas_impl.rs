@@ -3084,7 +3084,7 @@ impl SceneModel {
     /// the working directory and then [`Self::asset_search`]; then in the
     /// workspace's [`Self::shared_asset_roots`]. Missing everywhere, the
     /// first place, so the error names it.
-    fn resolve_asset_path(&self, path: impl AsRef<Path>) -> PathBuf {
+    pub(crate) fn resolve_asset_path(&self, path: impl AsRef<Path>) -> PathBuf {
         let path = path.as_ref();
         if path.is_absolute() {
             return path.to_path_buf();

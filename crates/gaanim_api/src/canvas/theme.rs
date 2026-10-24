@@ -601,6 +601,41 @@ impl CanvasTheme {
                 ..Default::default()
             },
         );
+        // Maps: land a step off the background with quiet borders, and a
+        // graticule as faint as a minor grid.
+        self.styles.insert(
+            "map/area".into(),
+            ThemeStyle {
+                fill: Some(ThemePaint::Named("header".into())),
+                stroke: Some(ThemeStrokeStyle::new("rule", 0.012)),
+                ..Default::default()
+            },
+        );
+        self.styles.insert(
+            "map/line".into(),
+            ThemeStyle {
+                stroke: Some(ThemeStrokeStyle::new("foreground", 0.02)),
+                ..Default::default()
+            },
+        );
+        self.styles.insert(
+            "map/graticule".into(),
+            ThemeStyle {
+                stroke: Some(ThemeStrokeStyle::new("rule", 0.006)),
+                ..Default::default()
+            },
+        );
+        self.styles.insert(
+            "map/labels".into(),
+            ThemeStyle {
+                fill: Some(ThemePaint::Named("muted".into())),
+                text: Some(TextStyle {
+                    size: Some(self.text.roles[&TextRole::Caption].size),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        );
     }
 
     fn sync_color_tokens(&mut self) {
