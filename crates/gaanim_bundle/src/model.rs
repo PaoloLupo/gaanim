@@ -1847,7 +1847,7 @@ fn read_three_d(
     }
     if !r.is_empty() {
         for _ in 0..r.len()? {
-            let index = r.len()?;
+            let index = r.index()?;
             let width = r.f32()?;
             sources
                 .get_mut(index)
@@ -1857,7 +1857,7 @@ fn read_three_d(
     }
     if !r.is_empty() {
         for _ in 0..r.len()? {
-            let index = r.len()?;
+            let index = r.index()?;
             let range = [r.f32()?, r.f32()?];
             sources
                 .get_mut(index)
@@ -1867,7 +1867,7 @@ fn read_three_d(
     }
     if !r.is_empty() {
         for _ in 0..r.len()? {
-            let index = r.len()?;
+            let index = r.index()?;
             let outline = codec::read_color(r)?;
             let width = r.f32()?;
             if let Some(material) = sources
@@ -1884,7 +1884,7 @@ fn read_three_d(
     let mut fills = Vec::new();
     if !r.is_empty() {
         for _ in 0..r.len()? {
-            let index = r.len()?;
+            let index = r.index()?;
             let colors = (0..r.len()?)
                 .map(|_| codec::read_color(r))
                 .collect::<Result<Vec<_>>>()?;
@@ -1897,7 +1897,7 @@ fn read_three_d(
                     *value = f64::from(r.f32()?);
                 }
                 let color = *colors
-                    .get(r.len()?)
+                    .get(r.index()?)
                     .ok_or_else(|| corrupt("a filled outline of no color"))?;
                 glyphs.push(gaanim_scene::PlaneGlyph {
                     outline,
@@ -1916,13 +1916,13 @@ fn read_three_d(
     }
     if !r.is_empty() {
         for _ in 0..r.len()? {
-            let index = r.len()?;
+            let index = r.index()?;
             let (_, glyphs) = fills
                 .iter_mut()
                 .find(|(filled, _)| *filled == index)
                 .ok_or_else(|| corrupt("gradients of no filled outlines"))?;
             for _ in 0..r.len()? {
-                let glyph = r.len()?;
+                let glyph = r.index()?;
                 let gradient = codec::read_gradient(r)?;
                 let mut to_gradient = [0.0; 6];
                 for value in &mut to_gradient {
@@ -1937,13 +1937,13 @@ fn read_three_d(
     }
     if !r.is_empty() {
         for _ in 0..r.len()? {
-            let index = r.len()?;
+            let index = r.index()?;
             let (_, glyphs) = fills
                 .iter_mut()
                 .find(|(filled, _)| *filled == index)
                 .ok_or_else(|| corrupt("clips of no filled outlines"))?;
             for _ in 0..r.len()? {
-                let glyph = r.len()?;
+                let glyph = r.index()?;
                 let outline = Resolver::path(tables, r.u32()?)?;
                 let offset = kurbo::Vec2::new(f64::from(r.f32()?), f64::from(r.f32()?));
                 let outside = r.bool()?;
@@ -1960,7 +1960,7 @@ fn read_three_d(
     }
     if !r.is_empty() {
         for _ in 0..r.len()? {
-            let index = r.len()?;
+            let index = r.index()?;
             let count = r.len()?;
             if count > gaanim_scene::model::MAX_JOINTS {
                 return Err(corrupt("a palette of more joints than a skin moves"));
@@ -1981,7 +1981,7 @@ fn read_three_d(
     }
     if !r.is_empty() {
         for _ in 0..r.len()? {
-            let index = r.len()?;
+            let index = r.index()?;
             let glow = gaanim_renderer::effects::Glow {
                 color: codec::read_color(r)?,
                 radius: r.f64()?,
@@ -2014,7 +2014,7 @@ fn read_three_d(
     }
     if !r.is_empty() {
         for _ in 0..r.len()? {
-            let index = r.len()?;
+            let index = r.index()?;
             let copies = tables.copies(r.u32()?)?;
             let reveal = r.f32()?;
             sources
@@ -2025,13 +2025,13 @@ fn read_three_d(
     }
     if !r.is_empty() {
         for _ in 0..r.len()? {
-            let index = r.len()?;
+            let index = r.index()?;
             let (_, glyphs) = fills
                 .iter_mut()
                 .find(|(filled, _)| *filled == index)
                 .ok_or_else(|| corrupt("images of no filled outlines"))?;
             for _ in 0..r.len()? {
-                let glyph = r.len()?;
+                let glyph = r.index()?;
                 let brush = codec::read_image_brush(r, tables)?;
                 let mut to_pixels = [0.0; 6];
                 for value in &mut to_pixels {
@@ -2049,7 +2049,7 @@ fn read_three_d(
     }
     if !r.is_empty() {
         for _ in 0..r.len()? {
-            let index = r.len()?;
+            let index = r.index()?;
             let color = codec::read_color(r)?;
             let offset = gaanim_core::glam::DVec2::new(r.f64()?, r.f64()?);
             let blur_radius = r.f64()?;
@@ -2065,7 +2065,7 @@ fn read_three_d(
     }
     if !r.is_empty() {
         for _ in 0..r.len()? {
-            let index = r.len()?;
+            let index = r.index()?;
             let sigma = r.f64()?;
             sources
                 .get_mut(index)
@@ -2075,7 +2075,7 @@ fn read_three_d(
     }
     if !r.is_empty() {
         for _ in 0..r.len()? {
-            let index = r.len()?;
+            let index = r.index()?;
             let count = r.len()?;
             let mut weights = Vec::with_capacity(count.min(1 << 12));
             for _ in 0..count {
@@ -2093,7 +2093,7 @@ fn read_three_d(
     }
     if !r.is_empty() {
         for _ in 0..r.len()? {
-            let index = r.len()?;
+            let index = r.index()?;
             let direction = DVec3::new(r.f64()?, r.f64()?, r.f64()?);
             let spot = gaanim_renderer::three_d::Spot {
                 direction,
@@ -2117,7 +2117,7 @@ fn read_three_d(
     }
     if !r.is_empty() {
         for _ in 0..r.len()? {
-            let index = r.len()?;
+            let index = r.index()?;
             let values = tables.image(r.u32()?)?;
             let size = [r.u32()?, r.u32()?, r.u32()?];
             let min = [r.f32()?, r.f32()?, r.f32()?];

@@ -2696,6 +2696,93 @@ mod tests {
         }
     }
 
+    /// Copies of many meshes come back however far back the copies each
+    /// is predicted from lie, and wherever in a frame its source is named:
+    /// the last of 200 sources is named in the last bytes of its frame,
+    /// with copies predicted from those 200 items before.
+    #[test]
+    fn copies_of_many_meshes_round_trip() {
+        const SOURCES: u32 = 200;
+        let mesh = Arc::new(gaanim_scene::TriangleMeshData {
+            vertices: vec![[0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            indices: vec![0, 1, 2],
+            normals: None,
+            uvs: None,
+            color: None,
+            colors: None,
+            material: Some(gaanim_scene::Material3D::default()),
+            surface: None,
+            blend: None,
+        });
+        let copies = |frame: usize, source: u32| {
+            Arc::new(gaanim_scene::MeshCopies {
+                positions: (0..5)
+                    .map(|i| [i as f32 * 0.1, source as f32 * 0.1, frame as f32 * 0.01])
+                    .collect(),
+                scales: Some(vec![[0.06, 0.12, 0.08]; 5]),
+                rotations: None,
+                colors: None,
+            })
+        };
+        let sources = |frame: usize| -> Vec<_> {
+            (1..=SOURCES)
+                .map(|raw| gaanim_renderer::pipeline::CapturedThreeDSource {
+                    entity: bevy::prelude::Entity::from_raw_u32(raw).unwrap(),
+                    transform: gaanim_core::glam::DMat4::IDENTITY,
+                    opacity: 1.0,
+                    mesh: Some(Arc::clone(&mesh)),
+                    lines: None,
+                    material: mesh.material,
+                    line_width: None,
+                    line_range: None,
+                    fill: None,
+                    joints: None,
+                    morph: None,
+                    glow: None,
+                    shadow: None,
+                    blur: None,
+                    instances: Some(gaanim_scene::MeshInstances {
+                        copies: copies(frame, raw),
+                        reveal: 1.0,
+                    }),
+                    volume: None,
+                    composition: gaanim_renderer::pipeline::ThreeDComposition {
+                        in_views: true,
+                        post_exempt: false,
+                        layer: None,
+                        transition_side: Default::default(),
+                        lineage: Vec::new(),
+                    },
+                })
+                .collect()
+        };
+        const FRAMES: usize = 4;
+        let mut writer = BundleWriter::new(std::io::Cursor::new(Vec::new()), "test");
+        for index in 0..FRAMES {
+            let mut captured = frame(index as f64 / 60.0);
+            captured.capture.three_d = Some(gaanim_renderer::pipeline::CapturedThreeD {
+                sources: sources(index),
+                ..Default::default()
+            });
+            writer.push_frame(&captured, [0; 32]).unwrap();
+        }
+        let scene = SceneData {
+            fps: 60,
+            duration: FRAMES as f64 / 60.0,
+            ..Default::default()
+        };
+        let mut bundle =
+            Bundle::from_bytes(writer.finish(&scene).unwrap().into_inner().into()).unwrap();
+        for index in 0..FRAMES {
+            let three_d = bundle.frame(index).unwrap().capture.three_d.unwrap();
+            assert_eq!(three_d.sources.len(), SOURCES as usize, "frame {index}");
+            for (source, raw) in three_d.sources.iter().zip(1..=SOURCES) {
+                let back = source.instances.as_ref().unwrap();
+                assert_eq!(*back.copies, *copies(index, raw), "frame {index}, source {raw}");
+            }
+        }
+    }
+
     /// An imported model's mesh comes back with its texture, normal map,
     /// alpha mode, sides, skin weights and morph targets, stored once, and
     /// each frame with the palette of its joints and its targets' weights,
