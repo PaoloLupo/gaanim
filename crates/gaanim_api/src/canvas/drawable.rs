@@ -1103,7 +1103,7 @@ impl DrawableHandle {
         )
     }
 
-    fn restyle<'a>(
+    pub(super) fn restyle<'a>(
         &self,
         targets: impl Iterator<Item = &'a SharedObjectSpec>,
         f: impl Fn(&mut ObjectSpec),

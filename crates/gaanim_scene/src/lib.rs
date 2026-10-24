@@ -28,10 +28,10 @@ pub use components::{
     LightKind3D, Lighting3D, LineListData, LineListSource, LocalBounds, Material3D,
     Material3DError, Mesh3DMarker, MeshBlend, MeshCopies, MeshInstances, MobjectId, ObjectTag,
     Opacity, OutsideSafeOnPurpose, ParallaxLayer, Path2D, PathRevealOrder, PathSource, PlaneClip,
-    PlaneFillData, PlaneGlyph, PlaneImage, Presence, REVEAL_SPAN, RasterImage, RenderLayer,
-    RenderOrder, SegmentContent, ShapeDeform, SpotCone, StepRate, StrokeBrush, TextAdvance,
-    TextBaseline, Transparency3D, TriangleMeshData, Visible, VolumeData, WorldBounds, ZLayer,
-    stepped,
+    PlaneFillData, PlaneGlyph, PlaneImage, Presence, REVEAL_SPAN, RasterImage, ReactiveOpacity,
+    RenderLayer, RenderOrder, SegmentContent, ShapeDeform, SpotCone, StepRate, StrokeBrush,
+    TextAdvance, TextBaseline, Transparency3D, TriangleMeshData, Visible, VolumeData, WorldBounds,
+    ZLayer, stepped,
 };
 pub use hierarchy::{GaanimScenePlugin, SceneSet};
 pub use model::{

@@ -598,6 +598,7 @@ pub fn has_opacity_changes(
             Changed<crate::Presence>,
             Changed<crate::Occlusion>,
             Changed<crate::AxisBoxShown>,
+            Changed<crate::ReactiveOpacity>,
         )>,
     >,
     mut removed: (
@@ -671,16 +672,18 @@ type StaleOpacityFilter = Or<(
     Changed<crate::Presence>,
     Changed<crate::Occlusion>,
     Changed<crate::AxisBoxShown>,
+    Changed<crate::ReactiveOpacity>,
     Changed<ChildOf>,
 )>;
 
 /// An entity's extra opacity factors: a repeater copy's presence, a
-/// billboard's occlusion by 3D meshes, and whether a grid line on a 3D box's
-/// edge shows.
+/// billboard's occlusion by 3D meshes, whether a grid line on a 3D box's
+/// edge shows, and the opacity a reactive binding gives it.
 type OpacityFactors = (
     Option<&'static crate::Presence>,
     Option<&'static crate::Occlusion>,
     Option<&'static crate::AxisBoxShown>,
+    Option<&'static crate::ReactiveOpacity>,
 );
 
 /// The product of an entity's extra opacity factors.
@@ -689,12 +692,14 @@ fn opacity_factor(
         Option<&crate::Presence>,
         Option<&crate::Occlusion>,
         Option<&crate::AxisBoxShown>,
+        Option<&crate::ReactiveOpacity>,
     ),
 ) -> f32 {
     let shown = factors.2.is_none_or(|shown| shown.0);
     factors.0.map_or(1.0, |presence| presence.0)
         * factors.1.map_or(1.0, |occlusion| occlusion.0)
         * if shown { 1.0 } else { 0.0 }
+        * factors.3.map_or(1.0, |reactive| reactive.0)
 }
 
 struct OpacityPropagation<'a, 'w1, 's1, 'w2, 's2> {

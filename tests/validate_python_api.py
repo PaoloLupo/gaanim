@@ -2475,6 +2475,13 @@ def validate_composable_properties_contract(module) -> list[str]:
     target = scene.geometry.circle(0.2).move_to(1, 1)
     scene.play(dot.animate.move_to(target).opacity(1))
 
+    # Entrances and exits multiply a reactive opacity; a fixed target does not.
+    for enter in (lambda m: m.animate.fade_in(), lambda m: m.animate.write(), lambda m: m.animate.create()):
+        mark = scene.text("=").opacity(module.computed(lambda r: 1 / (1 + r), inputs=[radius]))
+        scene.play(enter(mark).duration(0.2))
+        scene.play(mark.animate.fade_out().duration(0.2))
+    rejected("a fixed opacity target took a reactive opacity over", lambda: scene.play(mark.animate.opacity(0.5)))
+
     # Vertices travel rigidly, and the count can change.
     corners = [(-1, -0.6), (1, -0.6), (0.3, 1.0)]
     shape = scene.geometry.polygon(corners)

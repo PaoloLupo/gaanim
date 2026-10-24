@@ -1490,6 +1490,42 @@ fn combine_hint(combinable: &bool) -> &'static str {
     }
 }
 
+/// Whether `anim`, through its timeline `channel`, would take over `bound`,
+/// a channel a reactive binding owns. A bound opacity is a factor of its
+/// own that entrances and exits such as `fade_in` multiply, so only a fixed
+/// opacity target takes it over. Another bound channel excludes its own
+/// animations and effects that may move the drawable, but not the draw
+/// animations, which only reveal it.
+fn writes_bound_channel(
+    anim: &Anim,
+    channel: &str,
+    bound: gaanim_animation::PropertyChannel,
+) -> bool {
+    use crate::anim::AnimationType::*;
+    if bound == gaanim_animation::PropertyChannel::Opacity {
+        return channel == "opacity"
+            && !matches!(
+                anim.inner.anim_type,
+                FadeIn
+                    | FadeOut
+                    | FadeInFrom { .. }
+                    | Create3D
+                    | ReplacementTransform { .. }
+                    | MagicMove { .. }
+            );
+    }
+    channel == bound.name()
+        || (channel == "effect"
+            && !matches!(
+                anim.inner.anim_type,
+                Write { .. }
+                    | Create { .. }
+                    | Unwrite { .. }
+                    | Uncreate { .. }
+                    | DrawBorderThenFill { .. }
+            ))
+}
+
 fn animation_channels(anim: &Anim) -> Vec<String> {
     use crate::anim::AnimationType::*;
     if let PropertySource(source) = &anim.inner.anim_type {
@@ -6837,20 +6873,19 @@ impl SceneModel {
             let end = start + resolved_item.duration.unwrap_or(0.0);
             let label = crate::builder::SceneBuilder::anim_label(&anim.inner.anim_type);
             for channel in animation_channels(anim) {
-                if self
+                let bound = self
                     .state
                     .lock()
                     .expect("canvas state poisoned")
                     .bound_properties
                     .iter()
-                    .any(|(target, bound)| {
-                        *target == anim.inner.target
-                            && (bound.name() == channel || channel == "effect")
-                    })
-                {
+                    .filter(|(target, _)| *target == anim.inner.target)
+                    .map(|(_, bound)| *bound)
+                    .find(|bound| writes_bound_channel(anim, &channel, *bound));
+                if let Some(bound) = bound {
                     return Err(PlayError::BoundProperty {
                         target: anim.inner.target,
-                        channel,
+                        channel: bound.name().to_owned(),
                     });
                 }
                 let conflict = occupied.iter().find(

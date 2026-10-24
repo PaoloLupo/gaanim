@@ -4787,8 +4787,13 @@ class Drawable:
 
         A reactive source binds this channel from the current cursor; another
         source replaces it and a numeric setter ends the binding reversibly.
-        Sources must belong to this Scene. Animate the source Parameter while
-        linked; direct animation or relative writes to this channel error.
+        Sources must belong to this Scene. The bound value is the whole
+        opacity, replacing a fixed one, and entrances and exits multiply it:
+        ``fade_in``, ``fade_out``, ``write``, ``create`` and the like show and
+        hide a bound drawable like any other, the drawn opacity being the
+        reactive value times their progress. Animate the source Parameter to
+        change the value itself; ``animate.opacity(...)``, which asks for a
+        fixed value, errors while linked.
         """
         ...
     def item(self, *, duration: Optional[float] = None, advance: bool = True, **props: Any) -> Self:

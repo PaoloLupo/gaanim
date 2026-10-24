@@ -183,6 +183,13 @@ pub struct ShapeDeform(pub gaanim_core::kurbo::Affine);
 #[derive(Component, Debug, Clone, Copy, PartialEq)]
 pub struct Presence(pub f32);
 
+/// Opacity, between zero and one, that a reactive binding gives a drawable.
+/// It multiplies into the propagated opacity on top of the authored
+/// `Opacity`, which entrances and exits such as `fade_in` animate, so the
+/// drawn opacity is the reactive value times their progress.
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
+pub struct ReactiveOpacity(pub f32);
+
 /// Steps a drawable's time like stop-motion: its animations, updaters,
 /// procedural motion, path modifiers and video frames are evaluated this
 /// many times a second, on a grid from timeline second 0, and hold in

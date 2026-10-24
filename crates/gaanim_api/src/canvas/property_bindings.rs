@@ -96,6 +96,16 @@ impl DrawableHandle {
         {
             return Err("reactive inputs must belong to this Scene".into());
         }
+        if channel == PropertyChannel::Opacity {
+            // The bound value is the whole opacity: it replaces a fixed one,
+            // while entrances and exits such as `fade_in` multiply it.
+            drop(state);
+            self.restyle(std::iter::once(&self.spec), |spec| {
+                spec.opacity = 1.0;
+                spec.opacity_overridden = true;
+            });
+            state = self.state.lock().expect("canvas state poisoned");
+        }
         // A binding is an authored timeline operation; retain the declaration
         // state before later fixed setters create reversible cuts over it.
         state.freeze_spawn_specs();
@@ -492,6 +502,13 @@ impl SceneBuilder<'_, '_, '_> {
         let Some(state) = self.states.get(target) else {
             return;
         };
+        if channel == PropertyChannel::Opacity {
+            // Present from the start, so playback never changes the
+            // drawable's components.
+            self.commands
+                .entity(state.entity)
+                .insert(gaanim_scene::ReactiveOpacity(1.0));
+        }
         let binding = PropertyBinding {
             target: state.entity,
             source,
@@ -756,6 +773,14 @@ mod tests {
         (world, timeline, target)
     }
 
+    /// The opacity drawn: the authored opacity times a binding's factor.
+    fn drawn_opacity(world: &World, entity: Entity) -> f64 {
+        let reactive = world
+            .get::<gaanim_scene::ReactiveOpacity>(entity)
+            .map_or(1.0, |opacity| opacity.0);
+        f64::from(world.get::<Opacity>(entity).unwrap().0 * reactive)
+    }
+
     #[test]
     fn delayed_source_target_and_following_relative_clip_use_exact_start_values() {
         let mut canvas = SceneModel::new(320, 180);
@@ -874,7 +899,7 @@ mod tests {
         ] {
             timeline.seek(&mut world, time);
             assert!(
-                (world.get::<Opacity>(entity).unwrap().0 as f64 - expected).abs() < 1e-6,
+                (drawn_opacity(&world, entity) - expected).abs() < 1e-6,
                 "time {time}"
             );
         }
@@ -934,11 +959,11 @@ mod tests {
                     (transform.rotation - gaanim_core::glam::DQuat::from_rotation_z(0.5)).length()
                         < 1e-9
                 );
-                assert_eq!(world.get::<Opacity>(entity).unwrap().0, 0.5);
+                assert_eq!(drawn_opacity(&world, entity), 0.5);
             } else {
                 assert_eq!(transform.translation, DVec3::new(4.0, 5.0, 6.0));
                 assert_eq!(transform.scale, DVec3::ONE);
-                assert_eq!(world.get::<Opacity>(entity).unwrap().0, 1.0);
+                assert_eq!(drawn_opacity(&world, entity), 1.0);
             }
         }
     }
@@ -971,7 +996,59 @@ mod tests {
         let (mut world, mut timeline, entity) = compile(&canvas);
         for (time, expected) in [(0.5, 0.5), (1.5, 0.4), (0.25, 0.35)] {
             timeline.seek(&mut world, time);
-            assert!((world.get::<Opacity>(entity).unwrap().0 as f64 - expected).abs() < 1e-6);
+            assert!((drawn_opacity(&world, entity) - expected).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn entrances_and_exits_multiply_a_reactive_opacity() {
+        let mut canvas = SceneModel::new(320, 180);
+        let weight = canvas.parameter(0.5).unwrap();
+        // The bound value replaces a fixed opacity.
+        let dot = canvas
+            .circle(0.1)
+            .opacity(0.3_f32)
+            .bind_property(PropertySources::Opacity(weight.source()))
+            .unwrap();
+        canvas.wait(1.0);
+        // A fixed opacity target still takes the channel over.
+        assert!(
+            canvas
+                .play_items(vec![dot.animate().opacity(0.2).into()])
+                .is_err()
+        );
+        let linear = |anim: Anim| -> crate::canvas::PlayItem {
+            anim.duration(1.0).rate_func(RateFunc::Linear).into()
+        };
+        for anim in [
+            dot.animate().fade_in(),
+            weight.animate().set(1.0),
+            dot.animate().fade_out(),
+            dot.animate().write(),
+        ] {
+            canvas.play_items(vec![linear(anim)]).unwrap();
+        }
+        let (mut world, mut timeline, entity) = compile(&canvas);
+        for (time, expected) in [
+            // Hidden until its entrance, then the parameter times the fade.
+            (0.5, 0.0),
+            (1.5, 0.25),
+            (2.0, 0.5),
+            (2.5, 0.75),
+            (3.5, 0.5),
+            (3.75, 0.25),
+            // `write` shows it again at the parameter's value; its outline
+            // hides it until drawn.
+            (4.5, 1.0),
+            (1.5, 0.25),
+            (0.0, 0.0),
+        ] {
+            timeline.seek(&mut world, time);
+            assert!(
+                (drawn_opacity(&world, entity) - expected).abs() < 1e-6,
+                "time {time}: {}",
+                drawn_opacity(&world, entity)
+            );
         }
     }
 }
