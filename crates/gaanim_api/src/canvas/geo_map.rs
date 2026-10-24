@@ -13,6 +13,7 @@ use gaanim_math::Bounds3D;
 use gaanim_objects::prelude::SvgPath;
 use gaanim_renderer::effects::StrokeAlign;
 use gaanim_scene::StrokeBrush;
+use gaanim_text::prelude::{TextFlow, TextRole, TextSpec, TextStyle};
 use gaanim_visualization::{GeoError, GeoLine, GeoPolygon, GraticuleOptions, MapSide, MapView};
 use serde_json::{Map, Value};
 
@@ -280,17 +281,23 @@ impl SceneModel {
             .expect("graticule spec poisoned")
             .theme_selector = Some("map/graticule".into());
 
-        let (color, scale) = self.map_label_style();
-        let height = self.themed_text_config().roles[&gaanim_text::prelude::TextRole::Body].size
-            * scale
-            * 1.2;
+        let style = self.map_label_style();
         // Parallels first: a corner keeps the label of the side read first.
         let mut placed: Vec<Rect> = Vec::new();
         let mut handles = Vec::new();
         let mut labels = graticule.labels;
         labels.sort_by_key(|label| label.side.labels_meridians());
         for label in labels {
-            let width = self.tick_number_width(&label.text, scale);
+            let spec = TextSpec::new(
+                vec![label.text.as_str().into()],
+                None,
+                style.clone(),
+                TextFlow::default(),
+            )
+            .expect("graticule labels are plain text");
+            let Ok((width, height)) = self.measure_text_spec(&spec) else {
+                continue;
+            };
             let (anchor, x, y) = match label.side {
                 MapSide::Bottom => (
                     Anchor::BottomLeft,
@@ -329,12 +336,21 @@ impl SceneModel {
                 continue;
             }
             placed.push(rect);
-            handles.push(
-                self.text(&label.text)
-                    .fill(color)
-                    .scale_to(scale)
-                    .at_anchor(x, y, anchor),
-            );
+            // With a theme, its `map/labels` style gives the label its type
+            // and color when the scene compiles, as another theme does
+            // after a change of theme; without one, the label is muted.
+            let handle = if self.theme_style.is_some() {
+                let handle = self.text(&label.text);
+                handle
+                    .spec
+                    .lock()
+                    .expect("graticule label spec poisoned")
+                    .theme_selector = Some("map/labels".into());
+                handle
+            } else {
+                self.text_spec(spec).fill(LABEL_FILL)
+            };
+            handles.push(handle.at_anchor(x, y, anchor));
         }
         let refs: Vec<&DrawableHandle> = handles.iter().collect();
         let labels = self.group(&refs);
@@ -480,27 +496,30 @@ impl SceneModel {
         }
     }
 
-    /// The color and the scale from body text of graticule labels: the
-    /// theme's `map/labels` style, or its muted color at caption size.
-    fn map_label_style(&self) -> (Color, f64) {
-        let body = self.themed_text_config().roles[&gaanim_text::prelude::TextRole::Body].size;
+    /// The type graticule labels take, to measure them as they will draw:
+    /// the theme's body text under its `map/labels` style (font, size and
+    /// the rest), or without a theme a smaller body text.
+    fn map_label_style(&self) -> TextStyle {
+        let body = self.themed_text_config().roles[&TextRole::Body].size;
         let Some(theme) = self.theme_style.as_ref() else {
-            return (LABEL_FILL, 0.8);
+            return TextStyle {
+                size: Some(body * 0.8),
+                ..TextStyle::default()
+            };
         };
-        let rule = theme.styles.get("map/labels");
-        let color = rule
-            .and_then(|rule| rule.fill.as_ref())
-            .and_then(|fill| theme.resolve_paint(fill).ok())
-            .and_then(|brush| match brush {
-                Brush::Solid(color) => Some(color),
-                _ => None,
-            })
-            .unwrap_or(theme.palette.muted);
-        let size = rule
+        let base = theme
+            .text_styles
+            .get(&TextRole::Body)
+            .cloned()
+            .unwrap_or_default();
+        match theme
+            .styles
+            .get("map/labels")
             .and_then(|rule| rule.text.as_ref())
-            .and_then(|text| text.size)
-            .unwrap_or(theme.text.roles[&gaanim_text::prelude::TextRole::Caption].size);
-        (color, size / body)
+        {
+            Some(text) => super::theme::merge_text_style(&base, text),
+            None => base,
+        }
     }
 }
 
@@ -829,5 +848,104 @@ mod tests {
                 .as_deref(),
             Some("map/graticule")
         );
+    }
+
+    /// The labels of a graticule, as the theme resolves them.
+    fn resolved_labels(
+        canvas: &SceneModel,
+        graticule: &MapGraticule,
+    ) -> Vec<super::super::ObjectSpec> {
+        let SpawnKind::Group(ids) = graticule.labels.spec.lock().unwrap().kind.clone() else {
+            panic!("labels are a group");
+        };
+        let state = canvas.state.lock().unwrap();
+        let theme = canvas.theme_style.as_ref().unwrap();
+        ids.iter()
+            .map(|id| {
+                let spec = state.object_specs[id].lock().unwrap().clone();
+                theme.resolve_object(&spec).unwrap()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn graticule_labels_take_their_type_and_color_from_the_theme() {
+        let red = Color::from_rgb8(0xFF, 0x00, 0x00);
+        let mut canvas = SceneModel::new(16.0, 9.0);
+        let mut theme = crate::canvas::CanvasTheme::builtin("paper").unwrap();
+        theme
+            .set_styles(&std::collections::HashMap::from([(
+                "map/labels".to_string(),
+                crate::canvas::ThemeStyle {
+                    text: Some(TextStyle {
+                        font: Some("DejaVu Sans Mono".into()),
+                        size: Some(0.4),
+                        color: Some(red),
+                        ..TextStyle::default()
+                    }),
+                    ..Default::default()
+                },
+            )]))
+            .unwrap();
+        canvas.apply_theme(theme);
+        let map = map(&mut canvas);
+        let graticule = canvas
+            .map_graticule(&map, &GraticuleOptions::new((5.0, 5.0)))
+            .unwrap();
+        let labels = resolved_labels(&canvas, &graticule);
+        assert!(!labels.is_empty());
+        for label in &labels {
+            let SpawnKind::Text(text) = &label.kind else {
+                panic!("a label is a text");
+            };
+            assert_eq!(text.style.font.as_deref(), Some("DejaVu Sans Mono"));
+            assert_eq!(text.style.size, Some(0.4));
+            assert_eq!(text.style.color, Some(red));
+            // No fill of its own covers the rule's color.
+            assert!(!label.fill_overridden);
+        }
+
+        let mut world = bevy::prelude::World::new();
+        world.insert_resource(gaanim_timeline::timeline::Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+        let mut glyphs = world.query::<(
+            &gaanim_scene::components::TextSpan,
+            &gaanim_scene::FillBrush,
+        )>();
+        let colors: Vec<Color> = glyphs
+            .iter(&world)
+            .filter_map(|(_, fill)| match fill.0.as_ref() {
+                Some(Brush::Solid(color)) => Some(*color),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            !colors.is_empty() && colors.iter().all(|color| *color == red),
+            "{colors:?}"
+        );
+    }
+
+    #[test]
+    fn graticule_labels_are_muted_at_caption_size_by_default() {
+        let mut canvas = SceneModel::new(16.0, 9.0);
+        canvas.apply_theme(crate::canvas::CanvasTheme::builtin("paper").unwrap());
+        let map = map(&mut canvas);
+        let graticule = canvas
+            .map_graticule(&map, &GraticuleOptions::new((5.0, 5.0)))
+            .unwrap();
+        let theme = canvas.theme_style.clone().unwrap();
+        for label in resolved_labels(&canvas, &graticule) {
+            let SpawnKind::Text(text) = &label.kind else {
+                panic!("a label is a text");
+            };
+            assert_eq!(
+                text.style.size,
+                Some(theme.text.roles[&TextRole::Caption].size)
+            );
+            assert_eq!(label.fill, Some(Brush::Solid(theme.palette.muted)));
+        }
     }
 }

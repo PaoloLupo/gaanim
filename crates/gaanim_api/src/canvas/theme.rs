@@ -1072,7 +1072,7 @@ fn validate_selector(selector: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn merge_text_style(base: &TextStyle, overlay: &TextStyle) -> TextStyle {
+pub(crate) fn merge_text_style(base: &TextStyle, overlay: &TextStyle) -> TextStyle {
     TextStyle {
         font: overlay.font.clone().or_else(|| base.font.clone()),
         math_font: overlay.math_font.clone().or_else(|| base.math_font.clone()),
