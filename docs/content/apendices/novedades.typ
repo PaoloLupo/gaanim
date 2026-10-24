@@ -11,6 +11,113 @@ indica también qué tienes que ajustar en tus escenas al actualizar. Para
 instalar una versión nueva, sigue
 #link("/empezar/instalacion/")[Instalación].
 
+= 0.17.1
+
+Publicada el 23 de octubre de 2026. `scene.viz.map` dibuja mapas: pone
+longitud y latitud sobre un rectángulo de la escena con una proyección de
+Mercator o equirectangular, traza países desde un archivo GeoJSON, líneas,
+polígonos y la retícula de meridianos y paralelos, y coloca objetos en una
+longitud y una latitud. `outside_safe_on_purpose()` deja un riel de avance o
+un pie en el margen sin que `gaanim check` avise, el wheel de autoría se
+publica en PyPI y los proyectos lo fijan a la versión de la aplicación. Corrige
+los paquetes `.gaanim` con muchos objetos `instances`, que `check`, `pack` y
+los reproductores daban por dañados aunque estaban bien, y los cambios de
+cajas que empiezan a la vez, que ahora se animan juntos. Lee «Al actualizar».
+
+== Mapas
+
+- `scene.viz.map(lat=(-19, 1), center_lon=-75, within=zona)` crea un
+  `GeoMap`. Con `center_lon`, las latitudes fijan la escala y el mapa llena
+  la región; con `lon=(oeste, este)`, el mapa es tan grande como cabe en
+  ella. `projection="mercator"` (por defecto) conserva la forma de las áreas
+  pequeñas y `"equirectangular"` espacia los paralelos por igual; las dos usan
+  una sola escala para longitud y latitud. Ver
+  #link("/referencia/visualization/#mapas")[Visualización] y el ejemplo nuevo
+  `visualization/maps`.
+- El mapa no es un dibujable: `polygon`, `polyline`, `geojson` y `graticule`
+  dibujan dibujables comunes en coordenadas de escena, recortados al marco
+  del mapa (`frame`) si se salen de él, y `point` y `place` ponen otros
+  objetos en una longitud y una latitud. En `polygon`, un anillo dentro del
+  primero abre un agujero y uno aparte añade una isla, y los vecinos
+  comparten el borde exacto.
+- `geojson("andes.geojson", key="name")` lee una ruta, un diccionario o un
+  objeto con `__geo_interface__` (Shapely, GeoPandas) y devuelve un
+  `GeoFeatures`: un grupo con un dibujable por entidad que se indexa por
+  clave (`paises["Peru"]`) y trae sus `properties`.
+- `graticule(5, every=(10, 5), hemispheres="NSEO")` traza meridianos y
+  paralelos y los rotula dentro del marco (`15°S`, `75°O`); omite el rótulo
+  que taparía a otro.
+- Las longitudes valen en cualquier vuelta, y un anillo que cruza el
+  antimeridiano aparece en los dos bordes de un mapa del Pacífico. Los
+  selectores de tema `map/area`, `map/line`, `map/graticule`, `map/labels`
+  y `map/frame` dan estilo a los mapas.
+
+== Otros cambios
+
+- `drawable.outside_safe_on_purpose()` marca un objeto, y sus miembros si es
+  un grupo, que sale del área segura a propósito, como un riel de avance, un
+  pie o el número de lámina en el margen: `gaanim check` deja de avisar de
+  sus textos y `--strict` pasa. Los demás avisos sobre ellos se mantienen, y
+  el aviso del área segura sugiere el marcador. Ver
+  #link("/referencia/drawable/#api-drawable-outside_safe_on_purpose")[Drawable].
+- El wheel de autoría se publica en PyPI como `gaanim` con cada versión.
+  `gaanim init` fija `gaanim==0.17.1` en el `pyproject.toml` del proyecto, y
+  al abrir un proyecto con una versión exacta, Gaanim la lleva a la suya, así
+  que `uv sync` instala el mismo paquete que la aplicación. Los demás
+  requisitos quedan como están.
+- El `AGENTS.md` que crea `gaanim init` y la skill `gaanim-docs` del plugin
+  piden a los agentes capturar fotogramas en la carpeta `snapshots/` (que el
+  proyecto ignora) y mirarlos antes de dar una escena por terminada, en lugar
+  de fiarse de que `gaanim check` pase.
+
+== Correcciones
+
+- Un paquete `.gaanim` con muchos objetos `instances` (más de 64, o menos si
+  la escena tiene polilíneas 3D) ya no se da por dañado: `gaanim check`,
+  `gaanim pack` y los reproductores fallaban con «the bundle is damaged:
+  length out of range». El paquete estaba bien grabado: al leerlo, Gaanim
+  acotaba por los bytes que quedan valores que no son longitudes, como de qué
+  copias anteriores se predicen las de un objeto o a qué fuente 3D va un
+  cambio. Los paquetes grabados con 0.17.0 se leen sin volver a exportarlos.
+- Dos cambios de una caja que empiezan a la vez (`advance=False`) se animan
+  juntos, en cualquier orden: los hermanos se deslizan desde donde estaban
+  hasta donde los dejan los dos, y el hijo que entra o sale aparece, se
+  despliega, se desvanece o se pliega en su hueco. Antes solo el último se
+  animaba y lo demás saltaba. Vale también entre cajas del mismo árbol, con
+  una caja creada entre los dos cambios y justo después de un
+  `scene.stop()`.
+- Una imagen con `fit="contain"` conserva su recorte terminado en los
+  fotogramas que se reproducen en orden después de una animación de `crop`
+  (una exportación, el avance cuadro a cuadro); antes volvía a mostrarse con
+  el zoom del recorte dentro de su marco sin recortar, como una franja.
+- `deform` sobre `instances` o `points_3d` mueve cada copia entera por el
+  campo en su sitio, sea cual sea su escala y su giro, y la malla que
+  comparten conserva su forma. Antes cada copia escalaba el desplazamiento
+  con su propia escala.
+- Los rótulos de `graticule` toman del estilo `map/labels` del tema la
+  fuente, el tamaño y el color de su texto, como dice la referencia. Antes
+  tomaban solo el tamaño. Además se miden con la tipografía con que se
+  dibujan, así que un rótulo que antes no cabía junto a un borde puede
+  aparecer ahora.
+
+== Al actualizar
+
+- Los paquetes siguen en el formato 15. Gaanim 0.17.0 no lee un paquete con
+  muchos objetos `instances`: actualiza a 0.17.1 los reproductores que lo
+  publican.
+- Las cajas con cambios que empiezan a la vez se ven distintas mientras
+  cambian: lo que antes saltaba ahora se desliza. Revisa las animaciones que
+  contaban con el salto.
+- Las copias de `instances` y `points_3d` deformadas con `deform` recorren
+  ahora todo el desplazamiento del campo, no una parte escalada.
+- El aviso de `gaanim check` sobre un texto fuera del área segura termina
+  ahora con «or mark it with outside_safe_on_purpose() if it belongs in the
+  margin». Ajusta lo que lea ese texto.
+- Al abrir un proyecto que fija `gaanim==<versión>`, Gaanim cambia esa
+  versión por la suya en el `pyproject.toml`. Un proyecto creado antes, con
+  `gaanim` sin versión, no cambia: `uv sync` lo resuelve ahora desde PyPI, y
+  puedes fijarlo con `gaanim==0.17.1` para que siga a la aplicación.
+
 = 0.17.0
 
 Publicada el 22 de octubre de 2026. Una malla 3D se transforma en otra con
