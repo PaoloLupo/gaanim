@@ -10,8 +10,8 @@ use gaanim_math::GlobalSpatialTransform;
 use gaanim_scene::components::TextSpan;
 use gaanim_scene::{
     Billboard, CoversOnPurpose, DrawnIn3D, FillBrush, GlobalOpacity, HudOverlay, InWorld3D,
-    LayoutBackdrop, LocalBounds, ObjectTag, Path2D, RasterImage, RenderLayer, RenderOrder,
-    SegmentContent, Visible, ZLayer,
+    LayoutBackdrop, LocalBounds, ObjectTag, OutsideSafeOnPurpose, Path2D, RasterImage, RenderLayer,
+    RenderOrder, SegmentContent, Visible, ZLayer,
 };
 use gaanim_timeline::timeline::Timeline;
 
@@ -99,7 +99,7 @@ impl SceneModel {
         });
         let outside = outside.into_iter().map(|(text, by, place)| {
             format!(
-                "text \"{}\" leaves the safe area by {by:.2} scene units {place}; move it in, or give the layout that holds it more room",
+                "text \"{}\" leaves the safe area by {by:.2} scene units {place}; move it in, give the layout that holds it more room, or mark it with outside_safe_on_purpose() if it belongs in the margin",
                 text_content(world, text),
             )
         });
@@ -261,8 +261,10 @@ fn covered_texts(world: &mut World) -> Vec<(Entity, Entity)> {
 /// canvas where the canvas puts it (a perspective camera keeps that canvas
 /// still). A text centered out of the frame, part of a world larger than
 /// the frame that the camera shows a piece of, a text placed in the 3D
-/// world, which a moving camera brings in and out of the frame, and a
-/// clipped text, as a ticker crawling through its band, are left alone.
+/// world, which a moving camera brings in and out of the frame, a clipped
+/// text, as a ticker crawling through its band, and a text that leaves the
+/// safe area on purpose, as the labels of a rail in the margin, are left
+/// alone.
 fn unframed_texts(world: &mut World, frame: Rect, safe: Rect) -> Vec<(Entity, f64)> {
     // Antialiasing may graze the edge.
     const SLACK: f64 = 0.01;
@@ -296,7 +298,7 @@ fn unframed_texts(world: &mut World, frame: Rect, safe: Rect) -> Vec<(Entity, f6
             continue;
         }
         let (mut hud, mut in_3d) = (false, world.get::<DrawnIn3D>(glyph).is_some());
-        let mut clipped = false;
+        let (mut clipped, mut on_purpose) = (false, false);
         let mut current = Some(glyph);
         while let Some(node) = current {
             hud |= world.get::<HudOverlay>(node).is_some();
@@ -305,9 +307,10 @@ fn unframed_texts(world: &mut World, frame: Rect, safe: Rect) -> Vec<(Entity, f6
             clipped |= world
                 .get::<gaanim_renderer::effects::ClipMask>(node)
                 .is_some();
+            on_purpose |= world.get::<OutsideSafeOnPurpose>(node).is_some();
             current = world.get::<ChildOf>(node).map(ChildOf::parent);
         }
-        if in_3d || clipped {
+        if in_3d || clipped || on_purpose {
             continue;
         }
         let on_frame = |point: gaanim_core::glam::DVec3| {
@@ -681,6 +684,40 @@ mod tests {
             })
             .is_empty()
         );
+    }
+
+    /// A progress rail pinned in the bottom margin, two labels in a HUD
+    /// group.
+    fn rail(canvas: &mut SceneModel) -> super::super::DrawableHandle {
+        let first = canvas.text("PROBLEMA").move_to(-3.0, -4.4);
+        let second = canvas.text("OBJETIVOS").move_to(3.0, -4.4);
+        canvas.group(&[&first, &second]).hud()
+    }
+
+    #[test]
+    fn a_drawable_outside_the_safe_area_on_purpose_takes_its_members_with_it() {
+        let warned = outside(|canvas| {
+            rail(canvas);
+        });
+        assert_eq!(warned.len(), 2, "{warned:?}");
+        assert!(
+            warned[0]
+                .ends_with("or mark it with outside_safe_on_purpose() if it belongs in the margin"),
+            "{warned:?}"
+        );
+        assert!(
+            outside(|canvas| {
+                rail(canvas).outside_safe_on_purpose();
+            })
+            .is_empty()
+        );
+        // Only what is marked: another text cut by the frame still warns.
+        let cut = outside(|canvas| {
+            rail(canvas).outside_safe_on_purpose();
+            canvas.text("Borde").move_to(7.8, 0.0);
+        });
+        assert_eq!(cut.len(), 1, "{cut:?}");
+        assert!(cut[0].starts_with("text \"Borde\""), "{cut:?}");
     }
 
     #[test]
