@@ -2474,6 +2474,23 @@ def validate_composable_properties_contract(module) -> list[str]:
     scene.play(dot.animate.fill(color=paint).stroke(color=paint, width=0.05))
     target = scene.geometry.circle(0.2).move_to(1, 1)
     scene.play(dot.animate.move_to(target).opacity(1))
+
+    # Entrances and exits multiply a reactive opacity; a fixed target does not.
+    for enter in (lambda m: m.animate.fade_in(), lambda m: m.animate.write(), lambda m: m.animate.create()):
+        mark = scene.text("=").opacity(module.computed(lambda r: 1 / (1 + r), inputs=[radius]))
+        scene.play(enter(mark).duration(0.2))
+        scene.play(mark.animate.fade_out().duration(0.2))
+    rejected("a fixed opacity target took a reactive opacity over", lambda: scene.play(mark.animate.opacity(0.5)))
+
+    # Vertices travel rigidly, and the count can change.
+    corners = [(-1, -0.6), (1, -0.6), (0.3, 1.0)]
+    shape = scene.geometry.polygon(corners)
+    scene.play(shape.animate.points([(-x, -y) for x, y in corners], path="rigid", about=(0, 0)).duration(0.2))
+    scene.play(shape.animate.points([(-1, -1), (1, -1), (1, 1), (-1, 1)], path="rigid").duration(0.2))
+    shape.points([(0, 0), (1, 0), (0, 1)])
+    rejected("points accepted an unknown path", lambda: shape.animate.points(corners, path="curved"))
+    rejected("points accepted about without a rigid path", lambda: shape.animate.points(corners, about=(0, 0)))
+    rejected("points accepted an empty list", lambda: shape.animate.points([]))
     return failures
 
 

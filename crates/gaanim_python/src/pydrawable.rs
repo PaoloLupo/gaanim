@@ -589,15 +589,35 @@ impl PyCanvasAnim {
         })
     }
 
-    fn points(&self, points: Vec<(f64, f64)>) -> PyResult<Self> {
+    #[pyo3(signature = (points, *, path="linear", about=None))]
+    fn points(
+        &self,
+        points: Vec<(f64, f64)>,
+        path: &str,
+        about: Option<(f64, f64)>,
+    ) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         self.require_native_animation()?;
         self.require_drawable_effect("points")?;
+        let path = match (path, about) {
+            ("linear", None) => gaanim_api::canvas::VertexPath::Linear,
+            ("linear", Some(_)) => {
+                return Err(PyValueError::new_err("about requires path='rigid'"));
+            }
+            ("rigid", about) => gaanim_api::canvas::VertexPath::Rigid {
+                about: about.map(gaanim_core::kurbo::Point::from),
+            },
+            (other, _) => {
+                return Err(PyValueError::new_err(format!(
+                    "path must be 'linear' or 'rigid', not {other:?}"
+                )));
+            }
+        };
         Ok(Self {
             inner: self
                 .inner
                 .clone()
-                .points(points)
+                .points_along(points, path)
                 .map_err(PyValueError::new_err)?,
         })
     }

@@ -14,6 +14,7 @@ use crate::anim::{
     PropertyScale, PropertyTranslation,
 };
 use crate::canvas::ops::SharedCanvasState;
+use crate::stroke_lens::VertexPath;
 
 /// Public operation used by vector boolean drawables.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2263,24 +2264,30 @@ impl Anim {
     /// given in the coordinates the shape was declared in. Unlike
     /// `transform_to`, nothing is resampled: vertex `i` travels to
     /// `points[i]`, so each intermediate frame is the exact blend of the two
-    /// outlines. The shape keeps its number of vertices.
+    /// outlines.
     pub fn points(self, points: Vec<(f64, f64)>) -> Result<Self, String> {
+        self.points_along(points, VertexPath::Linear)
+    }
+
+    /// [`Self::points`] with the vertices carried along `path`. With another
+    /// number of points than the shape has vertices, the one with fewer
+    /// repeats some of its vertices, spread evenly, so no corner is lost to
+    /// resampling; the shape ends with one vertex per point.
+    pub fn points_along(self, points: Vec<(f64, f64)>, path: VertexPath) -> Result<Self, String> {
         let spec = self
             .property_spec
             .as_ref()
             .ok_or("points() requires Drawable.animate()")?;
-        let declared =
-            super::drawable::declared_vertices(&spec.lock().expect("object spec poisoned").kind)?;
-        if points.len() != declared {
-            return Err(format!(
-                "points() needs {declared} points, one per vertex of the shape, got {}",
-                points.len()
-            ));
+        super::drawable::check_vertex_points(
+            &spec.lock().expect("object spec poisoned").kind,
+            &points,
+        )?;
+        if let VertexPath::Rigid { about: Some(about) } = path
+            && !(about.x.is_finite() && about.y.is_finite())
+        {
+            return Err("about must be finite".to_string());
         }
-        if points.iter().any(|(x, y)| !x.is_finite() || !y.is_finite()) {
-            return Err("points must be finite".to_string());
-        }
-        Ok(self.update_properties(|properties| properties.points = Some(points)))
+        Ok(self.update_properties(|properties| properties.points = Some((points, path))))
     }
 
     /// Shows `count` copies of a `repeat` or `duplicate` group, from the

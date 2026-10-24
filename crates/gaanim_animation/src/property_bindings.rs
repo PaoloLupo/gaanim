@@ -7,7 +7,7 @@ use gaanim_core::{
     glam::{DQuat, DVec3, EulerRot},
 };
 use gaanim_math::{RateFunc, SpatialTransform};
-use gaanim_scene::{FillLevel, Opacity};
+use gaanim_scene::{FillLevel, Opacity, ReactiveOpacity};
 
 use crate::{AnimatableLens, FloatSignal, PlaybackState, ScalarSource};
 
@@ -169,6 +169,31 @@ impl PropertyValue {
             }
             if *transform != next {
                 *transform = next;
+            }
+        }
+    }
+
+    /// [`Self::apply`] for a binding: a bound opacity is a factor of its
+    /// own, [`ReactiveOpacity`], so the authored `Opacity` that entrances
+    /// and exits animate multiplies it instead of being overwritten.
+    fn apply_bound(self, world: &mut World, target: Entity) {
+        let Self::Opacity(value) = self else {
+            return self.apply(world, target);
+        };
+        set_reactive_opacity(world, target, value);
+    }
+}
+
+fn set_reactive_opacity(world: &mut World, target: Entity, value: f32) {
+    match world.get_mut::<ReactiveOpacity>(target) {
+        Some(mut opacity) => {
+            if opacity.0 != value {
+                opacity.0 = value;
+            }
+        }
+        None => {
+            if let Ok(mut entity) = world.get_entity_mut(target) {
+                entity.insert(ReactiveOpacity(value));
             }
         }
     }
@@ -371,11 +396,19 @@ pub fn property_binding_system(world: &mut World) {
 }
 
 pub fn apply_property_bindings(world: &mut World, time: f64) {
-    let mut updates = {
+    let (mut updates, unbound) = {
         let mut query = world.query::<&PropertyBinding>();
-        query
+        let (active, inactive): (Vec<_>, Vec<_>) = query
             .iter(world)
-            .filter(|binding| time >= binding.start && binding.end.is_none_or(|end| time < end))
+            .partition(|binding| time >= binding.start && binding.end.is_none_or(|end| time < end));
+        // Outside its opacity bindings, a drawable has no reactive factor.
+        let unbound = inactive
+            .iter()
+            .filter(|binding| binding.source.sources.channel() == PropertyChannel::Opacity)
+            .map(|binding| binding.target)
+            .collect::<Vec<_>>();
+        let updates = active
+            .into_iter()
             .map(|binding| {
                 (
                     binding.target,
@@ -385,8 +418,20 @@ pub fn apply_property_bindings(world: &mut World, time: f64) {
                     binding.source.anchor_offset,
                 )
             })
-            .collect::<Vec<_>>()
+            .collect::<Vec<_>>();
+        (updates, unbound)
     };
+    for target in unbound {
+        if world
+            .get::<ReactiveOpacity>(target)
+            .is_some_and(|opacity| opacity.0 != 1.0)
+            && !updates.iter().any(|(bound, fallback, ..)| {
+                *bound == target && matches!(fallback, PropertyValue::Opacity(_))
+            })
+        {
+            set_reactive_opacity(world, target, 1.0);
+        }
+    }
     // Apply scale and rotation first so a bound visual/text anchor uses the
     // same instant's transform, including when both channels are reactive.
     updates.sort_by_key(|(_, fallback, _, _, _)| matches!(fallback, PropertyValue::Translation(_)));
@@ -400,10 +445,10 @@ pub fn apply_property_bindings(world: &mut World, time: f64) {
                         transform.to_mat4().transform_point3(local) - transform.translation;
                     value = PropertyValue::Translation(position + anchor_offset - offset);
                 }
-                value.apply(world, target);
+                value.apply_bound(world, target);
             }
             Err(message) => {
-                fallback.apply(world, target);
+                fallback.apply_bound(world, target);
                 report_property_error(world, target, time, message);
             }
         }
@@ -653,7 +698,7 @@ mod tests {
         for time in [0.75, 0.25, 0.75] {
             apply_property_bindings(&mut world, time);
             assert_eq!(
-                world.get::<Opacity>(target).unwrap().0,
+                world.get::<ReactiveOpacity>(target).unwrap().0,
                 if time > 0.5 { 1.0 } else { time as f32 }
             );
         }
@@ -732,10 +777,13 @@ mod tests {
             end: Some(0.8),
             fallback: PropertyValue::Opacity(1.0),
         });
-        for (time, expected) in [(0.5, 0.5), (0.8, 1.0), (0.3, 0.3)] {
-            world.get_mut::<Opacity>(target).unwrap().0 = 1.0;
+        // The binding gives its own factor, which the authored opacity
+        // multiplies, and gives it back outside its window.
+        for (time, expected) in [(0.5, 0.5), (0.8, 1.0), (0.3, 0.3), (0.1, 1.0)] {
+            world.get_mut::<Opacity>(target).unwrap().0 = 0.5;
             apply_property_bindings(&mut world, time);
-            assert_eq!(world.get::<Opacity>(target).unwrap().0, expected);
+            assert_eq!(world.get::<ReactiveOpacity>(target).unwrap().0, expected);
+            assert_eq!(world.get::<Opacity>(target).unwrap().0, 0.5);
         }
     }
 }

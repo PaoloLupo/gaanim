@@ -334,15 +334,27 @@ fn math_source_terms(source: &str) -> Vec<String> {
 }
 
 /// Number of vertices `points()` sets on a drawable of `kind`.
-pub(crate) fn declared_vertices(kind: &SpawnKind) -> Result<usize, String> {
+/// Whether `points` can become the vertices of a drawable of `kind`: a
+/// polygon or a polyline with fixed coordinates, and at least one finite
+/// point.
+pub(crate) fn check_vertex_points(kind: &SpawnKind, points: &[(f64, f64)]) -> Result<(), String> {
     match kind {
-        SpawnKind::Polygon(points) | SpawnKind::Polyline { points, .. } => Ok(points.len()),
-        SpawnKind::ReactivePolyline { .. } => Err(
-            "points() requires fixed coordinates; this polyline follows reactive values"
-                .to_string(),
-        ),
-        _ => Err("points() requires a polygon or polyline".to_string()),
+        SpawnKind::Polygon(_) | SpawnKind::Polyline { .. } => {}
+        SpawnKind::ReactivePolyline { .. } => {
+            return Err(
+                "points() requires fixed coordinates; this polyline follows reactive values"
+                    .to_string(),
+            );
+        }
+        _ => return Err("points() requires a polygon or polyline".to_string()),
     }
+    if points.is_empty() {
+        return Err("points() needs at least one point".to_string());
+    }
+    if points.iter().any(|(x, y)| !x.is_finite() || !y.is_finite()) {
+        return Err("points must be finite".to_string());
+    }
+    Ok(())
 }
 
 #[allow(dead_code)]
@@ -1091,7 +1103,7 @@ impl DrawableHandle {
         )
     }
 
-    fn restyle<'a>(
+    pub(super) fn restyle<'a>(
         &self,
         targets: impl Iterator<Item = &'a SharedObjectSpec>,
         f: impl Fn(&mut ObjectSpec),
@@ -2394,19 +2406,14 @@ impl DrawableHandle {
     }
 
     /// Set every vertex of a polygon or polyline, in the coordinates it was
-    /// declared in. Before the first play this is the declared shape; after
-    /// it, a cut at the cursor that `animate.points` can continue from.
+    /// declared in, as many as there are points. Before the first play this
+    /// is the declared shape; after it, a cut at the cursor that
+    /// `animate.points` can continue from.
     pub fn points(self, points: Vec<(f64, f64)>) -> Result<Self, String> {
-        let declared = declared_vertices(&self.spec.lock().expect("object spec poisoned").kind)?;
-        if points.len() != declared {
-            return Err(format!(
-                "points() needs {declared} points, one per vertex of the shape, got {}",
-                points.len()
-            ));
-        }
-        if points.iter().any(|(x, y)| !x.is_finite() || !y.is_finite()) {
-            return Err("points must be finite".to_string());
-        }
+        check_vertex_points(
+            &self.spec.lock().expect("object spec poisoned").kind,
+            &points,
+        )?;
         let this = self.update_spec(|spec| {
             if let SpawnKind::Polygon(vertices)
             | SpawnKind::Polyline {
@@ -2416,7 +2423,13 @@ impl DrawableHandle {
                 *vertices = points.clone();
             }
         });
-        this.push_immediate(this.id, AnimationType::PathPointsTo { points });
+        this.push_immediate(
+            this.id,
+            AnimationType::PathPointsTo {
+                points,
+                path: crate::stroke_lens::VertexPath::Linear,
+            },
+        );
         Ok(this)
     }
 

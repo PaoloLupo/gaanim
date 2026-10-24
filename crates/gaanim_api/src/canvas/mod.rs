@@ -1,6 +1,7 @@
 pub mod ops;
 mod segment;
 pub use crate::anim::BoundsTarget;
+pub use crate::stroke_lens::VertexPath;
 pub use gaanim_animation::AxisMask;
 pub use gaanim_animation::{RollingMode, RollingNumberOptions};
 pub use gaanim_renderer::background::{BackgroundPaint, ShaderBackground, ShaderBackgroundError};

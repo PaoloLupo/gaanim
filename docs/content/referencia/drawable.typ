@@ -166,7 +166,7 @@ scene.render()
   name: "Drawable.opacity",
   kind: "method",
   params: ((name: "op", type: "float | Parameter | Variable | Computed | TimeInput", default: none, desc: [Opacidad de 0 a 1, o una fuente reactiva.]),),
-  desc: [La opacidad se multiplica por la jerarquía: la de un grupo escala la de sus miembros sin cambiar sus valores propios. Un grupo o un SVG translúcido se compone como una sola capa, como `opacity` en CSS: al fundirlo, lo que una pieza tapa sigue tapado (los ojos no asoman bajo los párpados) y las piezas translúcidas no se marcan más. Con una fuente reactiva el canal queda vinculado desde el cursor; un número termina el vínculo con un corte reversible. Mientras esté vinculado, anima la fuente: animar el canal directamente lanza un error.],
+  desc: [La opacidad se multiplica por la jerarquía: la de un grupo escala la de sus miembros sin cambiar sus valores propios. Un grupo o un SVG translúcido se compone como una sola capa, como `opacity` en CSS: al fundirlo, lo que una pieza tapa sigue tapado (los ojos no asoman bajo los párpados) y las piezas translúcidas no se marcan más. Con una fuente reactiva el canal queda vinculado desde el cursor; un número termina el vínculo con un corte reversible. El valor vinculado es toda la opacidad, así que sustituye a una fija, y las entradas y salidas lo multiplican: `fade_in`, `fade_out`, `write`, `create` y las demás muestran y ocultan un objeto vinculado como a cualquier otro, y la opacidad que se dibuja es el valor reactivo por su avance. Para cambiar el valor, anima la fuente: `animate.opacity(...)`, que pide un valor fijo, lanza un error mientras esté vinculado.],
 )[
 ```python
 >>>from gaanim import *
@@ -836,7 +836,7 @@ ring = scene.geometry.duplicate(scene.geometry.dot(0.1), Distribution.circle(16,
   params: (
     (name: "points", type: "Sequence[tuple[float, float]]", default: none, desc: [Un punto por vértice, en las coordenadas en que se declaró la figura.]),
   ),
-  desc: [Fija todos los vértices de un polígono o una polilínea. Antes del primer `scene.play` cambia la forma declarada, así que varias figuras pueden nacer iguales y deformarse luego; después la cambia en el cursor. `animate.points` sigue desde ahí. Una polilínea con `closed=True` sigue cerrada. Otro número de puntos, un valor no finito, un objeto que no sea polígono ni polilínea o una polilínea con coordenadas reactivas lanzan `ValueError`.],
+  desc: [Fija todos los vértices de un polígono o una polilínea. Antes del primer `scene.play` cambia la forma declarada, así que varias figuras pueden nacer iguales y deformarse luego; después la cambia en el cursor. La figura toma un vértice por punto, tuviera los que tuviera, y `animate.points` sigue desde ahí. Una polilínea con `closed=True` sigue cerrada. Una lista vacía, un valor no finito, un objeto que no sea polígono ni polilínea o una polilínea con coordenadas reactivas lanzan `ValueError`.],
 )[
 ```python
 >>>from gaanim import *

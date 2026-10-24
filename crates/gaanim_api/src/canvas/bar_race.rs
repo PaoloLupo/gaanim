@@ -729,7 +729,10 @@ mod tests {
                     (scale - state.fraction(index).max(MIN_BAR_SCALE)).abs() < 1e-9,
                     "length of bar {index} at {time}"
                 );
-                let opacity = world.get::<gaanim_scene::Opacity>(*shown).unwrap().0 as f64;
+                let opacity = world
+                    .get::<gaanim_scene::ReactiveOpacity>(*shown)
+                    .unwrap()
+                    .0 as f64;
                 assert!(
                     (opacity - race.model.visibility(state.ranks[index])).abs() < 1e-6,
                     "opacity of bar {index} at {time}"
