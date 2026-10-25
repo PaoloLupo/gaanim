@@ -552,13 +552,11 @@ struct SequentialDecoder {
     stdout: ChildStdout,
     metadata: VideoMetadata,
     next_frame: u64,
+    #[cfg(test)]
+    start_frame: u64,
 }
 
 impl SequentialDecoder {
-    fn spawn(path: &Path, metadata: &VideoMetadata) -> Result<Self, VideoError> {
-        Self::spawn_at(path, metadata, 0)
-    }
-
     fn spawn_at(
         path: &Path,
         metadata: &VideoMetadata,
@@ -567,9 +565,12 @@ impl SequentialDecoder {
         let mut command = Command::new("ffmpeg");
         command.args(["-v", "error"]);
         if start_frame > 0 {
+            // Half a frame early: FFmpeg keeps the first frame whose
+            // timestamp reaches the seek point, so a point that rounds a hair
+            // past frame `start_frame` would skip it.
             command
                 .arg("-ss")
-                .arg(format!("{:.9}", start_frame as f64 / metadata.fps));
+                .arg(format!("{:.9}", (start_frame as f64 - 0.5) / metadata.fps));
         }
         let mut child = command
             .arg("-i")
@@ -594,6 +595,8 @@ impl SequentialDecoder {
             stdout,
             metadata: metadata.clone(),
             next_frame: start_frame,
+            #[cfg(test)]
+            start_frame,
         })
     }
 
@@ -630,29 +633,68 @@ impl Drop for SequentialDecoder {
 struct RealtimeDecoderSession {
     path: PathBuf,
     decoder: SequentialDecoder,
+    /// When the session last served a frame, to close the least recently used.
+    last_used: u64,
 }
 
-const MAX_REALTIME_SEQUENTIAL_GAP: u64 = 12;
+/// Frames a decoder reads on to reach a request instead of seeking to it.
+const MAX_SEQUENTIAL_GAP: u64 = 12;
+
+/// FFmpeg processes the realtime decoder keeps open. Each one holds the
+/// decoding buffers of a whole stream, hundreds of MB for a 1080p H.264 video,
+/// and every video of the scene asks for frames, also the posters of clips in
+/// other segments: one process per drawable made a presentation with 16 clips
+/// hold 16 processes and about 6 GB. Only the clips near the playhead decode
+/// frame after frame; a clip whose session was closed opens a new one when it
+/// plays again.
+const MAX_REALTIME_SESSIONS: usize = 4;
+
+#[derive(Default)]
+struct RealtimeSessions {
+    sessions: HashMap<Entity, RealtimeDecoderSession>,
+    clock: u64,
+}
+
+impl RealtimeSessions {
+    /// Close the least recently used sessions until one more fits.
+    fn make_room(&mut self) {
+        while self.sessions.len() >= MAX_REALTIME_SESSIONS {
+            let Some(oldest) = self
+                .sessions
+                .iter()
+                .min_by_key(|(_, session)| session.last_used)
+                .map(|(entity, _)| *entity)
+            else {
+                break;
+            };
+            self.sessions.remove(&oldest);
+        }
+    }
+}
 
 fn decode_realtime_request(
-    sessions: &mut HashMap<Entity, RealtimeDecoderSession>,
+    sessions: &mut RealtimeSessions,
     request: &DecodeRequest,
 ) -> (Result<ImageData, VideoError>, bool) {
-    let restart = sessions.get(&request.entity).is_none_or(|session| {
-        session.path != request.path
-            || request.frame < session.decoder.next_frame
-            || request.frame.saturating_sub(session.decoder.next_frame)
-                > MAX_REALTIME_SEQUENTIAL_GAP
-    });
+    let restart = sessions
+        .sessions
+        .get(&request.entity)
+        .is_none_or(|session| {
+            session.path != request.path
+                || request.frame < session.decoder.next_frame
+                || request.frame.saturating_sub(session.decoder.next_frame) > MAX_SEQUENTIAL_GAP
+        });
     if restart {
-        sessions.remove(&request.entity);
+        sessions.sessions.remove(&request.entity);
+        sessions.make_room();
         match SequentialDecoder::spawn_at(&request.path, &request.metadata, request.frame) {
             Ok(decoder) => {
-                sessions.insert(
+                sessions.sessions.insert(
                     request.entity,
                     RealtimeDecoderSession {
                         path: request.path.clone(),
                         decoder,
+                        last_used: 0,
                     },
                 );
             }
@@ -660,13 +702,16 @@ fn decode_realtime_request(
         }
     }
 
-    let result = sessions
+    sessions.clock += 1;
+    let clock = sessions.clock;
+    let session = sessions
+        .sessions
         .get_mut(&request.entity)
-        .expect("realtime decoder session inserted")
-        .decoder
-        .read_to(&request.path, request.frame);
+        .expect("realtime decoder session inserted");
+    session.last_used = clock;
+    let result = session.decoder.read_to(&request.path, request.frame);
     if result.is_err() {
-        sessions.remove(&request.entity);
+        sessions.sessions.remove(&request.entity);
     }
     (result, restart)
 }
@@ -792,8 +837,12 @@ struct VideoDecoder {
     lru: VecDeque<(PathBuf, u64)>,
     cache_bytes: usize,
     sequential: HashMap<PathBuf, SequentialDecoder>,
+    /// Files whose decoding failure was already reported.
+    warned: std::collections::HashSet<PathBuf>,
     #[cfg(test)]
     realtime_process_spawns: Arc<AtomicUsize>,
+    #[cfg(test)]
+    realtime_peak_sessions: Arc<AtomicUsize>,
 }
 
 impl Default for VideoDecoder {
@@ -804,17 +853,24 @@ impl Default for VideoDecoder {
         let realtime_process_spawns = Arc::new(AtomicUsize::new(0));
         #[cfg(test)]
         let worker_process_spawns = realtime_process_spawns.clone();
+        #[cfg(test)]
+        let realtime_peak_sessions = Arc::new(AtomicUsize::new(0));
+        #[cfg(test)]
+        let worker_peak_sessions = realtime_peak_sessions.clone();
         // Without threads (the web player) video frames never decode; the
         // web plays bundles, which hold no video.
         let spawned = thread::Builder::new()
             .name("gaanim-video-decoder".to_string())
             .spawn(move || {
-                let mut sessions = HashMap::new();
+                let mut sessions = RealtimeSessions::default();
                 while let Ok(request) = request_rx.recv() {
                     let (image, _spawned) = decode_realtime_request(&mut sessions, &request);
                     #[cfg(test)]
-                    if _spawned {
-                        worker_process_spawns.fetch_add(1, Ordering::Relaxed);
+                    {
+                        if _spawned {
+                            worker_process_spawns.fetch_add(1, Ordering::Relaxed);
+                        }
+                        worker_peak_sessions.fetch_max(sessions.sessions.len(), Ordering::Relaxed);
                     }
                     let _ = response_tx.send(DecodeResponse {
                         entity: request.entity,
@@ -836,14 +892,24 @@ impl Default for VideoDecoder {
             lru: VecDeque::new(),
             cache_bytes: 0,
             sequential: HashMap::new(),
+            warned: Default::default(),
             #[cfg(test)]
             realtime_process_spawns,
+            #[cfg(test)]
+            realtime_peak_sessions,
         }
     }
 }
 
 impl VideoDecoder {
     const MAX_CACHE_BYTES: usize = 256 * 1024 * 1024;
+
+    /// Report a decoding failure once per file instead of once per update.
+    fn report_failure(&mut self, path: &Path, message: impl std::fmt::Display) {
+        if self.warned.insert(path.to_path_buf()) {
+            gaanim_core::console::warn("video", message);
+        }
+    }
 
     fn insert_cache(&mut self, key: (PathBuf, u64), image: ImageData) {
         let bytes = image.width as usize * image.height as usize * 4;
@@ -869,17 +935,22 @@ impl VideoDecoder {
         metadata: &VideoMetadata,
         frame: u64,
     ) -> Result<ImageData, VideoError> {
-        let restart = self
-            .sequential
-            .get(path)
-            .is_some_and(|decoder| frame < decoder.next_frame.saturating_sub(1));
+        // Reading on is cheapest while the frame is just ahead. A frame
+        // behind, or far ahead, seeks to it: decoding from the start of the
+        // file took thousands of frames for the poster of a clip late in a
+        // long video, and again whenever another clip of the same file asked
+        // for an earlier frame.
+        let restart = self.sequential.get(path).is_some_and(|decoder| {
+            frame < decoder.next_frame.saturating_sub(1)
+                || frame.saturating_sub(decoder.next_frame) > MAX_SEQUENTIAL_GAP
+        });
         if restart {
             self.sequential.remove(path);
         }
         if !self.sequential.contains_key(path) {
             self.sequential.insert(
                 path.to_path_buf(),
-                SequentialDecoder::spawn(path, metadata)?,
+                SequentialDecoder::spawn_at(path, metadata, frame)?,
             );
         }
         self.sequential
@@ -902,6 +973,16 @@ fn replace_raster_image(raster: &mut RasterImage, image: gaanim_core::peniko::Im
     raster.image = Some(brush);
 }
 
+/// Keep the image shown and treat `frame` as settled when FFmpeg cannot
+/// decode it. Asking again on every update spawned FFmpeg for the same frame
+/// over and over, and the editor never rests while a video frame is pending;
+/// the next frame the playhead reaches is decoded as usual.
+fn settle_failed_frame(world: &mut World, entity: Entity, frame: u64) {
+    if let Some(mut playback) = world.get_mut::<VideoPlayback>(entity) {
+        playback.last_frame = Some(frame);
+    }
+}
+
 fn sample_video_system(world: &mut World) {
     // Frames follow stepped time; preview audio keeps the playhead.
     let scene_time = world.resource::<Timeline>().evaluation_time();
@@ -915,24 +996,34 @@ fn sample_video_system(world: &mut World) {
             continue;
         }
         decoder.pending.remove(&response.entity);
-        if let Ok(image) = response.image {
-            let Some(playback) = world.get::<VideoPlayback>(response.entity) else {
+        let Some(playback) = world.get::<VideoPlayback>(response.entity) else {
+            continue;
+        };
+        let time = stepped(world.get::<StepRate>(response.entity), scene_time);
+        let wanted = playback.frame_index(time);
+        let image = match response.image {
+            Ok(image) => image,
+            Err(message) => {
+                let path = playback.path.clone();
+                decoder.report_failure(&path, message);
+                if wanted == response.frame {
+                    settle_failed_frame(world, response.entity, response.frame);
+                }
                 continue;
-            };
-            let time = stepped(world.get::<StepRate>(response.entity), scene_time);
-            // A response may arrive after a scrub reached a frame that the
-            // cache supplied; it must not replace the frame shown now.
-            let shows_wanted_frame = playback.last_frame == Some(playback.frame_index(time));
-            decoder.insert_cache((playback.path.clone(), response.frame), image.clone());
-            if shows_wanted_frame {
-                continue;
             }
-            if let Some(mut raster) = world.get_mut::<RasterImage>(response.entity) {
-                replace_raster_image(&mut raster, image);
-            }
-            if let Some(mut playback) = world.get_mut::<VideoPlayback>(response.entity) {
-                playback.last_frame = Some(response.frame);
-            }
+        };
+        // A response may arrive after a scrub reached a frame that the
+        // cache supplied; it must not replace the frame shown now.
+        let shows_wanted_frame = playback.last_frame == Some(wanted);
+        decoder.insert_cache((playback.path.clone(), response.frame), image.clone());
+        if shows_wanted_frame {
+            continue;
+        }
+        if let Some(mut raster) = world.get_mut::<RasterImage>(response.entity) {
+            replace_raster_image(&mut raster, image);
+        }
+        if let Some(mut playback) = world.get_mut::<VideoPlayback>(response.entity) {
+            playback.last_frame = Some(response.frame);
         }
     }
 
@@ -975,7 +1066,10 @@ fn sample_video_system(world: &mut World) {
                             playback.last_frame = Some(frame);
                         }
                     }
-                    Err(error) => gaanim_core::console::warn("video", error),
+                    Err(error) => {
+                        decoder.report_failure(&path, error);
+                        settle_failed_frame(world, entity, frame);
+                    }
                 }
             }
             VideoSamplingMode::Realtime => {
@@ -1493,7 +1587,9 @@ mod tests {
             lru: VecDeque::new(),
             cache_bytes: 0,
             sequential: HashMap::new(),
+            warned: Default::default(),
             realtime_process_spawns: Arc::new(AtomicUsize::new(0)),
+            realtime_peak_sessions: Arc::new(AtomicUsize::new(0)),
         };
         let mut world = World::new();
         world.insert_resource(Timeline::new());
@@ -1538,7 +1634,9 @@ mod tests {
             lru: VecDeque::new(),
             cache_bytes: 0,
             sequential: HashMap::new(),
+            warned: Default::default(),
             realtime_process_spawns: Arc::new(AtomicUsize::new(0)),
+            realtime_peak_sessions: Arc::new(AtomicUsize::new(0)),
         };
         let video = playback(false, 1.0);
         let wanted = video.frame_index(3.0);
@@ -1647,6 +1745,191 @@ mod tests {
             "adjacent realtime frames should share one FFmpeg process"
         );
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn realtime_decoder_keeps_a_bounded_number_of_ffmpeg_processes() {
+        if Command::new("ffmpeg").arg("-version").output().is_err()
+            || Command::new("ffprobe").arg("-version").output().is_err()
+        {
+            eprintln!("skipping realtime session check because FFmpeg is unavailable");
+            return;
+        }
+        let path = std::env::temp_dir().join(format!(
+            "gaanim-realtime-sessions-test-{}.mp4",
+            std::process::id()
+        ));
+        let status = Command::new("ffmpeg")
+            .args([
+                "-y",
+                "-v",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc2=s=16x12:r=8:d=2",
+                "-c:v",
+                "mpeg4",
+            ])
+            .arg(&path)
+            .status()
+            .expect("ffmpeg was available during the initial probe");
+        assert!(status.success());
+        let metadata = probe_video(&path).expect("fixture should be probeable");
+        let decoder = VideoDecoder::default();
+
+        // One clip per segment of a presentation: every drawable asks for its
+        // poster, and the first clips play again afterwards.
+        let clips = MAX_REALTIME_SESSIONS as u64 + 3;
+        let requests = (0..clips).chain(0..2);
+        for (generation, clip) in requests.enumerate() {
+            decoder
+                .request_tx
+                .send(DecodeRequest {
+                    entity: Entity::from_bits(clip + 1),
+                    generation: generation as u64,
+                    path: path.clone(),
+                    metadata: metadata.clone(),
+                    frame: clip * 2,
+                })
+                .unwrap();
+            let response = decoder
+                .response_rx
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .expect("decoded frame response");
+            assert!(
+                response.image.is_ok(),
+                "clip {clip}: {:?}",
+                response.image.err()
+            );
+        }
+
+        let peak = decoder.realtime_peak_sessions.load(Ordering::Relaxed);
+        assert!(
+            peak <= MAX_REALTIME_SESSIONS,
+            "{peak} FFmpeg processes were alive at once"
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn deterministic_decoding_seeks_to_distant_frames_and_matches_reading_from_the_start() {
+        if Command::new("ffmpeg").arg("-version").output().is_err()
+            || Command::new("ffprobe").arg("-version").output().is_err()
+        {
+            eprintln!("skipping deterministic seek check because FFmpeg is unavailable");
+            return;
+        }
+        let path = std::env::temp_dir().join(format!(
+            "gaanim-deterministic-seek-test-{}.mp4",
+            std::process::id()
+        ));
+        // Every frame differs, with a keyframe every 8 frames to seek between.
+        let status = Command::new("ffmpeg")
+            .args([
+                "-y",
+                "-v",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc2=s=16x12:r=8:d=6",
+                "-c:v",
+                "mpeg4",
+                "-g",
+                "8",
+            ])
+            .arg(&path)
+            .status()
+            .expect("ffmpeg was available during the initial probe");
+        assert!(status.success());
+        let metadata = probe_video(&path).expect("fixture should be probeable");
+        let mut reference = SequentialDecoder::spawn_at(&path, &metadata, 0).unwrap();
+        let expected: Vec<Vec<u8>> = (0..48)
+            .map(|frame| {
+                reference
+                    .read_to(&path, frame)
+                    .unwrap()
+                    .data
+                    .data()
+                    .to_vec()
+            })
+            .collect();
+
+        let mut decoder = VideoDecoder::default();
+        // A late poster, an earlier clip, a jump ahead, the next frame and a
+        // jump back: (requested frame, frame the decoder started from).
+        for (frame, started) in [(40, 40), (3, 3), (29, 29), (30, 29), (7, 7)] {
+            let image = decoder
+                .decode_sequential(&path, &metadata, frame)
+                .expect("frame should decode");
+            assert_eq!(
+                image.data.data(),
+                expected[frame as usize].as_slice(),
+                "frame {frame}"
+            );
+            assert_eq!(
+                decoder.sequential[&path].start_frame, started,
+                "frame {frame}"
+            );
+        }
+        drop(decoder);
+        drop(reference);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn a_frame_that_fails_to_decode_is_not_requested_again_until_the_playhead_moves() {
+        let (request_tx, request_rx) = crossbeam_channel::unbounded();
+        let (response_tx, response_rx) = crossbeam_channel::unbounded();
+        let decoder = VideoDecoder {
+            request_tx,
+            response_rx,
+            pending: HashMap::new(),
+            generation: 0,
+            cache: HashMap::new(),
+            lru: VecDeque::new(),
+            cache_bytes: 0,
+            sequential: HashMap::new(),
+            warned: Default::default(),
+            realtime_process_spawns: Arc::new(AtomicUsize::new(0)),
+            realtime_peak_sessions: Arc::new(AtomicUsize::new(0)),
+        };
+        let mut world = World::new();
+        world.insert_resource(Timeline::new());
+        world.insert_resource(VideoSamplingMode::Realtime);
+        world.insert_resource(decoder);
+        let entity = world
+            .spawn((gaanim_scene::RasterImage::none(), playback(false, 1.0)))
+            .id();
+
+        sample_video_system(&mut world);
+        let first = request_rx.recv().expect("initial frame request");
+        response_tx
+            .send(DecodeResponse {
+                entity,
+                generation: first.generation,
+                frame: first.frame,
+                image: Err("failed to fill whole buffer".to_string()),
+            })
+            .unwrap();
+        for _ in 0..3 {
+            sample_video_system(&mut world);
+        }
+        assert!(
+            request_rx.try_recv().is_err(),
+            "the failed frame was requested again"
+        );
+        assert_eq!(
+            world.get::<VideoPlayback>(entity).unwrap().last_frame,
+            Some(first.frame),
+            "the failed frame must count as settled so the editor can rest"
+        );
+
+        world.resource_mut::<Timeline>().current_time = 3.0;
+        sample_video_system(&mut world);
+        let next = request_rx.try_recv().expect("the next frame is requested");
+        assert_ne!(next.frame, first.frame);
     }
 
     #[test]
