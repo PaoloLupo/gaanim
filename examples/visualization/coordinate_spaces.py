@@ -20,8 +20,8 @@ MOVE = 1.4
 ZOOM = 1.3
 
 scene = Scene()
-accent = scene.canvas.color("accent")
-rule = scene.canvas.color("rule")
+accent = scene.colors.accent
+rule = scene.colors.rule
 X = Axis.linear(0, 6).ticks(1).label("x")
 Y = Axis.linear(0, 4).ticks(1).label("y")
 

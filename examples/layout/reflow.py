@@ -12,11 +12,11 @@ from gaanim import BoxStyle, Scene, Zones
 
 scene = Scene()
 L = scene.layout
-accent = scene.canvas.color("accent")
-header = scene.canvas.color("header")
-panel = scene.canvas.color("panel")
-rule = scene.canvas.color("rule")
-dark = scene.canvas.color("background")
+accent = scene.colors.accent
+header = scene.colors.header
+panel = scene.colors.panel
+rule = scene.colors.rule
+dark = scene.colors.background
 seeks = []
 
 # The boxes sit in the middle of the frame; the code of each step goes in a

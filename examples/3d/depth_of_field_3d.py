@@ -18,11 +18,11 @@ HOLD = 0.6
 SEEKS = []
 
 scene = Scene()
-accent = scene.canvas.color("accent")
-success = scene.canvas.color("success")
-danger = scene.canvas.color("danger")
-chart = scene.canvas.color("chart")
-rule = scene.canvas.color("rule")
+accent = scene.colors.accent
+success = scene.colors.success
+danger = scene.colors.danger
+chart = scene.colors.chart
+rule = scene.colors.rule
 # The camera stands about 9 units from its target, the third solid.
 HOME = scene.camera.state_3d(eye=(2.6, 3.2, 9.0), target=(0, -0.6, 0), fov_y=0.62)
 # The solids from near to far: at depths of about 0.6, 0.8, 1, 1.3 and 1.7.

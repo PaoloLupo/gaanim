@@ -18,7 +18,7 @@ HOLD = 0.8
 STEP = 2 * DRAW + 2 * HOLD + 0.4 + MORPH
 
 scene = Scene()
-accent = scene.canvas.color("accent")
+accent = scene.colors.accent
 
 # The same six cities in two years: their key column, "city", ties each row
 # of one spec to the row of the other.

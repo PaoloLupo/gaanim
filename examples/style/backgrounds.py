@@ -17,10 +17,10 @@ SHOW = 0.4
 HOLD = 1.8
 
 scene = Scene()
-background = scene.canvas.color("background")
-panel = scene.canvas.color("panel")
-accent = scene.canvas.color("accent")
-success = scene.canvas.color("success")
+background = scene.colors.background
+panel = scene.colors.panel
+accent = scene.colors.accent
+success = scene.colors.success
 # Palettes for the backgrounds, from two color maps: four blues from dark
 # to light, and a sunset from dark red to yellow.
 NIGHT = ColorMap("lapaz").colors(4)

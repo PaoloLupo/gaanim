@@ -14,8 +14,8 @@ from gaanim import Distribution, Easing, Scene, Zones
 DRIFT = 3.0
 
 scene = Scene()
-accent = scene.canvas.color("accent")
-foreground = scene.canvas.color("foreground")
+accent = scene.colors.accent
+foreground = scene.colors.foreground
 
 
 def label(code):

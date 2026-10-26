@@ -16,7 +16,7 @@ from gaanim import Scene, Zones
 from gaanim.live import pose
 
 scene = Scene()
-rule = scene.canvas.color("rule")
+rule = scene.colors.rule
 # Ten made-up players, all in the room from the start.
 scene.rehearsal(10, seed=3, arrive=0)
 audience = scene.audience()

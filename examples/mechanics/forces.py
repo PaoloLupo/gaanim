@@ -18,10 +18,10 @@ HOLD = 0.6
 
 scene = Scene()
 M = scene.mechanics
-fg = scene.canvas.color("foreground")
-accent = scene.canvas.color("accent")
-success = scene.canvas.color("success")
-panel = scene.canvas.color("panel")
+fg = scene.colors.foreground
+accent = scene.colors.accent
+success = scene.colors.success
+panel = scene.colors.panel
 
 
 def rows(count):

@@ -11,10 +11,10 @@ import os
 from gaanim import Easing, Scene, Zones
 
 scene = Scene(theme="gaanim")
-violet = scene.canvas.color("accent")
-gold = scene.canvas.color("title")
-muted = scene.canvas.color("muted")
-shadow = scene.canvas.color("shadow")
+violet = scene.colors.accent
+gold = scene.colors.title
+muted = scene.colors.muted
+shadow = scene.colors.shadow
 
 stage, band = scene.layout.zones(Zones.rows(["5fr", "1fr"], padding="page_padding"))
 x, y = stage.center

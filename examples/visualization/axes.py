@@ -18,7 +18,7 @@ ZOOM = 1.6
 PLANE_ZOOM = 1.3
 
 scene = Scene()
-accent = scene.canvas.color("accent")
+accent = scene.colors.accent
 
 
 def table(rows):

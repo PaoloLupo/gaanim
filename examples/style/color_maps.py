@@ -16,13 +16,13 @@ HOLD = 1.2
 STEPS = 64
 
 scene = Scene()
-background = scene.canvas.color("background")
-foreground = scene.canvas.color("foreground")
-muted = scene.canvas.color("muted")
-accent = scene.canvas.color("accent")
-success = scene.canvas.color("success")
-warning = scene.canvas.color("warning")
-danger = scene.canvas.color("danger")
+background = scene.colors.background
+foreground = scene.colors.foreground
+muted = scene.colors.muted
+accent = scene.colors.accent
+success = scene.colors.success
+warning = scene.colors.warning
+danger = scene.colors.danger
 
 
 def label(code):

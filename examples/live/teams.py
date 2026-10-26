@@ -16,8 +16,8 @@ from gaanim import Scene, Zones, computed
 from gaanim.live import ease_out_back, impact, lerp, pose, smoothstep
 
 scene = Scene()
-muted = scene.canvas.color("muted")
-track = scene.canvas.color("header")
+muted = scene.colors.muted
+track = scene.colors.header
 teams = scene.teams(["Comets", "Rockets"])
 # One skill per team: the first answers right far more often.
 scene.rehearsal(16, seed=2, skill=[0.85, 0.4], arrive=3.0)

@@ -11,7 +11,7 @@ import os
 from gaanim import Scene, Zones
 
 scene = Scene()
-success = scene.canvas.color("success")
+success = scene.colors.success
 
 
 def stage(label):

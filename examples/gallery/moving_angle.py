@@ -12,10 +12,10 @@ import os
 from gaanim import Easing, Scene, computed
 
 scene = Scene(theme="gaanim")
-violet = scene.canvas.color("accent")
-gold = scene.canvas.color("title")
-lilac = scene.canvas.color("chart")
-paper = scene.canvas.color("foreground")
+violet = scene.colors.accent
+gold = scene.colors.title
+lilac = scene.colors.chart
+paper = scene.colors.foreground
 geometry = scene.geometry
 
 vertex = (0.0, -2.6)

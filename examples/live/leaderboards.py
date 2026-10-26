@@ -13,11 +13,11 @@ import os
 from gaanim import Scene, Zones
 
 scene = Scene()
-foreground = scene.canvas.color("foreground")
-accent = scene.canvas.color("accent")
-muted = scene.canvas.color("muted")
-rule = scene.canvas.color("rule")
-track = scene.canvas.color("header")
+foreground = scene.colors.foreground
+accent = scene.colors.accent
+muted = scene.colors.muted
+rule = scene.colors.rule
+track = scene.colors.header
 scene.rehearsal(12, seed=4)
 board = scene.leaderboard()
 RANKS = 6

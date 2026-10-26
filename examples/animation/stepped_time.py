@@ -16,7 +16,7 @@ from gaanim import Easing, Scene, Updater, Zones
 RUN = 3.0
 
 scene = Scene()
-rule = scene.canvas.color("rule")
+rule = scene.colors.rule
 
 
 def rows(count, columns):

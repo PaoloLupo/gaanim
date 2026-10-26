@@ -244,7 +244,7 @@ _FALLBACK_COLORS = {
 
 def _theme_color(scene: Scene, role: str) -> Paint:
     try:
-        return scene.canvas.color(role)
+        return scene.colors[role]
     except ValueError:
         return _FALLBACK_COLORS[role]
 

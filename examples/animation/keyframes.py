@@ -15,10 +15,10 @@ DURATION = 1.6
 HOLD = 0.4
 
 scene = Scene()
-foreground = scene.canvas.color("foreground")
-rule = scene.canvas.color("rule")
-success = scene.canvas.color("success")
-danger = scene.canvas.color("danger")
+foreground = scene.colors.foreground
+rule = scene.colors.rule
+success = scene.colors.success
+danger = scene.colors.danger
 
 
 def table(header, rows):

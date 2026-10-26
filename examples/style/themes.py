@@ -19,7 +19,7 @@ GROW = 0.8
 HOLD = 1.4
 
 scene = Scene()
-muted = scene.canvas.color("muted")
+muted = scene.colors.muted
 
 ALIASES = [
     ("scientific", "technical"),

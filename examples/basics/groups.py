@@ -15,11 +15,11 @@ DURATION = 1.4
 HOLD = 0.6
 
 scene = Scene()
-foreground = scene.canvas.color("foreground")
-rule = scene.canvas.color("rule")
-panel = scene.canvas.color("panel")
-danger = scene.canvas.color("danger")
-success = scene.canvas.color("success")
+foreground = scene.colors.foreground
+rule = scene.colors.rule
+panel = scene.colors.panel
+danger = scene.colors.danger
+success = scene.colors.success
 
 
 def house(size=1.3):

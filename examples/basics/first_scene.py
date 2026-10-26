@@ -13,11 +13,11 @@ import os
 from gaanim import Easing, Scene, StrokeStyle, Zones
 
 scene = Scene()
-accent = scene.canvas.color("accent")
-foreground = scene.canvas.color("foreground")
-muted = scene.canvas.color("muted")
-rule = scene.canvas.color("rule")
-success = scene.canvas.color("success")
+accent = scene.colors.accent
+foreground = scene.colors.foreground
+muted = scene.colors.muted
+rule = scene.colors.rule
+success = scene.colors.success
 
 page = scene.layout.zones(Zones.rows(["1fr", "1.35fr"], gap="40px", padding="page_padding"))
 stage, chart = page[0], page[1]

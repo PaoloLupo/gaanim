@@ -14,9 +14,9 @@ from gaanim import Anchor, Direction, Scene, Zones, stagger
 
 scene = Scene()
 L = scene.layout
-header = scene.canvas.color("header")
-rule = scene.canvas.color("rule")
-foreground = scene.canvas.color("foreground")
+header = scene.colors.header
+rule = scene.colors.rule
+foreground = scene.colors.foreground
 seeks = []
 
 

@@ -66,8 +66,8 @@ FIELD_NOTES = Theme(
 )
 
 scene = Scene(theme=FIELD_NOTES)
-muted = scene.canvas.color("muted")
-success = scene.canvas.color("success")
+muted = scene.colors.muted
+success = scene.colors.success
 
 
 def label(code):

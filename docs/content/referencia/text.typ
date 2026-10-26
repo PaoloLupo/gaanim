@@ -796,7 +796,7 @@ title = scene.text.typst(Path("assets/title.typ"))
 === Colores del tema en Typst
 
 Cada documento empieza con `theme`, los colores del tema por nombre, los mismos
-que `scene.canvas.color(...)`. El texto ya toma el color del tema; úsalos para
+que `scene.colors`. El texto ya toma el color del tema; úsalos para
 lo que el documento pinta por su cuenta:
 
 ```python

@@ -16,12 +16,12 @@ SPACING = 3.0
 SEEKS = []
 
 scene = Scene()
-accent = scene.canvas.color("accent")
-success = scene.canvas.color("success")
-danger = scene.canvas.color("danger")
-muted = scene.canvas.color("muted")
-panel = scene.canvas.color("panel")
-rule = scene.canvas.color("rule")
+accent = scene.colors.accent
+success = scene.colors.success
+danger = scene.colors.danger
+muted = scene.colors.muted
+panel = scene.colors.panel
+rule = scene.colors.rule
 
 
 def world(columns=range(-6, 7), rows=range(-4, 5)):

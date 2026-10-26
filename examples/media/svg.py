@@ -14,8 +14,8 @@ FEATURES = "assets/features.svg"  # 360 x 220 px: gradients, clip paths, filters
 CHARACTER = "assets/character.svg"  # parts: head, face, torso, left-arm, right-arm, legs
 
 scene = Scene()
-accent = scene.canvas.color("accent")
-success = scene.canvas.color("success")
+accent = scene.colors.accent
+success = scene.colors.success
 
 DRAW = 1.4
 HOLD = 0.6

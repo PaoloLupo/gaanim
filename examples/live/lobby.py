@@ -13,10 +13,10 @@ import os
 from gaanim import Scene, Zones, computed
 
 scene = Scene()
-foreground = scene.canvas.color("foreground")
-background = scene.canvas.color("background")
-accent = scene.canvas.color("accent")
-track = scene.canvas.color("header")
+foreground = scene.colors.foreground
+background = scene.colors.background
+accent = scene.colors.accent
+track = scene.colors.header
 # The rehearsal's 14 players join one after another over 6 seconds.
 scene.rehearsal(14, seed=5, arrive=6.0)
 audience = scene.audience()

@@ -17,8 +17,8 @@ MORPH = 1.2
 LOOPS = 4.8
 
 scene = Scene()
-accent = scene.canvas.color("accent")
-muted = scene.canvas.color("muted")
+accent = scene.colors.accent
+muted = scene.colors.muted
 
 # The ball in its file: 2 units across about its origin. Its spikes reach
 # out 0.6 more, and its lean takes its top 0.7 aside.

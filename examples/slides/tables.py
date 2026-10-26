@@ -13,12 +13,12 @@ from gaanim import Scene, Text, Zones, stagger
 scene = Scene()
 S = scene.slides
 L = scene.layout
-accent = scene.canvas.color("accent")
-chart = scene.canvas.color("chart")
-dark = scene.canvas.color("background")
-header = scene.canvas.color("header")
-panel = scene.canvas.color("panel")
-rule = scene.canvas.color("rule")
+accent = scene.colors.accent
+chart = scene.colors.chart
+dark = scene.colors.background
+header = scene.colors.header
+panel = scene.colors.panel
+rule = scene.colors.rule
 seeks = []
 
 HEADERS = ["Method", "Residual", "Time"]

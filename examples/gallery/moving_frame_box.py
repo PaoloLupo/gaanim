@@ -11,9 +11,9 @@ import os
 from gaanim import Easing, Scene, part
 
 scene = Scene(theme="gaanim")
-violet = scene.canvas.color("accent")
-gold = scene.canvas.color("title")
-paper = scene.canvas.color("foreground")
+violet = scene.colors.accent
+gold = scene.colors.title
+paper = scene.colors.foreground
 geometry = scene.geometry
 
 rule = scene.text.equation(

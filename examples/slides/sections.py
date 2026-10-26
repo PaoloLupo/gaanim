@@ -13,12 +13,12 @@ from gaanim import Easing, Scene, Section, SectionStep, TextStyle, Transition, Z
 
 scene = Scene()
 L = scene.layout
-accent = scene.canvas.color("accent")
-foreground = scene.canvas.color("foreground")
-header = scene.canvas.color("header")
-muted = scene.canvas.color("muted")
-rule = scene.canvas.color("rule")
-success = scene.canvas.color("success")
+accent = scene.colors.accent
+foreground = scene.colors.foreground
+header = scene.colors.header
+muted = scene.colors.muted
+rule = scene.colors.rule
+success = scene.colors.success
 seeks = []
 
 # A section is a Section, a key used as its own title, or a (key, title) pair.

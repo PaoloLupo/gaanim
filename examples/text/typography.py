@@ -18,10 +18,10 @@ SAMPLE = "Sphinx of black quartz"
 PARAGRAPH = "Typography arranges type so that written language is legible, readable and appealing."
 
 scene = Scene()
-accent = scene.canvas.color("accent")
-success = scene.canvas.color("success")
-rule = scene.canvas.color("rule")
-background = scene.canvas.color("background")
+accent = scene.colors.accent
+success = scene.colors.success
+rule = scene.colors.rule
+background = scene.colors.background
 
 
 def label(code):

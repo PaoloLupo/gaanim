@@ -14,11 +14,11 @@ HOLD = 0.8
 SEEKS = []
 
 scene = Scene()
-accent = scene.canvas.color("accent")
-success = scene.canvas.color("success")
-muted = scene.canvas.color("muted")
-panel = scene.canvas.color("panel")
-rule = scene.canvas.color("rule")
+accent = scene.colors.accent
+success = scene.colors.success
+muted = scene.colors.muted
+panel = scene.colors.panel
+rule = scene.colors.rule
 
 
 def world(columns=range(-10, 11), rows=range(-5, 6)):

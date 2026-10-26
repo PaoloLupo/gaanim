@@ -26,9 +26,9 @@ VASE = [(0, -0.3), (0.2, -0.3), (0.25, -0.12), (0.12, 0.12), (0.16, 0.3), (0, 0.
 SEEKS = []
 
 scene = Scene()
-accent = Material3D.matte(scene.canvas.color("accent"))
-success = Material3D.matte(scene.canvas.color("success"))
-danger = Material3D.matte(scene.canvas.color("danger"))
+accent = Material3D.matte(scene.colors.accent)
+success = Material3D.matte(scene.colors.success)
+danger = Material3D.matte(scene.colors.danger)
 
 
 def morph(plays):

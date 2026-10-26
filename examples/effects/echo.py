@@ -18,8 +18,8 @@ MOVE = 1.2
 HOLD = 0.8
 
 scene = Scene()
-rule = scene.canvas.color("rule")
-success = scene.canvas.color("success")
+rule = scene.colors.rule
+success = scene.colors.success
 
 
 def label(code):
@@ -83,7 +83,7 @@ def stage(index, code):
 zone = stage(0, "bar.echo(6, delay=0.05)\nbar.animate.rotate_by(math.pi)")
 bar = scene.geometry.rounded_rect(zone.height * 1.6, 0.2, 0.1).move_to(*zone.center).echo(6, delay=0.05)
 zone = stage(1, "ring.echo(5, delay=0.06)\nring.animate.scale_to(2.0)")
-ring = scene.geometry.circle(zone.height * 0.25).no_fill().stroke(scene.canvas.color("accent"), 0.06)
+ring = scene.geometry.circle(zone.height * 0.25).no_fill().stroke(scene.colors.accent, 0.06)
 ring.move_to(*zone.center).echo(5, delay=0.06)
 zone = stage(2, "dot.echo(6, delay=0.05)\ndot.animate.move_to(x, y).fill(success)")
 (left, y), (right, _) = zone.point("left"), zone.point("right")

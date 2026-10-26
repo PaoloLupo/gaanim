@@ -12,12 +12,12 @@ from gaanim import Scene, Zones, stagger
 
 scene = Scene()
 S = scene.slides
-accent = scene.canvas.color("accent")
-chart = scene.canvas.color("chart")
-dark = scene.canvas.color("background")
-muted = scene.canvas.color("muted")
-success = scene.canvas.color("success")
-warning = scene.canvas.color("warning")
+accent = scene.colors.accent
+chart = scene.colors.chart
+dark = scene.colors.background
+muted = scene.colors.muted
+success = scene.colors.success
+warning = scene.colors.warning
 seeks = []
 
 TITLE, SUBTITLE = "Vector motion", "A short explanation"

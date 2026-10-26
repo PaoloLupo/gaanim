@@ -24,10 +24,10 @@ HOLD = 0.8
 TURNS = [(-1.0, 0, 0), (0.3, 1.0, 0)]
 
 scene = Scene()
-accent = scene.canvas.color("accent")
-success = scene.canvas.color("success")
-rule = scene.canvas.color("rule")
-foreground = scene.canvas.color("foreground")
+accent = scene.colors.accent
+success = scene.colors.success
+rule = scene.colors.rule
+foreground = scene.colors.foreground
 # Times worth a snapshot: while drawables are written, and once each move settles.
 moments = []
 

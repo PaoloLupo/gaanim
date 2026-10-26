@@ -12,10 +12,10 @@ import os
 from gaanim import Easing, Scene
 
 scene = Scene(theme="gaanim")
-violet = scene.canvas.color("accent")
-gold = scene.canvas.color("title")
-lilac = scene.canvas.color("chart")
-mist = scene.canvas.color("rule")
+violet = scene.colors.accent
+gold = scene.colors.title
+lilac = scene.colors.chart
+mist = scene.colors.rule
 geometry = scene.geometry
 
 start = (-4.6, -1.4)

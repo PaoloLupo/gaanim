@@ -15,8 +15,8 @@ HOLD = 0.6
 
 scene = Scene()
 M = scene.mechanics
-fg = scene.canvas.color("foreground")
-panel = scene.canvas.color("panel")
+fg = scene.colors.foreground
+panel = scene.colors.panel
 
 
 def block(size=0.8):

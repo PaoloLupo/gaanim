@@ -24,8 +24,8 @@ TIP = (0.9, 0.3, 0)
 TILT = (0.45, -0.6, 0)
 
 scene = Scene()
-accent = scene.canvas.color("accent")
-success = scene.canvas.color("success")
+accent = scene.colors.accent
+success = scene.colors.success
 # Times worth a snapshot: while shapes grow, and once each move settles.
 moments = []
 

@@ -15,7 +15,7 @@ DRAW = 1.4
 HOLD = 0.6
 
 scene = Scene()
-rule = scene.canvas.color("rule")
+rule = scene.colors.rule
 
 
 def reveal(drawables):

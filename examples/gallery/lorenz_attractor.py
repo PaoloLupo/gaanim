@@ -45,9 +45,9 @@ def integrate(start):
 
 
 scene = Scene(theme="gaanim")
-violet = scene.canvas.color("accent")
-lilac = scene.canvas.color("chart")
-gold = scene.canvas.color("title")
+violet = scene.colors.accent
+lilac = scene.colors.chart
+gold = scene.colors.title
 frame, = scene.layout.zones(Zones.rows(1))
 
 # The attractor is about 50 units tall around z = 25; SCALE fits it in the frame.

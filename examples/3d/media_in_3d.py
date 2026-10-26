@@ -22,7 +22,7 @@ TURN = (0, 0.5, 0)
 SEEKS = []
 
 scene = Scene()
-accent = scene.canvas.color("accent")
+accent = scene.colors.accent
 columns = scene.layout.zones(Zones.columns(3, gap="48px", padding="page_padding"))
 cells = [column.split(Zones.rows(["1fr", 0.4])) for column in columns]
 variants = [

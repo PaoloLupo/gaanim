@@ -16,10 +16,10 @@ ANSWERS = ["x²", "2ˣ", "x·log x"]
 VOTING = 2.4
 
 scene = Scene()
-foreground = scene.canvas.color("foreground")
-background = scene.canvas.color("background")
-accent = scene.canvas.color("accent")
-track = scene.canvas.color("header")
+foreground = scene.colors.foreground
+background = scene.colors.background
+accent = scene.colors.accent
+track = scene.colors.header
 # Previews, exports and snapshots play this made-up class of 24.
 scene.rehearsal(24, seed=3)
 seeks = []

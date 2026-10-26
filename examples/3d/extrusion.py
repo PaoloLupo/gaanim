@@ -18,8 +18,8 @@ HOLD = 0.6
 TILT = (0.4, -0.7, 0)
 
 scene = Scene()
-accent = scene.canvas.color("accent")
-foreground = scene.canvas.color("foreground")
+accent = scene.colors.accent
+foreground = scene.colors.foreground
 
 
 def show(solids):

@@ -14,7 +14,7 @@ GROW = 0.3
 HOLD = 0.5
 
 scene = Scene()
-rule = scene.canvas.color("rule")
+rule = scene.colors.rule
 
 
 def rows(count, label_share="4fr", stage_share="3fr"):

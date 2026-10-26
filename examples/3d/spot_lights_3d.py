@@ -18,10 +18,10 @@ HOLD = 0.6
 SEEKS = []
 
 scene = Scene()
-accent = scene.canvas.color("accent")
-success = scene.canvas.color("success")
-danger = scene.canvas.color("danger")
-rule = scene.canvas.color("rule")
+accent = scene.colors.accent
+success = scene.colors.success
+danger = scene.colors.danger
+rule = scene.colors.rule
 # Dim the sky and ground light, so that the spots shape the stage.
 scene.geometry.lighting_3d("studio", intensity=0.25)
 HOME = scene.camera.state_3d(eye=(0, 6, 11), target=(0, -0.5, 0), fov_y=0.7)

@@ -19,8 +19,8 @@ RING = "SPHINX OF BLACK QUARTZ · "
 LINE = "Sphinx of black quartz"
 
 scene = Scene()
-accent = scene.canvas.color("accent")
-rule = scene.canvas.color("rule")
+accent = scene.colors.accent
+rule = scene.colors.rule
 
 
 def cells(rows):

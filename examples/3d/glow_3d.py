@@ -19,9 +19,9 @@ HOLD = 0.6
 TILT = (0.45, -0.6, 0)
 
 scene = Scene()
-accent = scene.canvas.color("accent")
-success = scene.canvas.color("success")
-rule = scene.canvas.color("rule")
+accent = scene.colors.accent
+success = scene.colors.success
+rule = scene.colors.rule
 
 
 def cells(count):

@@ -19,9 +19,9 @@ MOVE = 2.0
 SEEKS = []
 
 scene = Scene()
-accent = scene.canvas.color("accent")
-rule = scene.canvas.color("rule")
-success = scene.canvas.color("success")
+accent = scene.colors.accent
+rule = scene.colors.rule
+success = scene.colors.success
 
 page = scene.layout.zones(Zones.rows(["1fr", 0.5], padding="page_padding"))
 model_zone, panel_zone = page[0].split(Zones.columns(["3fr", "2fr"], gap="32px"))

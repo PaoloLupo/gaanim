@@ -16,12 +16,12 @@ MOVE = 1.4
 HOLD = 0.8
 
 scene = Scene()
-accent = scene.canvas.color("accent")
-success = scene.canvas.color("success")
-warning = scene.canvas.color("warning")
-danger = scene.canvas.color("danger")
-chart = scene.canvas.color("chart")
-rule = scene.canvas.color("rule")
+accent = scene.colors.accent
+success = scene.colors.success
+warning = scene.colors.warning
+danger = scene.colors.danger
+chart = scene.colors.chart
+rule = scene.colors.rule
 geometry = scene.geometry
 
 SHAPES = {

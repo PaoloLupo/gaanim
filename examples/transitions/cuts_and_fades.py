@@ -13,8 +13,8 @@ from gaanim import Overlay, Scene, Transition, Zones
 HOLD = 1.6
 
 scene = Scene()
-background = scene.canvas.color("background")
-accent = scene.canvas.color("accent")
+background = scene.colors.background
+accent = scene.colors.accent
 page = scene.layout.zones(Zones.rows(["6fr", "1fr"], gap="24px", padding="page_padding"))
 ROLES = ["accent", "success", "chart", "danger"]
 SHAPES = [
@@ -30,7 +30,7 @@ captions = []
 def card(index):
     """Fill the stage with card ``index``: a theme color holding a large dark shape."""
     stage = page[0]
-    color = scene.canvas.color(ROLES[index % len(ROLES)])
+    color = scene.colors[ROLES[index % len(ROLES)]]
     scene.geometry.rounded_rect(stage.width, stage.height, 0.3).fill(color).place(stage)
     SHAPES[index % len(SHAPES)]().fill(background).place(stage.inset("96px"), fit="contain")
 

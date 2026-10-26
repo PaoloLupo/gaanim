@@ -14,7 +14,7 @@ BALLS = "assets/balls.json"  # 1920 x 1080, 4.15 seconds at 60 fps
 TOGGLE = "assets/toggle.lottie"  # animations idle and active, theme gold, state machine main
 
 scene = Scene()
-accent = scene.canvas.color("accent")
+accent = scene.colors.accent
 
 HOLD = 0.6
 
@@ -92,7 +92,7 @@ for index, change in enumerate([
     lambda: toggle.set_theme(None),
 ], start=1):
     change()
-    labels[index - 1].fill(scene.canvas.color("foreground"))
+    labels[index - 1].fill(scene.colors.foreground)
     labels[index].fill(accent)
     scene.wait(1.0)
 

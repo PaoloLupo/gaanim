@@ -19,7 +19,7 @@ HOLD = 0.8
 STEP = 2 * DRAW + HOLD
 
 scene = Scene()
-chart_color = scene.canvas.color("chart")
+chart_color = scene.colors.chart
 
 # One observation per row: x, y and how far its error reaches below and
 # above y.

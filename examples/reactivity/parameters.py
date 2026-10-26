@@ -17,10 +17,10 @@ DURATION = 2.0
 HOLD = 0.6
 
 scene = Scene()
-accent = scene.canvas.color("accent")
-success = scene.canvas.color("success")
-foreground = scene.canvas.color("foreground")
-rule = scene.canvas.color("rule")
+accent = scene.colors.accent
+success = scene.colors.success
+foreground = scene.colors.foreground
+rule = scene.colors.rule
 
 
 def code(text):

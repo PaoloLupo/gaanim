@@ -16,7 +16,7 @@ EDIT = WRITE + 2 * HOLD
 MORPH = 1.4
 
 scene = Scene()
-accent = scene.canvas.color("accent")
+accent = scene.colors.accent
 DIGITS = [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
 
 

@@ -21,8 +21,8 @@ STEP = 2 * DRAW + HOLD
 ZOOM = 1.3
 
 scene = Scene()
-accent = scene.canvas.color("accent")
-foreground = scene.canvas.color("foreground")
+accent = scene.colors.accent
+foreground = scene.colors.foreground
 # crossing("min") keeps both axes on the edges of the plot, clear of the curves.
 ANGLE = Axis.linear(0, 2 * math.pi).ticks(math.pi / 2).numbers("pi", denominator=2)
 WAVE = Axis.linear(-1.5, 1.5).ticks(1).crossing("min")

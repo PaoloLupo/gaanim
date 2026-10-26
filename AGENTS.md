@@ -286,9 +286,9 @@ The contract, checked by `just check-examples` (`scripts/examples.py`):
 - `scene = Scene()` with no `background`, `frame`, `margin`, `theme` or `post`,
   and no segment backgrounds or post-processing, unless that is the topic (list
   the rule in `allow`). Every example shares the default theme.
-- Colors come from the theme (`scene.canvas.color("accent")`, `"muted"`,
-  `"rule"`, `"success"`…, or the theme's default styles), never color
-  constants, hex strings or `Color(...)`.
+- Colors come from the theme (`scene.colors.accent`, `.muted`, `.rule`,
+  `.success`…, `scene.colors[role]` for a role in a variable, or the theme's
+  default styles), never color constants, hex strings or `Color(...)`.
 - No title, subtitle or kicker naming the demo. Text in the frame is content or
   a variant label, and a label is the code that builds the variant, with
   `role="code"`.

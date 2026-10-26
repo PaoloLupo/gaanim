@@ -58,6 +58,7 @@ mod pytext_animator;
 mod pyzones;
 mod rolling_number;
 mod text_motion;
+mod theme_colors;
 mod transition;
 mod updater;
 mod visualization;
@@ -206,6 +207,7 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<color::PyColor>()?;
     m.add_class::<color::PyColorMap>()?;
     m.add_class::<color::PyPalette>()?;
+    m.add_class::<theme_colors::PyThemeColors>()?;
     m.add_class::<brush::PyBrush>()?;
     m.add_class::<brush::PyBackground>()?;
     m.add_class::<pyduplicate::PyDistribution>()?;

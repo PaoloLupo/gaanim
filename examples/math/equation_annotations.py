@@ -20,7 +20,7 @@ SEGMENTS = 6
 SIZE = 1.0
 
 scene = Scene()
-accent = scene.canvas.color("accent")
+accent = scene.colors.accent
 
 
 def energy():

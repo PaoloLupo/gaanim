@@ -20,7 +20,7 @@ STYLING_END = FRAGMENTS_END + 2 * DURATION + HOLD
 SIZE = 0.8
 
 scene = Scene()
-accent = scene.canvas.color("accent")
+accent = scene.colors.accent
 
 # The pendulum's equation of motion. parts() names the mass and gravity
 # terms; "inertia" nests parts given as a mapping, whose names need not be

@@ -16,14 +16,14 @@ HOLD = 0.6
 LIGHT = 1.6
 
 scene = Scene()
-accent = scene.canvas.color("accent")
-success = scene.canvas.color("success")
-warning = scene.canvas.color("warning")
-danger = scene.canvas.color("danger")
-foreground = scene.canvas.color("foreground")
-background = scene.canvas.color("background")
-panel = scene.canvas.color("panel")
-rule = scene.canvas.color("rule")
+accent = scene.colors.accent
+success = scene.colors.success
+warning = scene.colors.warning
+danger = scene.colors.danger
+foreground = scene.colors.foreground
+background = scene.colors.background
+panel = scene.colors.panel
+rule = scene.colors.rule
 geometry = scene.geometry
 
 

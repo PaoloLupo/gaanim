@@ -17,10 +17,10 @@ TURN = 1.4
 HOLD = 0.6
 
 scene = Scene()
-foreground = scene.canvas.color("foreground")
-success = scene.canvas.color("success")
-danger = scene.canvas.color("danger")
-rule = scene.canvas.color("rule")
+foreground = scene.colors.foreground
+success = scene.colors.success
+danger = scene.colors.danger
+rule = scene.colors.rule
 geometry = scene.geometry
 
 

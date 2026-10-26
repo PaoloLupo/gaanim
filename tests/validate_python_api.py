@@ -350,6 +350,69 @@ def stub_theme_names(tree: ast.Module) -> list[str]:
     return []
 
 
+def stub_theme_color_roles(tree: ast.Module) -> list[str]:
+    """Roles the stub's ``ThemeColors`` class lists as ``Color`` properties."""
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef) and node.name == "ThemeColors":
+            return [
+                item.name
+                for item in node.body
+                if isinstance(item, ast.FunctionDef)
+                and any(isinstance(d, ast.Name) and d.id == "property" for d in item.decorator_list)
+                and isinstance(item.returns, ast.Name)
+                and item.returns.id == "Color"
+            ]
+    return []
+
+
+def validate_theme_colors_contract(module: object, tree: ast.Module) -> list[str]:
+    """``scene.colors`` reads the active theme's roles as attributes and by subscript."""
+    failures: list[str] = []
+    rgba = lambda color: (color.r, color.g, color.b, color.a)  # noqa: E731
+    roles = stub_theme_color_roles(tree)
+    if not roles:
+        return ["the stub does not declare ThemeColors role properties"]
+    scene = module.Scene(frame=(16, 9))
+    colors = scene.colors
+    if not isinstance(colors, module.ThemeColors):
+        failures.append("scene.colors is not a ThemeColors")
+    for role in roles:
+        if rgba(getattr(colors, role)) != rgba(scene.canvas.color(role)):
+            failures.append(f"scene.colors.{role} differs from canvas.color({role!r})")
+        if rgba(colors[role]) != rgba(scene.canvas.color(role)):
+            failures.append(f"scene.colors[{role!r}] differs from canvas.color({role!r})")
+    if sorted(colors) != sorted(roles) or len(colors) != len(roles):
+        failures.append(f"the default theme's roles {sorted(colors)} differ from the stub's {sorted(roles)}")
+    if "accent" not in colors or "brand" in colors:
+        failures.append("`in` does not list the theme's roles")
+    try:
+        colors["brand"]
+    except KeyError:
+        pass
+    else:
+        failures.append("scene.colors resolved an unknown role")
+    if colors.palette.colors(3) != scene.canvas.palette().colors(3):
+        failures.append("scene.colors.palette differs from canvas.palette()")
+    before = rgba(colors.background)
+    scene.canvas.set_theme("paper")
+    if rgba(colors.background) == before or rgba(colors.background) != rgba(scene.canvas.color("background")):
+        failures.append("scene.colors did not follow set_theme")
+    branded = module.Scene(frame=(16, 9), theme=module.Theme(colors={"brand": "#123456"}))
+    if "brand" not in branded.colors or rgba(branded.colors["brand"]) != (0x12, 0x34, 0x56, 0xFF):
+        failures.append("scene.colors did not read a role the theme adds")
+    plain = module.Scene(theme=None)
+    if "accent" in plain.colors or len(plain.colors) != 0:
+        failures.append("a scene without a theme lists color roles")
+    for read in (lambda: plain.colors.accent, lambda: plain.colors["accent"]):
+        try:
+            read()
+        except ValueError:
+            pass
+        else:
+            failures.append("scene.colors resolved a role without a theme")
+    return failures
+
+
 def validate_default_theme_contract(module: object, tree: ast.Module) -> list[str]:
     """New scenes use the technical theme; explicit choices and None still win."""
     failures: list[str] = []
@@ -2732,7 +2795,7 @@ def validate_easing_contract(module) -> list[str]:
 def validate_scene_capability_surface(module) -> list[str]:
     """Keep Scene limited to orchestration and scene-owned capabilities."""
     expected = {
-        "assets", "camera", "canvas", "fx", "geometry", "layout", "mechanics",
+        "assets", "camera", "canvas", "colors", "fx", "geometry", "layout", "mechanics",
         "media", "slides", "text", "ui", "viz", "fade_out_all", "link", "persist", "z_layers", "layer",
         "play", "release", "render", "reuse", "sections", "segment", "snapshots", "stop",
         "wait", "time", "cursor", "stops", "random", "noise",
@@ -4318,6 +4381,7 @@ def main() -> int:
     missing.extend(validate_editorial_contract(module))
     missing.extend(validate_theme_typography_contract(module))
     missing.extend(validate_default_theme_contract(module, tree))
+    missing.extend(validate_theme_colors_contract(module, tree))
     missing.extend(validate_stub_attribute_writability(module, tree))
     missing.extend(validate_timeline_cursor_contract(module))
     missing.extend(validate_timeline_labels_contract(module))

@@ -172,7 +172,7 @@ class PointerAnimator:
         radius = _positive(radius, "radius")
         scene = pointer._scene
         ring = scene.geometry.circle(radius).no_fill()
-        ring.stroke(color if color is not None else scene.canvas.color("accent"), 0.025)
+        ring.stroke(color if color is not None else scene.colors.accent, 0.025)
         ring.scale_to(0.2).hidden()
         if len(pointer._where) == 3:
             ring.move_to_3d(*pointer._where).billboard()
@@ -218,9 +218,9 @@ def _build_pointer(
         raise ValueError(f"style must be one of {', '.join(_STYLES)}")
     size = _positive(size, "size")
     where = _point(at, "at")
-    fill = color if color is not None else scene.canvas.color("foreground")
+    fill = color if color is not None else scene.colors.foreground
     shape = scene.geometry.polygon([(x * size, y * size) for x, y in _SHAPES[style]])
-    shape.fill(fill).stroke(scene.canvas.color("background"), 0.016 * size)
+    shape.fill(fill).stroke(scene.colors.background, 0.016 * size)
     group = scene.geometry.group(shape, origin=(0.0, 0.0))
     if len(where) == 3:
         group.move_to_3d(*where).billboard()

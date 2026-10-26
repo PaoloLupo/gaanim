@@ -23,12 +23,12 @@ CIRCLE_V = 0.55
 OFFSET = 0.03
 
 scene = Scene(theme="gaanim")
-violet = scene.canvas.color("accent")
-lilac = scene.canvas.color("chart")
-gold = scene.canvas.color("title")
-paper = scene.canvas.color("foreground")
-ink = scene.canvas.color("background")
-muted = scene.canvas.color("muted")
+violet = scene.colors.accent
+lilac = scene.colors.chart
+gold = scene.colors.title
+paper = scene.colors.foreground
+ink = scene.colors.background
+muted = scene.colors.muted
 geometry = scene.geometry
 geometry.lighting_3d("studio", intensity=1.1)
 curvature = ColorMap.from_colors([violet, lilac, gold])

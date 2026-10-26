@@ -13,10 +13,10 @@ from gaanim import BoxStyle, Scene, Zones, stagger
 
 scene = Scene()
 L = scene.layout
-accent = scene.canvas.color("accent")
-panel = scene.canvas.color("panel")
-rule = scene.canvas.color("rule")
-dark = scene.canvas.color("background")
+accent = scene.colors.accent
+panel = scene.colors.panel
+rule = scene.colors.rule
+dark = scene.colors.background
 seeks = []
 
 lane_style = BoxStyle(padding="8px", gap="8px", background=panel, border=rule)

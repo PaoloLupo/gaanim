@@ -14,11 +14,11 @@ DURATION = 1.4
 HOLD = 0.6
 
 scene = Scene()
-accent = scene.canvas.color("accent")
-foreground = scene.canvas.color("foreground")
-rule = scene.canvas.color("rule")
-success = scene.canvas.color("success")
-danger = scene.canvas.color("danger")
+accent = scene.colors.accent
+foreground = scene.colors.foreground
+rule = scene.colors.rule
+success = scene.colors.success
+danger = scene.colors.danger
 
 
 def table(entries):

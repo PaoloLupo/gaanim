@@ -17,8 +17,8 @@ MOVE = 1.6
 HOLD = 0.6
 
 scene = Scene()
-accent = scene.canvas.color("accent")
-muted = scene.canvas.color("muted")
+accent = scene.colors.accent
+muted = scene.colors.muted
 OUTLINE = StrokeStyle(muted, 0.02, dashes=[0.08, 0.06])
 
 # A five-pointed star drawn as one self-crossing polygon.

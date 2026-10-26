@@ -17,11 +17,11 @@ STEP = 0.8
 HOLD = 0.6
 
 scene = Scene()
-accent = scene.canvas.color("accent")
-success = scene.canvas.color("success")
-danger = scene.canvas.color("danger")
-warning = scene.canvas.color("warning")
-foreground = scene.canvas.color("foreground")
+accent = scene.colors.accent
+success = scene.colors.success
+danger = scene.colors.danger
+warning = scene.colors.warning
+foreground = scene.colors.foreground
 
 # Shapes are about 1.9 units across; R is half of that.
 R = 0.95

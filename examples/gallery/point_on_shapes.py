@@ -12,11 +12,11 @@ import os
 from gaanim import Easing, Scene, Zones, stagger
 
 scene = Scene(theme="gaanim")
-violet = scene.canvas.color("accent")
-gold = scene.canvas.color("title")
-lilac = scene.canvas.color("chart")
-paper = scene.canvas.color("foreground")
-mist = scene.canvas.color("rule")
+violet = scene.colors.accent
+gold = scene.colors.title
+lilac = scene.colors.chart
+paper = scene.colors.foreground
+mist = scene.colors.rule
 geometry = scene.geometry
 
 zones = scene.layout.zones(Zones.columns(4, gap="48px", padding="page_padding"))

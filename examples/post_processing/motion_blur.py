@@ -14,7 +14,7 @@ import os
 from gaanim import Easing, Scene, Zones
 
 scene = Scene()
-rule = scene.canvas.color("rule")
+rule = scene.colors.rule
 
 # A 360 degree shutter stays open for a whole frame (180 is the film
 # standard, 720 the maximum), sampled 32 times; phase= moves the shutter

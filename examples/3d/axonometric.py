@@ -16,12 +16,12 @@ MOVE = 1.6
 HOLD = 0.8
 
 scene = Scene()
-accent = scene.canvas.color("accent")
-rule = scene.canvas.color("rule")
-muted = scene.canvas.color("muted")
-chart = scene.canvas.color("chart")
-ink = scene.canvas.color("background")
-foreground = scene.canvas.color("foreground")
+accent = scene.colors.accent
+rule = scene.colors.rule
+muted = scene.colors.muted
+chart = scene.colors.chart
+ink = scene.colors.background
+foreground = scene.colors.foreground
 
 # A small building, in model units: a floor, walls (the front one with a
 # door), an L-shaped roof slab, three columns and a beam above it.

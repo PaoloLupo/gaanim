@@ -16,11 +16,11 @@ CROSS = 2.0
 HOLD = 1.0
 
 scene = Scene()
-background = scene.canvas.color("background")
-foreground = scene.canvas.color("foreground")
-accent = scene.canvas.color("accent")
-success = scene.canvas.color("success")
-danger = scene.canvas.color("danger")
+background = scene.colors.background
+foreground = scene.colors.foreground
+accent = scene.colors.accent
+success = scene.colors.success
+danger = scene.colors.danger
 
 BAND = 0.7
 DISC = Brush.radial([foreground, accent, danger], radius=0.62)

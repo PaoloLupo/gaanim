@@ -18,12 +18,12 @@ HOLD = 0.6
 FADE = 0.8
 
 scene = Scene()
-accent = scene.canvas.color("accent")
-chart = scene.canvas.color("chart")
-foreground = scene.canvas.color("foreground")
-muted = scene.canvas.color("muted")
-rule = scene.canvas.color("rule")
-success = scene.canvas.color("success")
+accent = scene.colors.accent
+chart = scene.colors.chart
+foreground = scene.colors.foreground
+muted = scene.colors.muted
+rule = scene.colors.rule
+success = scene.colors.success
 
 # Where each segment starts on the timeline, read from scene.cursor.
 starts = {}
@@ -100,7 +100,7 @@ def x_at(t):
 mid = stage.center[1]
 pieces = []
 names = list(starts)
-background = scene.canvas.color("background")
+background = scene.colors.background
 for index, name in enumerate(names):
     start = starts[name]
     stop = starts[names[index + 1]] if index + 1 < len(names) else end

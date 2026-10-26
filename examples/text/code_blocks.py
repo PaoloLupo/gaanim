@@ -26,9 +26,9 @@ SOURCES = {
 }
 
 scene = Scene()
-success = scene.canvas.color("success")
-muted = scene.canvas.color("muted")
-foreground = scene.canvas.color("foreground")
+success = scene.colors.success
+muted = scene.colors.muted
+foreground = scene.colors.foreground
 
 
 def python(**options):

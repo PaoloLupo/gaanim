@@ -20,10 +20,10 @@ LEAD = 0.3  # where on its strip each row's cursor sits
 GROW = 0.6  # length of the animation that carries the sound
 
 scene = Scene()
-accent = scene.canvas.color("accent")
-foreground = scene.canvas.color("foreground")
-muted = scene.canvas.color("muted")
-rule = scene.canvas.color("rule")
+accent = scene.colors.accent
+foreground = scene.colors.foreground
+muted = scene.colors.muted
+rule = scene.colors.rule
 
 
 class Strip:

@@ -13,7 +13,7 @@ from gaanim import Scene, Zones
 CLIP = "assets/clip.mp4"  # 480 x 270 px, 4 seconds at 30 fps, with a tone
 
 scene = Scene()
-rule = scene.canvas.color("rule")
+rule = scene.colors.rule
 HOLD = 0.6
 
 

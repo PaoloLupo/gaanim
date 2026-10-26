@@ -16,10 +16,10 @@ STEP = 0.6
 HOLD = 0.8
 
 scene = Scene()
-accent = scene.canvas.color("accent")
-muted = scene.canvas.color("muted")
-panel = scene.canvas.color("panel")
-foreground = scene.canvas.color("foreground")
+accent = scene.colors.accent
+muted = scene.colors.muted
+panel = scene.colors.panel
+foreground = scene.colors.foreground
 
 # The central Andes, from 1° N to 19° S: the latitudes fix the scale and
 # center_lon picks the meridian in the middle of the region.

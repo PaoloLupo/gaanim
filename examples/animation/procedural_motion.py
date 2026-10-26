@@ -15,9 +15,9 @@ RUN = 4.0
 CROSSING = 4.0
 
 scene = Scene()
-foreground = scene.canvas.color("foreground")
-muted = scene.canvas.color("muted")
-rule = scene.canvas.color("rule")
+foreground = scene.colors.foreground
+muted = scene.colors.muted
+rule = scene.colors.rule
 
 
 def rows(count, label_share):
@@ -119,7 +119,7 @@ scene.play(speed.animate.set(0.0).duration(2.0).easing(Easing.SMOOTH))
 random_start = scene.cursor
 scene.segment("random")
 panels = scene.layout.zones(Zones.grid(rows=2, columns=3, gap="48px", padding="page_padding"))
-palette = [scene.canvas.color(role) for role in ("accent", "success", "warning", "danger", "chart")]
+palette = [scene.colors[role] for role in ("accent", "success", "warning", "danger", "chart")]
 
 
 def panel(index, label):
