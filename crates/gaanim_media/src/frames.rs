@@ -457,14 +457,22 @@ mod tests {
         assert_eq!(frames.len(), 20);
         let opaque = |index: usize| {
             let picture = frames.picture(index).unwrap();
-            picture.data.data().chunks_exact(4).filter(|pixel| pixel[3] > 128).count()
+            picture
+                .data
+                .data()
+                .chunks_exact(4)
+                .filter(|pixel| pixel[3] > 128)
+                .count()
         };
         // Each frame shows the two dots alone: one that kept the dots of
         // the frames before would cover more of the canvas.
         let first = opaque(0);
         for index in 1..frames.len() {
             let count = opaque(index);
-            assert!(count < first + first / 10, "frame {index}: {first} → {count}");
+            assert!(
+                count < first + first / 10,
+                "frame {index}: {first} → {count}"
+            );
         }
     }
 
