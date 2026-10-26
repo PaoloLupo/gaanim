@@ -9166,6 +9166,8 @@ class Video(Drawable):
 
     Use either one legacy Scene.play([video]) activation or finite segments.
     Mixing modes on one instance raises ValueError. Fluent setters retain Video.
+    ``MediaLibrary.animated_image`` and ``MediaLibrary.image_sequence`` return
+    silent videos of image frames, which play the same way.
     """
     def frame(self, width: float, height: float, fit: Literal["contain", "cover", "stretch"] = "contain") -> Self:
         """Set a centered destination frame in scene units and return this object.
@@ -9236,7 +9238,10 @@ class Video(Drawable):
         ...
     @property
     def frame_rate(self) -> float:
-        """Source frames per second used by deterministic timeline sampling."""
+        """Source frames per second used by deterministic timeline sampling.
+
+        For an animated image, the rate of its shortest frame.
+        """
         ...
     def segment(self, *, start: float, end: float, speed: Optional[float] = None, audio: Optional[bool] = None, volume: Optional[float] = None) -> VideoSegment:
         """Declare a finite selection of absolute source seconds for Scene.play.
@@ -11150,6 +11155,73 @@ class MediaLibrary:
         its selected output duration to the play batch. Requires ``ffmpeg`` and
         ``ffprobe`` and raises ValueError for invalid ranges or RuntimeError for
         media failures.
+        """
+        ...
+    def animated_image(
+        self,
+        path: str | os.PathLike[str],
+        *,
+        width: Optional[float] = None,
+        height: Optional[float] = None,
+        fit: Literal["contain", "cover", "stretch"] = "contain",
+        crop: Optional[tuple[float, float, float, float]] = None,
+        quality: Literal["low", "medium", "high"] = "medium",
+        offset: float = 0.0,
+        duration: Optional[float] = None,
+        loop: bool = True,
+        speed: float = 1.0,
+    ) -> Video:
+        """Declare an animated GIF, WebP or PNG (APNG) as a silent ``Video``.
+
+        Its frames are decoded once and play on the scene timeline like a
+        video's: inert until ``Scene.play``, with ``offset``, ``duration``,
+        ``loop``, ``speed`` and ``segment`` in source seconds, and a seek
+        shows the frame playing reaches. Each frame lasts as long as the file
+        says; one of 10 ms or less lasts 100 ms, as browsers show it. It
+        loops by default, so ``scene.play([sticker])`` starts it without
+        lengthening the play. A still image is one frame. It needs no
+        FFmpeg, so it also plays in the web playground and records into
+        ``.gaanim`` bundles. A missing file raises ``FileNotFoundError``; a
+        file that is not an image, frames that take more than 512 MB
+        decoded, or invalid sizes and timing raise ``ValueError``.
+
+        Example:
+            sticker = scene.media.animated_image("assets/wave.gif", width=2)
+            scene.play([sticker])
+        """
+        ...
+    def image_sequence(
+        self,
+        frames: str | os.PathLike[str] | Sequence[str | os.PathLike[str]],
+        *,
+        fps: float = 24.0,
+        width: Optional[float] = None,
+        height: Optional[float] = None,
+        fit: Literal["contain", "cover", "stretch"] = "contain",
+        crop: Optional[tuple[float, float, float, float]] = None,
+        quality: Literal["low", "medium", "high"] = "medium",
+        offset: float = 0.0,
+        duration: Optional[float] = None,
+        loop: bool = False,
+        speed: float = 1.0,
+    ) -> Video:
+        """Declare numbered image files, shown ``fps`` per second, as a silent ``Video``.
+
+        ``frames`` is a pattern whose file name holds ``%d``, which a number
+        of any length takes, or ``%0Nd``, which numbers of exactly N digits
+        take (``"render/frame_%04d.png"``), and names the files in increasing
+        number; or a sequence of paths, in order. Every file must have the
+        first one's size, and each is read when its frame is shown, so long
+        sequences do not stay in memory. It plays like ``animated_image``
+        (but does not loop by default: a finite sequence lengthens its play
+        like a video). A pattern that matches no file or a missing file
+        raises ``FileNotFoundError``; a malformed pattern, files of different
+        sizes, a non-positive ``fps`` or invalid timing raise ``ValueError``,
+        and ``frames`` of another type ``TypeError``.
+
+        Example:
+            render = scene.media.image_sequence("assets/spin_%02d.png", fps=12, loop=True)
+            scene.play([render])
         """
         ...
     def lottie(

@@ -368,6 +368,54 @@ print(clip.source_duration, clip.frame_rate, clip.source_width, clip.source_heig
 ```
 ]
 
+== Imágenes animadas y secuencias
+
+Un GIF, WebP o PNG animado (APNG) y una secuencia de imágenes numeradas son
+videos mudos de sus fotogramas: devuelven un `Video` que se reproduce desde
+el `scene.play` que lo incluye, con `offset`, `duration`, `loop`, `speed` y
+`segment` en segundos de la fuente, y un seek muestra el fotograma al que
+llega la reproducción. No necesitan FFmpeg, así que también funcionan en el
+playground y se graban en los paquetes `.gaanim`. Su `frame_rate` es el de su
+fotograma más corto.
+
+#api-entry(
+  name: "MediaLibrary.animated_image",
+  kind: "factory",
+  params: ((name: "path", type: "str | os.PathLike", default: none, desc: [GIF, WebP o PNG animado local; una imagen fija es un solo fotograma.]), (name: "width / height / fit / crop / quality", type: "—", default: "—", desc: [Igual que en `image`.]), (name: "offset / duration / speed", type: "float", default: "—", desc: [Igual que en `video`.]), (name: "loop", type: "bool", default: "True", desc: [Repite la animación; sin bucle se queda en su último fotograma.])),
+  desc: [Decodifica todos los fotogramas una vez, cada uno con la duración que da el archivo; uno de 10 ms o menos dura 100 ms, como lo muestran los navegadores. Como se repite por defecto, `scene.play([sticker])` lo inicia sin alargar la jugada. Un archivo inexistente lanza `FileNotFoundError`; uno que no es una imagen, fotogramas que ocupan más de 512 MB decodificados, o tamaños y tiempos inválidos lanzan `ValueError`.],
+)[
+```python
+# show-code: true
+from gaanim import Scene
+scene = Scene(frame=(16, 9))
+sticker = scene.media.animated_image("assets/pulse.gif", width=3)
+slow = scene.media.animated_image("assets/pulse.gif", width=3, speed=0.5)
+sticker.move_to(-2.5, 0)
+slow.move_to(2.5, 0)
+scene.play([sticker, slow])
+scene.wait(1.2)
+# output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
+  name: "MediaLibrary.image_sequence",
+  kind: "factory",
+  params: ((name: "frames", type: "str | os.PathLike | Sequence", default: none, desc: [Un patrón cuyo nombre de archivo lleva `%d`, que toma un número de cualquier longitud, o `%0Nd`, que toma números de exactamente N cifras (`"render/frame_%04d.png"`), y nombra los archivos por número creciente; o una secuencia de rutas, en orden.]), (name: "fps", type: "float", default: "24.0", desc: [Fotogramas por segundo, positivo.]), (name: "width / height / fit / crop / quality", type: "—", default: "—", desc: [Igual que en `image`.]), (name: "offset / duration / loop / speed", type: "—", default: "—", desc: [Igual que en `video`; sin bucle por defecto.])),
+  desc: [Muestra un archivo por fotograma. Todos deben tener el tamaño del primero, y cada uno se lee cuando se muestra, así que una secuencia larga no queda en memoria. Una secuencia finita alarga su jugada como un video. Un patrón sin coincidencias o un archivo inexistente lanzan `FileNotFoundError`; un patrón mal formado, archivos de tamaños distintos, un `fps` no positivo o tiempos inválidos lanzan `ValueError`, y `frames` de otro tipo, `TypeError`.],
+)[
+```python
+# show-code: true
+from gaanim import Scene
+scene = Scene(frame=(16, 9))
+spin = scene.media.image_sequence("assets/spin/spin_%02d.png", fps=12, width=3)
+scene.play([spin])
+# output: preview.webp
+scene.render()
+```
+]
+
 == Lottie y dotLottie
 
 Animaciones vectoriales exportadas desde After Effects, Cavalry u otras

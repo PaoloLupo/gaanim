@@ -28,6 +28,87 @@ use crate::transition::PyTransitionType;
 use crate::visualization::{PyParameter, PyVariable, extract_scalar_source};
 use gaanim_layout::{Align, LayoutNodeKind};
 
+/// The options of a video drawable, from the arguments the media factories
+/// share.
+#[allow(clippy::too_many_arguments)]
+fn video_options(
+    width: Option<f64>,
+    height: Option<f64>,
+    fit: &str,
+    crop: Option<(f64, f64, f64, f64)>,
+    quality: &str,
+    offset: f64,
+    duration: Option<f64>,
+    looping: bool,
+    speed: f64,
+    audio: bool,
+    volume: f64,
+) -> PyResult<VideoOptions> {
+    let fit = match fit {
+        "contain" => ImageFit::Contain,
+        "cover" => ImageFit::Cover,
+        "stretch" => ImageFit::Stretch,
+        _ => {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "fit must be 'contain', 'cover', or 'stretch'",
+            ));
+        }
+    };
+    Ok(VideoOptions {
+        image: ImageOptions {
+            width,
+            height,
+            fit,
+            crop: crop.map(|(x, y, width, height)| ImageCrop {
+                x,
+                y,
+                width,
+                height,
+            }),
+            quality: image_quality(quality)?,
+        },
+        offset,
+        duration,
+        looping,
+        speed,
+        audio,
+        volume,
+    })
+}
+
+/// The Python exception of a failed video, animated image or sequence.
+fn video_load_error(error: gaanim_api::canvas::VideoLoadError) -> PyErr {
+    use gaanim_api::canvas::FramesError;
+    use gaanim_api::canvas::VideoLoadError;
+    match &error {
+        VideoLoadError::Options(_)
+        | VideoLoadError::InvalidNumber { .. }
+        | VideoLoadError::OffsetOutOfRange
+        | VideoLoadError::DurationOutOfRange
+        | VideoLoadError::Frames(
+            FramesError::Decode { .. }
+            | FramesError::Empty { .. }
+            | FramesError::TooLarge { .. }
+            | FramesError::NoFiles
+            | FramesError::SizeMismatch { .. }
+            | FramesError::InvalidFps
+            | FramesError::InvalidPattern { .. },
+        ) => pyo3::exceptions::PyValueError::new_err(error.to_string()),
+        VideoLoadError::Frames(FramesError::NoMatches { .. }) => {
+            pyo3::exceptions::PyFileNotFoundError::new_err(error.to_string())
+        }
+        VideoLoadError::Frames(FramesError::Read { source, .. })
+            if source.kind() == std::io::ErrorKind::NotFound =>
+        {
+            pyo3::exceptions::PyFileNotFoundError::new_err(error.to_string())
+        }
+        VideoLoadError::Frames(FramesError::Read { .. }) => {
+            pyo3::exceptions::PyOSError::new_err(error.to_string())
+        }
+        _ => pyo3::exceptions::PyRuntimeError::new_err(error.to_string()),
+    }
+}
+
 pub(crate) fn image_quality(value: &str) -> PyResult<gaanim_core::peniko::ImageQuality> {
     match value {
         "low" => Ok(gaanim_core::peniko::ImageQuality::Low),
@@ -6525,50 +6606,110 @@ impl PyMediaLibrary {
         volume: f64,
     ) -> PyResult<Py<PyVideo>> {
         crate::custom::ensure_authoring_allowed()?;
-        let fit = match fit {
-            "contain" => ImageFit::Contain,
-            "cover" => ImageFit::Cover,
-            "stretch" => ImageFit::Stretch,
-            _ => {
-                return Err(pyo3::exceptions::PyValueError::new_err(
-                    "fit must be 'contain', 'cover', or 'stretch'",
-                ));
-            }
-        };
-        let options = VideoOptions {
-            image: ImageOptions {
-                width,
-                height,
-                fit,
-                crop: crop.map(|(x, y, width, height)| ImageCrop {
-                    x,
-                    y,
-                    width,
-                    height,
-                }),
-                quality: image_quality(quality)?,
-            },
-            offset,
-            duration,
-            looping: r#loop,
-            speed,
-            audio,
-            volume,
-        };
+        let options = video_options(
+            width, height, fit, crop, quality, offset, duration, r#loop, speed, audio, volume,
+        )?;
         let inner = self
             .inner
             .lock()
             .expect("scene canvas poisoned")
             .video_with_options(path, options)
-            .map_err(|error| match error {
-                gaanim_api::canvas::VideoLoadError::Options(_)
-                | gaanim_api::canvas::VideoLoadError::InvalidNumber { .. }
-                | gaanim_api::canvas::VideoLoadError::OffsetOutOfRange
-                | gaanim_api::canvas::VideoLoadError::DurationOutOfRange => {
-                    pyo3::exceptions::PyValueError::new_err(error.to_string())
-                }
-                _ => pyo3::exceptions::PyRuntimeError::new_err(error.to_string()),
-            })?;
+            .map_err(video_load_error)?;
+        Py::new(py, PyVideo::initializer(inner))
+    }
+
+    /// Load the frames of an animated GIF, WebP or PNG as a silent Video.
+    #[pyo3(signature = (
+        path,
+        *,
+        width=None,
+        height=None,
+        fit="contain",
+        crop=None,
+        quality="medium",
+        offset=0.0,
+        duration=None,
+        r#loop=true,
+        speed=1.0,
+    ))]
+    #[allow(clippy::too_many_arguments)]
+    fn animated_image(
+        &self,
+        py: Python<'_>,
+        path: PathBuf,
+        width: Option<f64>,
+        height: Option<f64>,
+        fit: &str,
+        crop: Option<(f64, f64, f64, f64)>,
+        quality: &str,
+        offset: f64,
+        duration: Option<f64>,
+        r#loop: bool,
+        speed: f64,
+    ) -> PyResult<Py<PyVideo>> {
+        crate::custom::ensure_authoring_allowed()?;
+        let options = video_options(
+            width, height, fit, crop, quality, offset, duration, r#loop, speed, false, 1.0,
+        )?;
+        let inner = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .animated_image_with_options(path, options)
+            .map_err(video_load_error)?;
+        Py::new(py, PyVideo::initializer(inner))
+    }
+
+    /// Show numbered image files one after another as a silent Video.
+    #[pyo3(signature = (
+        frames,
+        *,
+        fps=24.0,
+        width=None,
+        height=None,
+        fit="contain",
+        crop=None,
+        quality="medium",
+        offset=0.0,
+        duration=None,
+        r#loop=false,
+        speed=1.0,
+    ))]
+    #[allow(clippy::too_many_arguments)]
+    fn image_sequence(
+        &self,
+        py: Python<'_>,
+        frames: &Bound<'_, PyAny>,
+        fps: f64,
+        width: Option<f64>,
+        height: Option<f64>,
+        fit: &str,
+        crop: Option<(f64, f64, f64, f64)>,
+        quality: &str,
+        offset: f64,
+        duration: Option<f64>,
+        r#loop: bool,
+        speed: f64,
+    ) -> PyResult<Py<PyVideo>> {
+        crate::custom::ensure_authoring_allowed()?;
+        let options = video_options(
+            width, height, fit, crop, quality, offset, duration, r#loop, speed, false, 1.0,
+        )?;
+        let mut scene = self.inner.lock().expect("scene canvas poisoned");
+        let paths: Vec<PathBuf> = match frames.extract::<PathBuf>() {
+            Ok(pattern) => scene
+                .numbered_files(pattern)
+                .map_err(video_load_error)?,
+            Err(_) => frames.extract::<Vec<PathBuf>>().map_err(|_| {
+                pyo3::exceptions::PyTypeError::new_err(
+                    "frames must be a numbered pattern such as 'frame_%04d.png' or a sequence of paths",
+                )
+            })?,
+        };
+        let inner = scene
+            .image_sequence_with_options(&paths, fps, options)
+            .map_err(video_load_error)?;
+        drop(scene);
         Py::new(py, PyVideo::initializer(inner))
     }
 

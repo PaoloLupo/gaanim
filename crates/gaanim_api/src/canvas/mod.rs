@@ -116,6 +116,7 @@ pub use canvas_impl::{
 };
 pub use canvas_impl::{InsertPosition, ScheduleLabel};
 pub use canvas_impl::{background_image, clear_asset_caches, forget_assets, image_overlay};
+pub use gaanim_media::frames::{FramesError, MAX_ANIMATED_BYTES, VideoFrames};
 pub use gaanim_media::narration::{MarkerSource, NARRATION_DIR, ScriptSection, TakeFiles};
 pub use narration::{
     LiveTakeSpec, MarkerSpec, NarrationManifest, ScriptSpec, TextSource, VoiceoverError,

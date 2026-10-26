@@ -285,11 +285,12 @@ fn post_passes(world: &World, shaders: &[PostProcessShader], time: f64) -> Resul
 /// Features the bundle format does not record yet; recording refuses them
 /// instead of writing a bundle that plays back differently.
 fn unsupported_content(world: &mut World) -> Option<&'static str> {
+    // Animated images and image sequences draw frames already in memory or
+    // on disk, which record like any image; video files need FFmpeg.
     if world
-        .query_filtered::<(), With<gaanim_media::VideoPlayback>>()
+        .query::<&gaanim_media::VideoPlayback>()
         .iter(world)
-        .next()
-        .is_some()
+        .any(|video| video.frames.is_none())
     {
         return Some("video");
     }

@@ -13,6 +13,8 @@ bevy = { workspace = true }
 crossbeam-channel = { workspace = true }
 # Already built for Bevy's WAV support; reads and writes narration takes.
 hound = "3.5"
+# Frames of animated GIF, WebP and PNG images and of image sequences.
+image = { version = "0.25", default-features = false, features = ["gif", "jpeg", "png", "webp"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

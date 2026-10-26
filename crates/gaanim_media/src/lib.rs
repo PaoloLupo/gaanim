@@ -20,6 +20,7 @@ use gaanim_timeline::timeline::Timeline;
 use serde::Deserialize;
 
 pub mod analysis;
+pub mod frames;
 pub mod narration;
 
 /// Metadata read from the first video stream in a media file.
@@ -370,6 +371,9 @@ pub struct VideoPlayback {
     pub active: bool,
     /// Empty preserves legacy playback; otherwise intervals are sorted by scene start.
     pub intervals: Vec<VideoInterval>,
+    /// The frames of an animated image or an image sequence, shown instead
+    /// of decoding `path` with FFmpeg; `metadata` describes them.
+    pub frames: Option<Arc<frames::VideoFrames>>,
 }
 
 fn append_atempo_args(filter: &mut String, mut tempo: f64) {
@@ -481,7 +485,11 @@ impl VideoPlayback {
     }
 
     pub fn frame_index(&self, scene_time: f64) -> u64 {
-        (self.source_time(scene_time) * self.metadata.fps).floor() as u64
+        let time = self.source_time(scene_time);
+        match &self.frames {
+            Some(frames) => frames.index_at(time) as u64,
+            None => (time * self.metadata.fps).floor() as u64,
+        }
     }
 }
 
@@ -983,6 +991,45 @@ fn settle_failed_frame(world: &mut World, entity: Entity, frame: u64) {
     }
 }
 
+/// Show frame `index` of `frames`, which need no FFmpeg: decoded frames at
+/// once, and a sequence's file once it is read (and cached like a video
+/// frame).
+fn show_frame(
+    world: &mut World,
+    decoder: &mut VideoDecoder,
+    entity: Entity,
+    path: &Path,
+    frames: &frames::VideoFrames,
+    index: u64,
+) {
+    let picture = match frames.file(index as usize) {
+        Some(file) => {
+            let key = (file.to_path_buf(), 0);
+            match decoder.cache.get(&key).cloned() {
+                Some(image) => Ok(image),
+                None => frames.picture(index as usize).inspect(|image| {
+                    decoder.insert_cache(key, image.clone());
+                }),
+            }
+        }
+        None => frames.picture(index as usize),
+    };
+    match picture {
+        Ok(image) => {
+            if let Some(mut raster) = world.get_mut::<RasterImage>(entity) {
+                replace_raster_image(&mut raster, image);
+            }
+            if let Some(mut playback) = world.get_mut::<VideoPlayback>(entity) {
+                playback.last_frame = Some(index);
+            }
+        }
+        Err(error) => {
+            decoder.report_failure(path, error);
+            settle_failed_frame(world, entity, index);
+        }
+    }
+}
+
 fn sample_video_system(world: &mut World) {
     // Frames follow stepped time; preview audio keeps the playhead.
     let scene_time = world.resource::<Timeline>().evaluation_time();
@@ -1037,12 +1084,17 @@ fn sample_video_system(world: &mut World) {
                 playback.metadata.clone(),
                 playback.frame_index(stepped(step, scene_time)),
                 playback.last_frame,
+                playback.frames.clone(),
             )
         })
         .collect::<Vec<_>>();
 
-    for (entity, path, metadata, frame, last_frame) in targets {
+    for (entity, path, metadata, frame, last_frame, frames) in targets {
         if last_frame == Some(frame) {
+            continue;
+        }
+        if let Some(frames) = frames {
+            show_frame(world, &mut decoder, entity, &path, &frames, frame);
             continue;
         }
         if let Some(image) = decoder.cache.get(&(path.clone(), frame)).cloned() {
@@ -1508,6 +1560,7 @@ mod tests {
             last_frame: None,
             active: true,
             intervals: Vec::new(),
+            frames: None,
         }
     }
 
@@ -1930,6 +1983,80 @@ mod tests {
         sample_video_system(&mut world);
         let next = request_rx.try_recv().expect("the next frame is requested");
         assert_ne!(next.frame, first.frame);
+    }
+
+    #[test]
+    fn frames_in_memory_or_files_show_without_ffmpeg_in_both_modes() {
+        let folder = tempfile::tempdir().unwrap();
+        let paths: Vec<PathBuf> = [[255, 0, 0, 255], [0, 255, 0, 255]]
+            .iter()
+            .enumerate()
+            .map(|(index, color)| {
+                let path = folder.path().join(format!("frame_{index}.png"));
+                image::RgbaImage::from_pixel(2, 2, image::Rgba(*color))
+                    .save(&path)
+                    .unwrap();
+                path
+            })
+            .collect();
+        for mode in [
+            VideoSamplingMode::Deterministic,
+            VideoSamplingMode::Realtime,
+        ] {
+            let (request_tx, request_rx) = crossbeam_channel::unbounded();
+            let (_response_tx, response_rx) = crossbeam_channel::unbounded();
+            let decoder = VideoDecoder {
+                request_tx,
+                response_rx,
+                pending: HashMap::new(),
+                generation: 0,
+                cache: HashMap::new(),
+                lru: VecDeque::new(),
+                cache_bytes: 0,
+                sequential: HashMap::new(),
+                warned: Default::default(),
+                realtime_process_spawns: Arc::new(AtomicUsize::new(0)),
+                realtime_peak_sessions: Arc::new(AtomicUsize::new(0)),
+            };
+            let mut world = World::new();
+            world.insert_resource(Timeline::new());
+            world.insert_resource(mode);
+            world.insert_resource(decoder);
+            let frames = Arc::new(frames::VideoFrames::sequence(paths.clone(), 2.0).unwrap());
+            let mut video = playback(false, 1.0);
+            video.metadata = frames.metadata();
+            video.scene_start = 0.0;
+            video.source_offset = 0.0;
+            video.source_duration = frames.duration();
+            video.frames = Some(frames);
+            let entity = world.spawn((gaanim_scene::RasterImage::none(), video)).id();
+            let shown = |world: &World| {
+                let raster = world.get::<RasterImage>(entity).unwrap();
+                raster.image.as_ref().unwrap().image.data.data()[..4].to_vec()
+            };
+
+            sample_video_system(&mut world);
+            assert_eq!(
+                world.get::<VideoPlayback>(entity).unwrap().last_frame,
+                Some(0)
+            );
+            assert_eq!(shown(&world), [255, 0, 0, 255], "{mode:?}");
+            world.resource_mut::<Timeline>().current_time = 0.75;
+            sample_video_system(&mut world);
+            assert_eq!(
+                world.get::<VideoPlayback>(entity).unwrap().last_frame,
+                Some(1)
+            );
+            assert_eq!(shown(&world), [0, 255, 0, 255], "{mode:?}");
+            // Past the end the last frame stays.
+            world.resource_mut::<Timeline>().current_time = 9.0;
+            sample_video_system(&mut world);
+            assert_eq!(shown(&world), [0, 255, 0, 255], "{mode:?}");
+            assert!(request_rx.try_recv().is_err(), "no FFmpeg request");
+            // A sequence's files are read once and cached.
+            let decoder = world.resource::<VideoDecoder>();
+            assert!(decoder.cache.contains_key(&(paths[1].clone(), 0)));
+        }
     }
 
     #[test]
