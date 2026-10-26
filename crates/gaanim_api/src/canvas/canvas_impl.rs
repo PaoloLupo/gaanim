@@ -2057,6 +2057,8 @@ pub enum VideoLoadError {
     OffsetOutOfRange,
     #[error("video duration extends beyond the end of the source")]
     DurationOutOfRange,
+    #[error(transparent)]
+    Frames(#[from] gaanim_media::frames::FramesError),
 }
 
 /// Failures while loading or configuring a Lottie JSON composition.
@@ -5040,6 +5042,68 @@ impl SceneModel {
         path: impl AsRef<Path>,
         options: VideoOptions,
     ) -> Result<VideoClip, VideoLoadError> {
+        Self::check_video_options(&options)?;
+        let path = self.resolve_asset_path(path);
+        let metadata = gaanim_media::probe_video(&path)?;
+        self.spawn_video(path, metadata, None, options)
+    }
+
+    /// Load the frames of an animated GIF, WebP or PNG (APNG) as a silent
+    /// video: it plays, loops, changes speed and takes segments like one,
+    /// without FFmpeg. A still image is one frame.
+    pub fn animated_image_with_options(
+        &mut self,
+        path: impl AsRef<Path>,
+        options: VideoOptions,
+    ) -> Result<VideoClip, VideoLoadError> {
+        Self::check_video_options(&options)?;
+        let path = self.resolve_asset_path(path);
+        let frames = gaanim_media::frames::VideoFrames::decode(&path)?;
+        let metadata = frames.metadata();
+        let options = VideoOptions {
+            audio: false,
+            ..options
+        };
+        self.spawn_video(path, metadata, Some(Arc::new(frames)), options)
+    }
+
+    /// Show image files one after another, `fps` per second, as a silent
+    /// video like [`Self::animated_image_with_options`]. Each file is read
+    /// when its frame is shown; every one must have the first one's size.
+    pub fn image_sequence_with_options(
+        &mut self,
+        paths: &[PathBuf],
+        fps: f64,
+        options: VideoOptions,
+    ) -> Result<VideoClip, VideoLoadError> {
+        Self::check_video_options(&options)?;
+        let paths: Vec<PathBuf> = paths
+            .iter()
+            .map(|path| self.resolve_asset_path(path))
+            .collect();
+        let frames = gaanim_media::frames::VideoFrames::sequence(paths.clone(), fps)?;
+        let metadata = frames.metadata();
+        let options = VideoOptions {
+            audio: false,
+            ..options
+        };
+        self.spawn_video(paths[0].clone(), metadata, Some(Arc::new(frames)), options)
+    }
+
+    /// The files a numbered `pattern` such as `render/frame_%04d.png` names,
+    /// by increasing number (see [`gaanim_media::frames::numbered_files`]);
+    /// its folder is found like other assets.
+    pub fn numbered_files(
+        &self,
+        pattern: impl AsRef<Path>,
+    ) -> Result<Vec<PathBuf>, VideoLoadError> {
+        let pattern = pattern.as_ref();
+        let folder = self.resolve_asset_path(pattern.parent().unwrap_or(Path::new("")));
+        let name = pattern.file_name().unwrap_or_default();
+        Ok(gaanim_media::frames::numbered_files(&folder.join(name))?)
+    }
+
+    fn check_video_options(options: &VideoOptions) -> Result<(), VideoLoadError> {
         for (name, value, positive) in [
             ("offset", options.offset, false),
             ("speed", options.speed, true),
@@ -5060,9 +5124,18 @@ impl SceneModel {
                 requirement: "positive",
             });
         }
+        Ok(())
+    }
 
-        let path = self.resolve_asset_path(path);
-        let metadata = gaanim_media::probe_video(&path)?;
+    /// A video drawable of `path`, or of `frames` when given, described by
+    /// `metadata`.
+    fn spawn_video(
+        &mut self,
+        path: PathBuf,
+        metadata: gaanim_media::VideoMetadata,
+        frames: Option<Arc<gaanim_media::frames::VideoFrames>>,
+        options: VideoOptions,
+    ) -> Result<VideoClip, VideoLoadError> {
         if options.offset >= metadata.duration {
             return Err(VideoLoadError::OffsetOutOfRange);
         }
@@ -5075,7 +5148,10 @@ impl SceneModel {
         let view = self
             .sized_to_safe_frame(options.image)
             .resolve(metadata.width, metadata.height)?;
-        let poster = gaanim_media::decode_video_frame(&path, &metadata, options.offset)?;
+        let poster = match &frames {
+            Some(frames) => frames.picture(frames.index_at(options.offset))?,
+            None => gaanim_media::decode_video_frame(&path, &metadata, options.offset)?,
+        };
         let has_audio = metadata.has_audio;
         let playback = gaanim_media::VideoPlayback {
             path: path.canonicalize().unwrap_or(path),
@@ -5090,6 +5166,7 @@ impl SceneModel {
             last_frame: None,
             active: false,
             intervals: Vec::new(),
+            frames,
         };
         let audio = if options.audio && has_audio {
             Some(AudioTrack::from_media(
@@ -13261,6 +13338,7 @@ mod tests {
             last_frame: None,
             active: true,
             intervals: Vec::new(),
+            frames: None,
         };
         let poster = gaanim_core::peniko::ImageData {
             data: gaanim_core::peniko::Blob::from(vec![0, 0, 0, 255]),
@@ -13340,6 +13418,7 @@ mod tests {
             last_frame: None,
             active: true,
             intervals: Vec::new(),
+            frames: None,
         };
         let drawable = canvas.spawn(SpawnKind::Video {
             poster,

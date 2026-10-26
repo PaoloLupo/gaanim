@@ -759,6 +759,10 @@ description = "MP4 clips synchronized with the timeline: fitted and cropped, tri
 web = false
 
 [[example]]
+path = "media/animated_images.py"
+description = "Animated GIF, WebP and PNG images and a numbered image sequence played like silent videos: looped, slowed down, offset, played once and cut into a segment."
+
+[[example]]
 path = "media/lottie.py"
 description = "Lottie JSON clips trimmed, looped and sped up, drawn in before they play, and a dotLottie state machine driven by inputs, events and themes."
 
