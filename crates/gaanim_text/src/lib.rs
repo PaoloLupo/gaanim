@@ -1,4 +1,5 @@
 pub mod code;
+pub mod code_diff;
 pub mod config;
 pub mod font;
 pub mod motion;

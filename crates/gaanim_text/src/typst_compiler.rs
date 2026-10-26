@@ -1756,6 +1756,33 @@ pub fn compile_scaled_typst_to_hierarchy(
     (entity, bounds, cached.metrics)
 }
 
+/// The characters every glyph `source` compiles to draws, in order: one
+/// for most glyphs, several for a ligature.
+#[cfg(test)]
+pub(crate) fn compiled_glyph_characters(source: &str) -> Vec<Vec<char>> {
+    let hierarchy = compile_typst_source(
+        &FontRegistry::new(),
+        source,
+        false,
+        None,
+        None,
+        None,
+        None,
+        &None,
+        &StrokeBrush::transparent(),
+    )
+    .expect("the source compiles");
+    hierarchy
+        .children
+        .iter()
+        .filter(|child| child.tag.0 == "TypstGlyph")
+        .map(|child| match &child.ligature {
+            Some(drawn) => drawn.chars().collect(),
+            None => vec![child.span.character],
+        })
+        .collect()
+}
+
 /// The character and fill of every glyph `source` compiles to, in order.
 #[cfg(test)]
 pub(crate) fn compiled_glyph_fills(source: &str) -> Vec<(char, Option<peniko::Color>)> {

@@ -9009,6 +9009,7 @@ impl SceneModel {
                     AnimationType::Transform { target, .. }
                     | AnimationType::ReplacementTransform { target }
                     | AnimationType::MagicMove { target, .. }
+                    | AnimationType::CodeEdit { target, .. }
                     | AnimationType::FadeTransform { target }
                     | AnimationType::TextTransition {
                         target,
@@ -9025,6 +9026,7 @@ impl SceneModel {
                             AnimationType::Transform { target, .. }
                             | AnimationType::ReplacementTransform { target }
                             | AnimationType::MagicMove { target, .. }
+                            | AnimationType::CodeEdit { target, .. }
                             | AnimationType::FadeTransform { target }
                             | AnimationType::TextTransition {
                                 target,
@@ -10620,6 +10622,11 @@ impl SceneModel {
                 target: *id_map.get(target)?,
                 copy: *copy,
                 semantic_pairs: semantic_pairs.clone(),
+            },
+            AnimationType::CodeEdit { target, from, to } => AnimationType::CodeEdit {
+                target: *id_map.get(target)?,
+                from: from.clone(),
+                to: to.clone(),
             },
             // A marker draws behind the glyphs at the text's stack level.
             AnimationType::TextSelection {

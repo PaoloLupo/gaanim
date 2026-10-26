@@ -10764,7 +10764,7 @@ class Typography:
         theme: str | os.PathLike[str] | None = None,
         highlight: bool = True,
         font: Optional[str] = None,
-    ) -> Drawable:
+    ) -> Code:
         """Create a code panel: ``source`` in a monospaced block highlighted as ``language``.
 
         The block sits on a ``width`` by ``height`` rounded panel, centered at
@@ -10795,9 +10795,127 @@ class Typography:
         ``ValueError``; a missing ``theme`` file raises ``FileNotFoundError``,
         and one that is not a tmTheme, ``ValueError``.
 
+        The block is a ``Code``: a ``Drawable`` whose source can change with
+        ``edit`` and whose lines can be picked out with ``select`` and
+        ``animate.highlight``.
+
         Example:
             snippet = scene.text.code("def area(r):\\n    return 3.14 * r * r", language="python")
             monokai = scene.text.code("x = 1", language="python", theme="assets/monokai.tmTheme")
+        """
+        ...
+
+class Code(Drawable):
+    """A code block from ``scene.text.code``: a ``Drawable`` whose source can change.
+
+    The panel stays as it was made and the code inside it is drawn from the
+    current source. ``animate.edit`` turns one source into another token by
+    token, ``select`` dims every line but some, and ``animate.highlight``
+    tints a word or a line and back. Lines count from 1; in ``text``, a
+    word only matches whole words (``"dt"`` is found in ``dt * 2`` but not
+    in ``dtype``), and other text matches wherever it occurs.
+    """
+    @property
+    def source(self) -> str:
+        """The source the block shows after its latest ``edit``."""
+        ...
+    @property
+    def language(self) -> str:
+        """The language the block highlights, as given to ``scene.text.code``."""
+        ...
+    @property
+    def line_count(self) -> int:
+        """The number of lines of the current source; a final newline starts no line."""
+        ...
+    def edit(self, source: str) -> Self:
+        """Show ``source`` from the cursor, at once, and return this Code.
+
+        Before the block is first shown this replaces the source it is
+        declared with. Afterwards the new code replaces the old at the
+        cursor, inside the panel wherever the block has moved, and later
+        edits and selections start from it. An empty or blank ``source``
+        raises ``ValueError``.
+
+        Example:
+            snippet.edit("def area(r):\\n    return math.pi * r ** 2")
+        """
+        ...
+    def select(
+        self,
+        lines: int | tuple[int, int] | None = None,
+        *,
+        text: Optional[str] = None,
+        dim: float = 0.3,
+    ) -> Self:
+        """Dim the code outside ``lines`` and ``text`` to ``dim`` at once, and return this Code.
+
+        ``lines`` is one line or a ``(first, last)`` pair, both included;
+        ``text`` selects each of its occurrences, and the two can be
+        combined. The selected code is shown fully opaque; ``select()`` with
+        neither shows every line again. An ``edit`` also shows every line.
+        Lines outside the block, a ``text`` that does not occur in it, or a
+        ``dim`` outside ``[0, 1]`` raise ``ValueError``.
+
+        Example:
+            snippet.select(lines=(2, 3), dim=0.25)
+        """
+        ...
+    @property
+    def animate(self) -> CodeAnimation:
+        """Animation proxy: ``Drawable.animate`` plus ``edit``, ``select`` and ``highlight``.
+
+        Example:
+            scene.play([snippet.animate.edit(new_source).duration(0.8)])
+        """
+        ...
+
+class CodeAnimation(Anim):
+    """Animation proxy of a ``Code``: an ``Anim`` with ``edit``, ``select`` and ``highlight``.
+
+    Each of these returns an ``Anim`` of its own, to pass to ``scene.play``
+    and chain with ``.duration()`` or an easing; it cannot be combined with
+    property targets in one ``Anim``.
+    """
+    def edit(self, source: str) -> Anim:
+        """Turn the block's code into ``source``, token by token.
+
+        A token is a word (letters, digits and underscores) or any other
+        visible character. Lines that stay the same up to their indentation
+        keep every token and slide to their new places; between them, the
+        changed lines keep the tokens the two versions share in order. Those
+        tokens move, the rest fade out, and the new ones fade in. Later
+        edits and selections start from ``source``, even before this
+        animation plays. An empty or blank ``source`` raises ``ValueError``.
+
+        Example:
+            scene.play([snippet.animate.edit("x = compute(y)\\nprint(x)").duration(0.8)])
+        """
+        ...
+    def select(
+        self,
+        lines: int | tuple[int, int] | None = None,
+        *,
+        text: Optional[str] = None,
+        dim: float = 0.3,
+    ) -> Anim:
+        """Fade the code outside ``lines`` and ``text`` to ``dim`` and the selected code to full opacity.
+
+        Arguments and errors are those of ``Code.select``; ``select()``
+        with neither ``lines`` nor ``text`` brings every line back.
+
+        Example:
+            scene.play([snippet.animate.select(lines=2, dim=0.25)])
+        """
+        ...
+    def highlight(self, text: Optional[str] = None, *, lines: int | tuple[int, int] | None = None) -> Anim:
+        """Tint ``text`` and ``lines`` with the theme's ``"accent"`` and back, without moving them.
+
+        Glyphs already in the accent take the theme's ``"foreground"``.
+        Either ``text`` or ``lines`` is required (``ValueError`` otherwise);
+        they select as in ``Code.select``.
+
+        Example:
+            scene.play([snippet.animate.highlight("r")])
         """
         ...
 

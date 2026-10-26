@@ -123,6 +123,8 @@ pub use narration::{
 };
 mod character;
 pub use character::{CharacterError, CharacterHandle};
+mod code;
+pub use code::{CodeError, CodeHandle, CodeStyle};
 mod timeline_index;
 pub use timeline_index::{IndexedMarker, IndexedSegment, IndexedSpan, IndexedStop, TimelineIndex};
 mod live;
