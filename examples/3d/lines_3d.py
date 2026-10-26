@@ -16,9 +16,9 @@ HOLD = 0.8
 TRACE = 3.0
 
 scene = Scene()
-accent = scene.canvas.color("accent")
-danger = scene.canvas.color("danger")
-foreground = scene.canvas.color("foreground")
+accent = scene.colors.accent
+danger = scene.colors.danger
+foreground = scene.colors.foreground
 
 # The camera looks at the origin from AZIMUTH radians around z and ELEVATION
 # radians above the floor, with z up. From DISTANCE away, a field of view as

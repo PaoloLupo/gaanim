@@ -24,8 +24,8 @@ GOLDEN = math.pi * (3 - math.sqrt(5))
 SEEKS = []
 
 scene = Scene()
-accent = scene.canvas.color("accent")
-success = scene.canvas.color("success")
+accent = scene.colors.accent
+success = scene.colors.success
 blend = ColorMap.from_colors([accent, success])
 
 

@@ -16,12 +16,12 @@ HOLD = 0.5
 SEEKS = []
 
 scene = Scene()
-accent = scene.canvas.color("accent")
-success = scene.canvas.color("success")
-danger = scene.canvas.color("danger")
-muted = scene.canvas.color("muted")
-panel = scene.canvas.color("panel")
-rule = scene.canvas.color("rule")
+accent = scene.colors.accent
+success = scene.colors.success
+danger = scene.colors.danger
+muted = scene.colors.muted
+panel = scene.colors.panel
+rule = scene.colors.rule
 
 page = scene.layout.zones(Zones.rows(["1fr", "80px"]))
 stage = page[0].inset("page_padding")

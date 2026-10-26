@@ -14,11 +14,11 @@ from gaanim import Axis, Easing, Scene, Zones, computed, stagger
 TURN = 6.0
 
 scene = Scene()
-accent = scene.canvas.color("accent")
-success = scene.canvas.color("success")
-foreground = scene.canvas.color("foreground")
-muted = scene.canvas.color("muted")
-rule = scene.canvas.color("rule")
+accent = scene.colors.accent
+success = scene.colors.success
+foreground = scene.colors.foreground
+muted = scene.colors.muted
+rule = scene.colors.rule
 
 # Readouts in a band on top; below, the circle on the left and the number
 # line from 0 to 2π across the rest of the width.

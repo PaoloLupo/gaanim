@@ -20,9 +20,9 @@ HOLD = 0.6
 SEEKS = []
 
 scene = Scene()
-accent = scene.canvas.color("accent")
-success = scene.canvas.color("success")
-warning = scene.canvas.color("warning")
+accent = scene.colors.accent
+success = scene.colors.success
+warning = scene.colors.warning
 TILT = (0.5, -0.5, 0.0)
 
 # Three balls of charge: the field is the sum of their pulls, and its

@@ -15,8 +15,8 @@ BANNER = "assets/banner.png"  # 1280 x 640 pixels
 BADGE = "assets/badge.png"  # 512 x 512 pixels of pixel art
 
 scene = Scene()
-accent = scene.canvas.color("accent")
-rule = scene.canvas.color("rule")
+accent = scene.colors.accent
+rule = scene.colors.rule
 
 
 def code(text, zone, anchor="left"):

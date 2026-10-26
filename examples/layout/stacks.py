@@ -12,12 +12,12 @@ from gaanim import BoxStyle, Scene, stagger
 
 scene = Scene()
 L = scene.layout
-accent = scene.canvas.color("accent")
-panel = scene.canvas.color("panel")
-rule = scene.canvas.color("rule")
-dark = scene.canvas.color("background")
-success = scene.canvas.color("success")
-danger = scene.canvas.color("danger")
+accent = scene.colors.accent
+panel = scene.colors.panel
+rule = scene.colors.rule
+dark = scene.colors.background
+success = scene.colors.success
+danger = scene.colors.danger
 seeks = []
 
 badge = BoxStyle(padding=("4px", "16px"), background=accent, color=dark)

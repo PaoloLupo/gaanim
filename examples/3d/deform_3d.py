@@ -14,10 +14,10 @@ import os
 from gaanim import Material3D, Scene, Zones
 
 scene = Scene()
-accent = scene.canvas.color("accent")
-success = scene.canvas.color("success")
-muted = scene.canvas.color("muted")
-foreground = scene.canvas.color("foreground")
+accent = scene.colors.accent
+success = scene.colors.success
+muted = scene.colors.muted
+foreground = scene.colors.foreground
 
 HEIGHT = 6.0
 FLOORS = (0.0, 3.0, 6.0)

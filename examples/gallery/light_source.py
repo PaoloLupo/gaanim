@@ -13,11 +13,11 @@ import os
 from gaanim import Easing, Material3D, Scene
 
 scene = Scene(theme="gaanim")
-violet = scene.canvas.color("accent")
-gold = scene.canvas.color("title")
-lilac = scene.canvas.color("chart")
-paper = scene.canvas.color("foreground")
-panel = scene.canvas.color("panel")
+violet = scene.colors.accent
+gold = scene.colors.title
+lilac = scene.colors.chart
+paper = scene.colors.foreground
+panel = scene.colors.panel
 geometry = scene.geometry
 geometry.lighting_3d("studio", intensity=0.35)
 

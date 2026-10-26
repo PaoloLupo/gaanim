@@ -19,13 +19,13 @@ LEAD = 0.3
 HOLD = 0.3
 
 scene = Scene()
-accent = scene.canvas.color("accent")
-foreground = scene.canvas.color("foreground")
-chart = scene.canvas.color("chart")
-rule = scene.canvas.color("rule")
-success = scene.canvas.color("success")
-warning = scene.canvas.color("warning")
-danger = scene.canvas.color("danger")
+accent = scene.colors.accent
+foreground = scene.colors.foreground
+chart = scene.colors.chart
+rule = scene.colors.rule
+success = scene.colors.success
+warning = scene.colors.warning
+danger = scene.colors.danger
 
 
 def tiles(header, labels, columns=2):

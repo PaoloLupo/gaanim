@@ -11,8 +11,8 @@ from gaanim import Anchor, Easing, Scene, TextAnchor, Zones
 
 scene = Scene()
 viz = scene.viz
-accent = scene.canvas.color("accent")
-success = scene.canvas.color("success")
+accent = scene.colors.accent
+success = scene.colors.success
 
 COUNT = 3.0
 HOLD = 0.6

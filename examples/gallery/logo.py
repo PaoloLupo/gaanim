@@ -13,10 +13,10 @@ import os
 from gaanim import Easing, Scene, stagger
 
 scene = Scene(theme="gaanim")
-gold = scene.canvas.color("title")
-violet = scene.canvas.color("accent")
-mist = scene.canvas.color("rule")
-paper = scene.canvas.color("foreground")
+gold = scene.colors.title
+violet = scene.colors.accent
+mist = scene.colors.rule
+paper = scene.colors.foreground
 geometry = scene.geometry
 
 # The logo is drawn on a grid of units, 71 wide and 16 tall, y pointing down;

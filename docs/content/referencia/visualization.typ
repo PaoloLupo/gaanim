@@ -1091,7 +1091,7 @@ countries = atlas.geojson("andes.geojson", key="name")
 trench = atlas.polyline([(-81.2, 1.0), (-82.0, -5.0), (-78.2, -12.3), (-71.2, -19.0)])
 lima = atlas.place(scene.geometry.dot(0.08), -77.03, -12.05)
 scene.play([grid.animate.create(), countries.animate.create()], duration=1.0)
-scene.play([countries["Peru"].animate.fill(scene.canvas.color("accent")), trench.animate.create(), lima.animate.fade_in()])
+scene.play([countries["Peru"].animate.fill(scene.colors.accent), trench.animate.create(), lima.animate.fade_in()])
 # output: preview.webp
 scene.render()
 ```
@@ -1181,7 +1181,7 @@ route = atlas.polyline([(-77.0, -12.0), (-72.0, -13.5), (-68.2, -16.5)]).stroke(
 >>>scene = Scene(frame=(16, 9))
 >>>atlas = scene.viz.map(lat=(-19, 1), center_lon=-72)
 countries = atlas.geojson("andes.geojson", key="name")
-countries["Peru"].fill(scene.canvas.color("accent"))
+countries["Peru"].fill(scene.colors.accent)
 print(len(countries), countries.keys[:3], countries.properties[0]["iso"])
 ```
 ]

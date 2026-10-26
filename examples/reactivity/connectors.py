@@ -17,10 +17,10 @@ RUN = 4.0
 HOLD = 0.5
 
 scene = Scene()
-accent = scene.canvas.color("accent")
-foreground = scene.canvas.color("foreground")
-muted = scene.canvas.color("muted")
-rule = scene.canvas.color("rule")
+accent = scene.colors.accent
+foreground = scene.colors.foreground
+muted = scene.colors.muted
+rule = scene.colors.rule
 
 
 def code(text):

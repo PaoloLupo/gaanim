@@ -35,7 +35,7 @@ Para un lienzo sin tema, pasa `Scene(theme=None)` o llama a
 `scene.canvas.set_theme(None)`. Sin tema el fondo vuelve a ser blanco (salvo
 que hayas elegido uno) y el texto, las formas y los ejes sin estilo propio son
 blancos, así que dales color o usa un fondo que contraste; `gaanim check`
-avisa cuando no se verían. Sin tema, `scene.canvas.color(...)` y
+avisa cuando no se verían. Sin tema, `scene.colors`, `scene.canvas.color(...)` y
 `scene.canvas.validate_theme()` lanzan `ValueError`, y los componentes como
 `badge` o `card` usan los colores de `technical`.
 
@@ -244,7 +244,7 @@ card = scene.geometry.rounded_rect(6, 2.75, 0.35).fill(gradient)
 >>>from gaanim import *
 >>>scene = Scene(frame=(16, 9), theme="technical")
 orb = scene.geometry.circle(1.5).fill(
-    Brush.radial(["white", scene.canvas.color("accent"), "#0000"], center=(-0.375, 0.44), radius=1.875)
+    Brush.radial(["white", scene.colors.accent, "#0000"], center=(-0.375, 0.44), radius=1.875)
 )
 ```
 ]
@@ -803,11 +803,45 @@ scene.text("fn main() {}", role="code").move_to(0, -1)
 ]
 
 #api-entry(
+  name: "Scene.colors",
+  kind: "property",
+  signature: "colors: ThemeColors",
+  returns: (type: "ThemeColors", desc: [Los colores del tema activo por rol, como atributos.]),
+  desc: [Es la forma de dar a tus objetos los colores del tema: `scene.colors.accent` en lugar de `scene.canvas.color("accent")`. Cada rol es un atributo, así que el editor lo autocompleta y el verificador de tipos detecta un nombre mal escrito. Cada lectura resuelve el tema activo en ese momento: después de `set_theme`, la misma expresión da el color del tema nuevo, y un objeto conserva el color que recibió. Los roles que añade un tema propio con `Theme(colors={"marca": ...})`, o un rol que llega en una variable, se leen con corchetes: `scene.colors["marca"]`. `in`, `len` y la iteración recorren los roles del tema, y `palette` es su paleta categórica, como `scene.canvas.palette()`. Sin tema activo, toda lectura lanza `ValueError`; un rol desconocido, `KeyError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9), theme="technical")
+colors = scene.colors
+card = scene.geometry.rounded_rect(5.25, 2.25, 0.3).fill(colors.panel).stroke(colors.rule, 0.04)
+dot = scene.geometry.dot(0.25).fill(colors.accent)
+scene.play([card.animate.stroke(colors.accent, 0.04)])
+```
+]
+
+#table(
+  columns: (auto, 1fr),
+  inset: 7pt,
+  [*Rol*], [*Uso*],
+  [`background`], [El fondo del cuadro.],
+  [`foreground` (`primary`, `body`)], [El texto y la tinta predeterminada.],
+  [`muted` (`secondary`)], [Texto secundario y marcas discretas.],
+  [`title`], [Títulos.],
+  [`accent`], [El color que atrae la mirada.],
+  [`chart`], [Marcas de gráficos sin color propio.],
+  [`panel`], [Paneles y tarjetas detrás del contenido.],
+  [`header`], [Cabeceras de tablas y paneles.],
+  [`rule` (`border`)], [Reglas, rejillas y bordes.],
+  [`success`, `warning`, `danger`], [Buenas noticias, precaución y errores.],
+  [`shadow`], [Sombras.],
+)
+
+#api-entry(
   name: "Canvas.color",
   kind: "method",
   params: ((name: "role", type: "str", default: none, desc: [Rol o token de color del tema activo.]),),
   returns: (type: "Color", desc: [El color resuelto.]),
-  desc: [Sirve para que tus propios objetos usen los colores del tema. Sin tema activo, o con un rol desconocido, lanza `ValueError`.],
+  desc: [El mismo color que `Scene.colors`, con el rol como cadena. Sin tema activo, o con un rol desconocido, lanza `ValueError`.],
 )[
 ```python
 >>>from gaanim import *

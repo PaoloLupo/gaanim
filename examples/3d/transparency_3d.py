@@ -22,9 +22,9 @@ SEEKS = []
 
 scene = Scene()
 scene.geometry.transparency_3d("order_independent", layers=6)
-accent = scene.canvas.color("accent")
-success = scene.canvas.color("success")
-warning = scene.canvas.color("warning")
+accent = scene.colors.accent
+success = scene.colors.success
+warning = scene.colors.warning
 
 
 def cells(count):

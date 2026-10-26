@@ -13,9 +13,9 @@ from gaanim import Scene, Zones, stagger
 
 scene = Scene()
 L = scene.layout
-header = scene.canvas.color("header")
-rule = scene.canvas.color("rule")
-danger = scene.canvas.color("danger")
+header = scene.colors.header
+rule = scene.colors.rule
+danger = scene.colors.danger
 seeks = []
 
 

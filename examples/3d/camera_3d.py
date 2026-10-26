@@ -13,11 +13,11 @@ HOLD = 0.5
 MOVE = 1.6
 
 scene = Scene()
-accent = scene.canvas.color("accent")
-success = scene.canvas.color("success")
-danger = scene.canvas.color("danger")
-chart = scene.canvas.color("chart")
-rule = scene.canvas.color("rule")
+accent = scene.colors.accent
+success = scene.colors.success
+danger = scene.colors.danger
+chart = scene.colors.chart
+rule = scene.colors.rule
 
 # A camera state is a reusable pose: where the eye is, what it looks at and
 # its vertical field of view in radians. to() cuts to it; animate.to() moves.

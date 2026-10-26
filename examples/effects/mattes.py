@@ -16,11 +16,11 @@ MOVE = 1.6
 HOLD = 0.6
 
 scene = Scene()
-accent = scene.canvas.color("accent")
-foreground = scene.canvas.color("foreground")
-background = scene.canvas.color("background")
-rule = scene.canvas.color("rule")
-COLORS = [accent, scene.canvas.color("success"), scene.canvas.color("danger"), scene.canvas.color("chart")]
+accent = scene.colors.accent
+foreground = scene.colors.foreground
+background = scene.colors.background
+rule = scene.colors.rule
+COLORS = [accent, scene.colors.success, scene.colors.danger, scene.colors.chart]
 
 
 def label(code):

@@ -13,10 +13,10 @@ import os
 from gaanim import Axis, ColorMap, Easing, Scene, Zones
 
 scene = Scene(theme="gaanim")
-violet = scene.canvas.color("accent")
-gold = scene.canvas.color("title")
-paper = scene.canvas.color("foreground")
-mist = scene.canvas.color("rule")
+violet = scene.colors.accent
+gold = scene.colors.title
+paper = scene.colors.foreground
+mist = scene.colors.rule
 
 top, middle = scene.layout.zones(Zones.rows(["1fr", "1fr"], padding="page_padding"))
 sentence = scene.text("Some text, and an identity", size=0.7, color=paper).place(top, anchor="bottom")

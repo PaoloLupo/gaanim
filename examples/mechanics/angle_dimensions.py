@@ -16,8 +16,8 @@ HOLD = 0.6
 
 scene = Scene()
 M = scene.mechanics
-accent = scene.canvas.color("accent")
-muted = scene.canvas.color("muted")
+accent = scene.colors.accent
+muted = scene.colors.muted
 
 
 def angles(variants, end=2.2, length=2.6, centered=False):

@@ -13,9 +13,9 @@ from gaanim import Box, BoxStyle, Direction, Scene, Text, Zones, stagger
 
 scene = Scene()
 L = scene.layout
-accent = scene.canvas.color("accent")
-header = scene.canvas.color("header")
-rule = scene.canvas.color("rule")
+accent = scene.colors.accent
+header = scene.colors.header
+rule = scene.colors.rule
 seeks = []
 
 chip = BoxStyle(padding=("2px", "24px"), border=rule, radius="full", font_size="48px")

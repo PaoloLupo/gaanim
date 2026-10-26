@@ -17,9 +17,9 @@ MOVE = 1.6
 HOLD = 0.6
 
 scene = Scene()
-foreground = scene.canvas.color("foreground")
-background = scene.canvas.color("background")
-COLORS = [scene.canvas.color(role) for role in ("accent", "success", "danger", "chart")]
+foreground = scene.colors.foreground
+background = scene.colors.background
+COLORS = [scene.colors[role] for role in ("accent", "success", "danger", "chart")]
 
 
 def faded(color, alpha):

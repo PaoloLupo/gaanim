@@ -18,10 +18,10 @@ MOVE = 1.6
 HOLD = 0.6
 
 scene = Scene()
-accent = scene.canvas.color("accent")
-foreground = scene.canvas.color("foreground")
-success = scene.canvas.color("success")
-danger = scene.canvas.color("danger")
+accent = scene.colors.accent
+foreground = scene.colors.foreground
+success = scene.colors.success
+danger = scene.colors.danger
 
 # Inside a pass, gaanim_scene(uv) reads the drawable's own texture, uv spans
 # its box plus the margin, and time is the scene time in seconds.

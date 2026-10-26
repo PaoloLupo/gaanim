@@ -11,10 +11,10 @@ import os
 from gaanim import Axis, Direction, Easing, Scene, Zones
 
 scene = Scene(theme="gaanim")
-violet = scene.canvas.color("accent")
-gold = scene.canvas.color("title")
-lilac = scene.canvas.color("chart")
-muted = scene.canvas.color("muted")
+violet = scene.colors.accent
+gold = scene.colors.title
+lilac = scene.colors.chart
+muted = scene.colors.muted
 
 
 def f(x):

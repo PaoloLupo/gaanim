@@ -12,14 +12,14 @@ from gaanim import BoxStyle, Scene, Zones, component, stagger
 
 scene = Scene()
 L = scene.layout
-accent = scene.canvas.color("accent")
-header = scene.canvas.color("header")
-muted = scene.canvas.color("muted")
-rule = scene.canvas.color("rule")
-dark = scene.canvas.color("background")
-success = scene.canvas.color("success")
-warning = scene.canvas.color("warning")
-danger = scene.canvas.color("danger")
+accent = scene.colors.accent
+header = scene.colors.header
+muted = scene.colors.muted
+rule = scene.colors.rule
+dark = scene.colors.background
+success = scene.colors.success
+warning = scene.colors.warning
+danger = scene.colors.danger
 seeks = []
 
 

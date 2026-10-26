@@ -13,10 +13,10 @@ import os
 from gaanim import Scene, Zones, load_questions
 
 scene = Scene()
-background = scene.canvas.color("background")
-chart = scene.canvas.color("chart")
-success = scene.canvas.color("success")
-track = scene.canvas.color("header")
+background = scene.colors.background
+chart = scene.colors.chart
+success = scene.colors.success
+track = scene.colors.header
 scene.rehearsal(20, seed=1)
 seeks = []
 

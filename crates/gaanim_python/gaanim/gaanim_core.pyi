@@ -327,6 +327,104 @@ class Palette:
 
 PaletteLike: TypeAlias = Palette | str | Sequence[ColorLike]
 
+class ThemeColors:
+    """The colors of the scene's active theme by role, from ``scene.colors``.
+
+    Every role is an attribute, so an editor completes it and a type checker
+    catches a misspelled one: ``scene.colors.accent`` instead of
+    ``scene.canvas.color("accent")``. Each read resolves the theme active at
+    that moment, so after ``scene.canvas.set_theme`` the same expression gives
+    the new theme's color, and a drawable keeps the color it was given.
+    Roles a theme adds with ``Theme(colors={"brand": ...})``, or a role named
+    in a variable, are read by subscript: ``scene.colors["brand"]``. ``in``,
+    ``len`` and iteration list the theme's roles. A scene without a theme
+    (``Scene(theme=None)``) raises ``ValueError`` on every read, and an
+    unknown role ``KeyError``.
+
+    Example:
+        colors = scene.colors
+        card = scene.geometry.rounded_rect(4, 2, 0.2).fill(colors.panel).stroke(colors.rule, 0.02)
+        scene.play([card.animate.stroke(colors.accent, 0.04)])
+    """
+    @property
+    def background(self) -> Color:
+        """The frame's background."""
+        ...
+    @property
+    def foreground(self) -> Color:
+        """Text and the default ink."""
+        ...
+    @property
+    def primary(self) -> Color:
+        """The same color as ``foreground``."""
+        ...
+    @property
+    def body(self) -> Color:
+        """The same color as ``foreground``."""
+        ...
+    @property
+    def muted(self) -> Color:
+        """Secondary text and quiet marks."""
+        ...
+    @property
+    def secondary(self) -> Color:
+        """The same color as ``muted``."""
+        ...
+    @property
+    def title(self) -> Color:
+        """Titles."""
+        ...
+    @property
+    def accent(self) -> Color:
+        """The color that draws the eye."""
+        ...
+    @property
+    def chart(self) -> Color:
+        """Chart marks without a color of their own."""
+        ...
+    @property
+    def panel(self) -> Color:
+        """Panels and cards behind content."""
+        ...
+    @property
+    def header(self) -> Color:
+        """Headers of tables and panels."""
+        ...
+    @property
+    def rule(self) -> Color:
+        """Rules, grids and borders."""
+        ...
+    @property
+    def border(self) -> Color:
+        """The same color as ``rule``."""
+        ...
+    @property
+    def success(self) -> Color:
+        """Good news."""
+        ...
+    @property
+    def warning(self) -> Color:
+        """Caution."""
+        ...
+    @property
+    def danger(self) -> Color:
+        """Bad news and errors."""
+        ...
+    @property
+    def shadow(self) -> Color:
+        """Drop shadows."""
+        ...
+    @property
+    def palette(self) -> Palette:
+        """The categorical palette that colors chart categories, as ``scene.canvas.palette()``."""
+        ...
+    def __getitem__(self, role: str) -> Color:
+        """The color of any role, the theme's own included; an unknown one raises ``KeyError``."""
+        ...
+    def __contains__(self, role: str) -> bool: ...
+    def __iter__(self) -> Iterator[str]: ...
+    def __len__(self) -> int: ...
+
 class Brush:
     @staticmethod
     def solid(color: ColorLike) -> Brush:
@@ -6476,7 +6574,9 @@ class Canvas:
     def color(self, role: str) -> Color:
         """Resolve a semantic color from the active theme.
 
-        Raises ``ValueError`` for unknown roles or after ``set_theme(None)``.
+        ``scene.colors.accent`` gives the same color with the role as an
+        attribute, which editors complete and type checkers check. Raises
+        ``ValueError`` for unknown roles or after ``set_theme(None)``.
         """
         ...
     def palette(self) -> Palette:
@@ -13203,6 +13303,14 @@ class Scene:
 
         Example:
             value = scene.canvas
+        """
+        ...
+    @property
+    def colors(self) -> ThemeColors:
+        """The active theme's colors by role, as attributes: ``scene.colors.accent``.
+
+        Example:
+            dot = scene.geometry.circle(0.4).fill(scene.colors.accent)
         """
         ...
     @property

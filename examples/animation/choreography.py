@@ -13,10 +13,10 @@ from gaanim import Anchor, Easing, Scene, StrokeStyle, Zones, label, sequence
 HOLD = 0.6
 
 scene = Scene()
-foreground = scene.canvas.color("foreground")
-accent = scene.canvas.color("accent")
-muted = scene.canvas.color("muted")
-rule = scene.canvas.color("rule")
+foreground = scene.colors.foreground
+accent = scene.colors.accent
+muted = scene.colors.muted
+rule = scene.colors.rule
 
 
 def rows(count, label_share):

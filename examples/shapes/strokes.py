@@ -15,9 +15,9 @@ HOLD = 0.6
 MARCH = 2.4
 
 scene = Scene()
-accent = scene.canvas.color("accent")
-foreground = scene.canvas.color("foreground")
-success = scene.canvas.color("success")
+accent = scene.colors.accent
+foreground = scene.colors.foreground
+success = scene.colors.success
 
 # Paths shared by the rows, in scene coordinates: a wide and a sharp corner,
 # and one period of a sine wave.

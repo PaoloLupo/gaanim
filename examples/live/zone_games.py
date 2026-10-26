@@ -15,11 +15,11 @@ from gaanim import Scene, Zones
 from gaanim.live import ease_out_back, impact, lerp, pose, progress, smoothstep, spring
 
 scene = Scene()
-foreground = scene.canvas.color("foreground")
-background = scene.canvas.color("background")
-accent = scene.canvas.color("accent")
-muted = scene.canvas.color("muted")
-rule = scene.canvas.color("rule")
+foreground = scene.colors.foreground
+background = scene.colors.background
+accent = scene.colors.accent
+muted = scene.colors.muted
+rule = scene.colors.rule
 scene.rehearsal(12, seed=8, arrive=0)
 audience = scene.audience()
 board = scene.leaderboard()

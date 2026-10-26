@@ -23,9 +23,9 @@ SEEKS = []
 
 scene = Scene()
 scene.segment("picture_in_picture")
-accent = scene.canvas.color("accent")
-muted = scene.canvas.color("muted")
-rule = scene.canvas.color("rule")
+accent = scene.colors.accent
+muted = scene.colors.muted
+rule = scene.colors.rule
 
 whole = scene.layout.frame
 page = scene.layout.zones(Zones.rows(["1fr", "80px"]))

@@ -14,7 +14,7 @@ from gaanim import Anchor, Easing, Scene, Zones
 HOLD = 0.5
 
 scene = Scene()
-rule = scene.canvas.color("rule")
+rule = scene.colors.rule
 
 
 def rows(count):

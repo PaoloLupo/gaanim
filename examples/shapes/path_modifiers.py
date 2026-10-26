@@ -15,7 +15,7 @@ PLAY = 1.4
 HOLD = 0.6
 
 scene = Scene()
-accent = scene.canvas.color("accent")
+accent = scene.colors.accent
 
 
 def table(variants):

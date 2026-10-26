@@ -18,10 +18,10 @@ HOLD = 0.4
 
 scene = Scene()
 M = scene.mechanics
-fg = scene.canvas.color("foreground")
-accent = scene.canvas.color("accent")
-muted = scene.canvas.color("muted")
-panel = scene.canvas.color("panel")
+fg = scene.colors.foreground
+accent = scene.colors.accent
+muted = scene.colors.muted
+panel = scene.colors.panel
 
 
 def page(lines):

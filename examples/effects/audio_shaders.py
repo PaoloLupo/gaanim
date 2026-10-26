@@ -12,10 +12,10 @@ import os
 from gaanim import Brush, Falloff, PostProcess, Scene, Zones
 
 scene = Scene()
-accent = scene.canvas.color("accent")
-foreground = scene.canvas.color("foreground")
-success = scene.canvas.color("success")
-danger = scene.canvas.color("danger")
+accent = scene.colors.accent
+foreground = scene.colors.foreground
+success = scene.colors.success
+danger = scene.colors.danger
 music = scene.media.audio("assets/rhythm.ogg")
 
 RIPPLE = """

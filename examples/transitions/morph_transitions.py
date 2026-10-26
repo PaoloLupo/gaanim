@@ -15,15 +15,10 @@ from gaanim import Easing, Scene, Transition, Zones
 HOLD = 1.4
 
 scene = Scene()
-background = scene.canvas.color("background")
+background = scene.colors.background
 page = scene.layout.zones(Zones.rows(["6fr", "1fr"], gap="24px", padding="page_padding"))
 stage = page[0]
 captions = []
-
-
-def color(role):
-    """The theme color of ``role``."""
-    return scene.canvas.color(role)
 
 
 def caption(*lines):
@@ -53,7 +48,7 @@ scene.wait(HOLD)
 caption("scene.link(bars_segment, card_segment,", "Transition.morph(0.8, pairs=[(bars[2], card)]))")
 starts.append(scene.cursor)
 card_segment = scene.segment("card")
-card = scene.geometry.rounded_rect(stage.width * 0.6, stage.height, 0.3).fill(color("success")).place(stage)
+card = scene.geometry.rounded_rect(stage.width * 0.6, stage.height, 0.3).fill(scene.colors.success).place(stage)
 slots = stage.inset((0, stage.width * 0.2)).split(Zones.columns(3, gap="48px"))
 dots = [scene.geometry.circle(1.0).fill(background).place(slot.inset("72px"), fit="contain") for slot in slots]
 scene.wait(HOLD)
@@ -68,7 +63,7 @@ tiles_segment = scene.segment("tiles")
 NAMES = ["first", "second", "third"]
 ROLES = ["accent", "chart", "danger"]
 tiles = [
-    scene.geometry.rounded_rect(slot.width, slot.height, 0.3).fill(color(role)).place(slot).named(name)
+    scene.geometry.rounded_rect(slot.width, slot.height, 0.3).fill(scene.colors[role]).place(slot).named(name)
     for slot, role, name in zip(stage.split(Zones.columns(3, gap="48px")), ROLES, NAMES)
 ]
 scene.wait(HOLD)
@@ -82,8 +77,8 @@ starts.append(scene.cursor)
 scene.segment("column", Transition.magic_move(0.8))
 left, right = stage.split(Zones.columns(["1fr", "2fr"], gap="48px"))
 for row, role, name in zip(left.split(Zones.rows(3, gap="24px")), ROLES, NAMES):
-    scene.geometry.circle(1.0).fill(color(role)).place(row, fit="contain").named(name)
-scene.geometry.rounded_rect(right.width, right.height, 0.3).fill(color("success")).place(right)
+    scene.geometry.circle(1.0).fill(scene.colors[role]).place(row, fit="contain").named(name)
+scene.geometry.rounded_rect(right.width, right.height, 0.3).fill(scene.colors.success).place(right)
 scene.wait(HOLD)
 
 # Every transition takes an easing; a spring carries the stars past their
@@ -93,7 +88,7 @@ starts.append(scene.cursor)
 scene.segment("diagonal", Transition.magic_move(0.8, easing=Easing.SNAPPY))
 cells = stage.split(Zones.grid(rows=3, columns=3, gap="24px"))
 for cell, role, name in zip([cells[6], cells[4], cells[2]], ROLES, NAMES):
-    scene.geometry.star(5, 1.0, 0.45).fill(color(role)).place(cell, fit="contain").named(name)
+    scene.geometry.star(5, 1.0, 0.45).fill(scene.colors[role]).place(cell, fit="contain").named(name)
 scene.wait(HOLD)
 
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):

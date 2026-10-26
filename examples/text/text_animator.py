@@ -17,7 +17,7 @@ SAMPLE = "Sphinx of black quartz"
 SIZE = 0.5
 
 scene = Scene()
-accent = scene.canvas.color("accent")
+accent = scene.colors.accent
 
 
 def sample():

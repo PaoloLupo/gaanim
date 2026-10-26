@@ -14,8 +14,8 @@ HOLD = 0.6
 WALKS = 3.0
 
 scene = Scene()
-accent = scene.canvas.color("accent")
-muted = scene.canvas.color("muted")
+accent = scene.colors.accent
+muted = scene.colors.muted
 
 # The wolf's size in its file, in its units: about 1.8 tall and, seen in
 # three-quarter view, 2.3 long. Its origin lies between its feet.

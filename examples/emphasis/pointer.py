@@ -12,10 +12,10 @@ import os
 from gaanim import Scene, Zones
 
 scene = Scene()
-accent = scene.canvas.color("accent")
-success = scene.canvas.color("success")
-panel = scene.canvas.color("panel")
-rule = scene.canvas.color("rule")
+accent = scene.colors.accent
+success = scene.colors.success
+panel = scene.colors.panel
+rule = scene.colors.rule
 geometry = scene.geometry
 
 

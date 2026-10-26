@@ -140,13 +140,13 @@ def bounds(k):
 
 
 scene = Scene(theme="gaanim")
-gold = scene.canvas.color("title")
-violet = scene.canvas.color("accent")
-lilac = scene.canvas.color("chart")
-paper = scene.canvas.color("foreground")
-muted = scene.canvas.color("muted")
-rule = scene.canvas.color("rule")
-panel = scene.canvas.color("panel")
+gold = scene.colors.title
+violet = scene.colors.accent
+lilac = scene.colors.chart
+paper = scene.colors.foreground
+muted = scene.colors.muted
+rule = scene.colors.rule
+panel = scene.colors.panel
 geometry = scene.geometry
 geometry.lighting_3d("studio", intensity=1.1)
 COLORS = [gold, violet, lilac]

@@ -17,10 +17,10 @@ HOLD = 0.8
 TILT = (0.45, -0.6, 0)
 
 scene = Scene()
-accent = scene.canvas.color("accent")
-success = scene.canvas.color("success")
-danger = scene.canvas.color("danger")
-rule = scene.canvas.color("rule")
+accent = scene.colors.accent
+success = scene.colors.success
+danger = scene.colors.danger
+rule = scene.colors.rule
 
 # One studio rig lights every lit primitive of the scene: sky and ground
 # light, a soft key light from the upper left and a faint rim. intensity

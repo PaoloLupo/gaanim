@@ -10,11 +10,11 @@ import os
 from gaanim import Axis, Easing, Scene, Zones, computed
 
 scene = Scene(theme="gaanim")
-violet = scene.canvas.color("accent")
-gold = scene.canvas.color("title")
-lilac = scene.canvas.color("chart")
-paper = scene.canvas.color("foreground")
-muted = scene.canvas.color("muted")
+violet = scene.colors.accent
+gold = scene.colors.title
+lilac = scene.colors.chart
+paper = scene.colors.foreground
+muted = scene.colors.muted
 geometry = scene.geometry
 
 AREA = 6.0

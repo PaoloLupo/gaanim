@@ -15,16 +15,11 @@ from gaanim import Scene, Transition, Zones
 HOLD = 1.2
 
 scene = Scene()
-background = scene.canvas.color("background")
-foreground = scene.canvas.color("foreground")
+background = scene.colors.background
+foreground = scene.colors.foreground
 page = scene.layout.zones(Zones.rows(["6fr", "1fr"], gap="24px", padding="page_padding"))
 stage = page[0]
 captions = []
-
-
-def color(role):
-    """The theme color of ``role``."""
-    return scene.canvas.color(role)
 
 
 def caption(*lines):
@@ -46,7 +41,7 @@ def caption(*lines):
 
 def card(role, shape):
     """Fill the stage with a card of ``role`` holding a large dark ``shape()``."""
-    scene.geometry.rounded_rect(stage.width, stage.height, 0.3).fill(color(role)).place(stage)
+    scene.geometry.rounded_rect(stage.width, stage.height, 0.3).fill(scene.colors[role]).place(stage)
     shape().fill(background).place(stage.inset("96px"), fit="contain")
 
 
@@ -56,7 +51,7 @@ scene.segment("tiles")
 caption('scene.segment("tiles")')
 slots = stage.split(Zones.columns(3, gap="48px"))
 tiles = [
-    scene.geometry.rounded_rect(slot.width, slot.height, 0.3).fill(color(role)).place(slot)
+    scene.geometry.rounded_rect(slot.width, slot.height, 0.3).fill(scene.colors[role]).place(slot)
     for slot, role in zip(slots, ["accent", "chart", "danger"])
 ]
 scene.wait(HOLD)
@@ -69,7 +64,7 @@ scene.segment("focus", Transition.cross_fade(0.8))
 scene.reuse(tiles[0])
 lines, aside = stage.split(Zones.columns(["2fr", "1fr"], gap="48px"))
 for row in lines.split(Zones.rows(3, gap="48px")):
-    scene.geometry.rounded_rect(row.width, row.height, row.height / 2).fill(color("chart")).place(row)
+    scene.geometry.rounded_rect(row.width, row.height, row.height / 2).fill(scene.colors.chart).place(row)
 scene.wait(0.8)
 scene.play([tiles[0].animate.move_to(*aside.center).duration(0.6)])
 

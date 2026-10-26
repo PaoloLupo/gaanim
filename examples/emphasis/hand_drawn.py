@@ -15,11 +15,11 @@ DRAW = 1.2
 HOLD = 0.6
 
 scene = Scene()
-accent = scene.canvas.color("accent")
-success = scene.canvas.color("success")
-danger = scene.canvas.color("danger")
-panel = scene.canvas.color("panel")
-rule = scene.canvas.color("rule")
+accent = scene.colors.accent
+success = scene.colors.success
+danger = scene.colors.danger
+panel = scene.colors.panel
+rule = scene.colors.rule
 geometry = scene.geometry
 
 

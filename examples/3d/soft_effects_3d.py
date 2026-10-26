@@ -20,10 +20,10 @@ TILT = (0.45, -0.6, 0)
 SEEKS = []
 
 scene = Scene()
-accent = scene.canvas.color("accent")
-success = scene.canvas.color("success")
-panel = scene.canvas.color("panel")
-shade = scene.canvas.color("shadow")
+accent = scene.colors.accent
+success = scene.colors.success
+panel = scene.colors.panel
+shade = scene.colors.shadow
 
 
 def cells(count):

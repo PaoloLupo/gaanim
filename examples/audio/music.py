@@ -14,10 +14,10 @@ from gaanim import Easing, Scene, Zones
 BEAT = "assets/beat.ogg"  # six seconds of drums and bass at 120 BPM
 
 scene = Scene()
-accent = scene.canvas.color("accent")
-foreground = scene.canvas.color("foreground")
-muted = scene.canvas.color("muted")
-rule = scene.canvas.color("rule")
+accent = scene.colors.accent
+foreground = scene.colors.foreground
+muted = scene.colors.muted
+rule = scene.colors.rule
 
 
 class Lanes:

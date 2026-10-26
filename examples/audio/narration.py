@@ -14,10 +14,10 @@ from gaanim import Easing, Scene, Zones
 
 scene = Scene()
 SEEKS = []  # moments to capture, collected as the scene is built
-accent = scene.canvas.color("accent")
-foreground = scene.canvas.color("foreground")
-muted = scene.canvas.color("muted")
-rule = scene.canvas.color("rule")
+accent = scene.colors.accent
+foreground = scene.colors.foreground
+muted = scene.colors.muted
+rule = scene.colors.rule
 
 
 def page():

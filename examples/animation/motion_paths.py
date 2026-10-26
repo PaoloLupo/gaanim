@@ -15,8 +15,8 @@ DURATION = 2.4
 HOLD = 0.5
 
 scene = Scene()
-foreground = scene.canvas.color("foreground")
-rule = scene.canvas.color("rule")
+foreground = scene.colors.foreground
+rule = scene.colors.rule
 
 
 def panels(rows, columns, header):

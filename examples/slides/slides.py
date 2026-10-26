@@ -14,9 +14,9 @@ from gaanim import Scene, Transition, comparison, credits, lecture, minimal, tit
 scene = Scene()
 S = scene.slides
 L = scene.layout
-accent = scene.canvas.color("accent")
-chart = scene.canvas.color("chart")
-rule = scene.canvas.color("rule")
+accent = scene.colors.accent
+chart = scene.colors.chart
+rule = scene.colors.rule
 seeks = []
 
 

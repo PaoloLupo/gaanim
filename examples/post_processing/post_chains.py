@@ -24,8 +24,8 @@ fn gaanim_post(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> {
 """
 
 scene = Scene()
-background = scene.canvas.color("background")
-foreground = scene.canvas.color("foreground")
+background = scene.colors.background
+foreground = scene.colors.foreground
 page = scene.layout.zones(Zones.rows(["5fr", "1fr"], gap="24px", padding="page_padding"))
 
 # The scene's post-process applies to every segment that does not set its own.
@@ -44,7 +44,7 @@ def test_card(zone):
         lambda: scene.geometry.annulus(1.0, 0.55),
     ]
     for cell, role, shape in zip(cells, roles, shapes):
-        scene.geometry.rounded_rect(cell.width, cell.height, 0.2).fill(scene.canvas.color(role)).place(cell)
+        scene.geometry.rounded_rect(cell.width, cell.height, 0.2).fill(scene.colors[role]).place(cell)
         shape().fill(background).place(cell.inset("48px"), fit="contain")
     (left, y), (right, _) = ramp.point("left"), ramp.point("right")
     gray = Brush.linear([background, foreground], start=(left, y), end=(right, y))

@@ -15,11 +15,11 @@ from gaanim import Brush, Emitter, Scene, Zones
 RUN = 2.0
 
 scene = Scene()
-accent = scene.canvas.color("accent")
-success = scene.canvas.color("success")
-danger = scene.canvas.color("danger")
-chart = scene.canvas.color("chart")
-rule = scene.canvas.color("rule")
+accent = scene.colors.accent
+success = scene.colors.success
+danger = scene.colors.danger
+chart = scene.colors.chart
+rule = scene.colors.rule
 PALETTE = [accent, success, danger, chart]
 
 

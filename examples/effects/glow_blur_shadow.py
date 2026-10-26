@@ -16,12 +16,12 @@ HOLD = 1.0
 MOVE = 1.2
 
 scene = Scene()
-accent = scene.canvas.color("accent")
-foreground = scene.canvas.color("foreground")
-success = scene.canvas.color("success")
+accent = scene.colors.accent
+foreground = scene.colors.foreground
+success = scene.colors.success
 # Shadows are dark, so they show on a light surface: cards cast them on tiles.
-shade = scene.canvas.color("background")
-surface = scene.canvas.color("chart")
+shade = scene.colors.background
+surface = scene.colors.chart
 
 
 def faded(color, alpha):

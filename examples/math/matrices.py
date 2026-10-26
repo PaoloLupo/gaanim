@@ -20,7 +20,7 @@ SIZE = 0.8
 GROWTH = SIZE / 0.44
 
 scene = Scene()
-accent = scene.canvas.color("accent")
+accent = scene.colors.accent
 ACCENT = TextStyle(size=SIZE, color=accent)
 DIGITS = [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
 SQUARE = [[1, 2], [3, 4]]

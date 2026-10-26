@@ -15,8 +15,8 @@ DRAW = 1.2
 HOLD = 0.6
 
 scene = Scene()
-accent = scene.canvas.color("accent")
-success = scene.canvas.color("success")
+accent = scene.colors.accent
+success = scene.colors.success
 
 
 def cells(rows, columns):

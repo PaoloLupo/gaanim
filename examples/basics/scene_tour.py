@@ -16,9 +16,9 @@ DURATION = 1.4
 HOLD = 0.8
 
 scene = Scene()
-panel = scene.canvas.color("panel")
-rule = scene.canvas.color("rule")
-success = scene.canvas.color("success")
+panel = scene.colors.panel
+rule = scene.colors.rule
+success = scene.colors.success
 
 
 def table(rows, tracks=None):

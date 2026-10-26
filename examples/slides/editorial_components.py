@@ -12,12 +12,12 @@ from gaanim import Easing, Scene, TextStyle, Zones, stagger
 
 scene = Scene()
 S = scene.slides
-accent = scene.canvas.color("accent")
-chart = scene.canvas.color("chart")
-dark = scene.canvas.color("background")
-foreground = scene.canvas.color("foreground")
-muted = scene.canvas.color("muted")
-rule = scene.canvas.color("rule")
+accent = scene.colors.accent
+chart = scene.colors.chart
+dark = scene.colors.background
+foreground = scene.colors.foreground
+muted = scene.colors.muted
+rule = scene.colors.rule
 seeks = []
 
 # Badges and chips are shown at ZOOM times their size, and cards at

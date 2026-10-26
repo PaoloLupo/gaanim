@@ -24,7 +24,7 @@ ANIMATE = WRITE + 2 * 0.2 + CELL + HOLD
 SIZE = 0.72
 
 scene = Scene()
-accent = scene.canvas.color("accent")
+accent = scene.colors.accent
 DIGITS = [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
 
 

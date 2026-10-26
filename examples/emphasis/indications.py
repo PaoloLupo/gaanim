@@ -15,8 +15,8 @@ DURATION = 1.6
 HOLD = 0.5
 
 scene = Scene()
-success = scene.canvas.color("success")
-foreground = scene.canvas.color("foreground")
+success = scene.colors.success
+foreground = scene.colors.foreground
 geometry = scene.geometry
 
 

@@ -27,9 +27,9 @@ def neon(zone):
         (lambda: scene.geometry.regular_polygon(3, 1.0), "foreground"),
     ]
     for cell, (shape, role) in zip(shapes.split(Zones.columns(4, gap="48px")), outlines):
-        shape().no_fill().stroke(scene.canvas.color(role), 0.16).place(cell, fit="contain")
+        shape().no_fill().stroke(scene.colors[role], 0.16).place(cell, fit="contain")
     for cell, role in zip(bars.split(Zones.columns(3, gap="48px")), ["chart", "muted", "rule"]):
-        scene.geometry.rounded_rect(cell.width, cell.height, cell.height / 2).fill(scene.canvas.color(role)).place(cell)
+        scene.geometry.rounded_rect(cell.width, cell.height, cell.height / 2).fill(scene.colors[role]).place(cell)
 
 
 def glow(code, post):

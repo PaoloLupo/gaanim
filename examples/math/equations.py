@@ -18,7 +18,7 @@ SEGMENTS = 10
 SIZE = 0.8
 
 scene = Scene()
-accent = scene.canvas.color("accent")
+accent = scene.colors.accent
 equation = scene.text.equation
 
 

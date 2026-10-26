@@ -122,7 +122,7 @@ class Timeline:
         paint = color if color is not None else self._color
         wrap = self._label_width if self._label_width is not None else False
         title_text = scene.text(title, role="label", weight=700, wrap=wrap)
-        body_text = scene.text(body, role="caption", color=scene.canvas.color("muted"), wrap=wrap) if body else None
+        body_text = scene.text(body, role="caption", color=scene.colors.muted, wrap=wrap) if body else None
         tb = title_text.bounds()
         bb = body_text.bounds() if body_text is not None else None
         width = max(tb.width, bb.width if bb is not None else 0.0)
@@ -165,7 +165,7 @@ class Timeline:
         members = []
         if knockout:
             # Made after the texts, so it is ordered below them explicitly.
-            plate = scene.geometry.rect(width + 2 * _PAD, height + 2 * _PAD).fill(scene.canvas.color("background")).no_stroke()
+            plate = scene.geometry.rect(width + 2 * _PAD, height + 2 * _PAD).fill(scene.colors.background).no_stroke()
             plate.move_to((x0 + x1) / 2, bottom + height / 2).z_index(0)
             members.append(plate)
         members.append(title_text.z_index(1))
@@ -197,7 +197,7 @@ class Timeline:
 
     def _draw_axis(self, breaks: list[float]) -> Drawable:
         scene = self._scene
-        ink = scene.canvas.color("foreground")
+        ink = scene.colors.foreground
         left, right = self._x_range
         cuts = [left + (right - left) * fraction for fraction in breaks]
         half = 0.06
@@ -244,5 +244,5 @@ def _build_timeline(
     return Timeline(
         scene, start, end, x_range=(left, right), y=_finite(y, "y"), breaks=knots,
         lane_height=_positive(lane_height, "lane_height"), gap=_non_negative(gap, "gap"),
-        label_width=label_width, color=color if color is not None else scene.canvas.color("accent"),
+        label_width=label_width, color=color if color is not None else scene.colors.accent,
     )

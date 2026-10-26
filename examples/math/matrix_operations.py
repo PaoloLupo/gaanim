@@ -27,7 +27,7 @@ SIZE = 0.66
 GROWTH = SIZE / 0.44
 
 scene = Scene()
-accent = scene.canvas.color("accent")
+accent = scene.colors.accent
 A = [[1, 2], [3, 4]]
 B = [[2, 0], [1, 2]]
 

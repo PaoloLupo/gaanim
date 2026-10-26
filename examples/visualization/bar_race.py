@@ -17,12 +17,12 @@ HOLD = 0.6
 STEP = RACE + HOLD
 
 scene = Scene()
-accent = scene.canvas.color("accent")
-success = scene.canvas.color("success")
-warning = scene.canvas.color("warning")
-danger = scene.canvas.color("danger")
-chart = scene.canvas.color("chart")
-muted = scene.canvas.color("muted")
+accent = scene.colors.accent
+success = scene.colors.success
+warning = scene.colors.warning
+danger = scene.colors.danger
+chart = scene.colors.chart
+muted = scene.colors.muted
 
 # Visitors per year, in thousands; a city missing from a year counts as zero.
 FRAMES = {

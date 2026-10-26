@@ -17,10 +17,10 @@ LEAD = 0.3
 HOLD = 0.3
 
 scene = Scene()
-accent = scene.canvas.color("accent")
-foreground = scene.canvas.color("foreground")
-muted = scene.canvas.color("muted")
-rule = scene.canvas.color("rule")
+accent = scene.colors.accent
+foreground = scene.colors.foreground
+muted = scene.colors.muted
+rule = scene.colors.rule
 
 
 def rows(count, label_share="5fr", stage_share="3fr"):

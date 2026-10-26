@@ -14,12 +14,12 @@ from gaanim import PostProcess, Scene, Zones
 BADGE = "assets/badge.png"
 
 scene = Scene()
-foreground = scene.canvas.color("foreground")
-accent = scene.canvas.color("accent")
-success = scene.canvas.color("success")
+foreground = scene.colors.foreground
+accent = scene.colors.accent
+success = scene.colors.success
 # Shadows are dark, so they show on a light surface: stickers sit on tiles.
-shade = scene.canvas.color("background")
-surface = scene.canvas.color("chart")
+shade = scene.colors.background
+surface = scene.colors.chart
 gray = PostProcess.color_grade(saturation=0.0)
 
 grid = scene.layout.zones(Zones.grid(rows=2, columns=4, gap="48px", padding="page_padding"))

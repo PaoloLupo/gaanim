@@ -13,7 +13,7 @@ DURATION = 1.6
 HOLD = 0.4
 
 scene = Scene()
-rule = scene.canvas.color("rule")
+rule = scene.colors.rule
 
 
 def inner(zone):

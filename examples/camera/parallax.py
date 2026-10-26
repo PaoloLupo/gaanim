@@ -17,12 +17,12 @@ HOLD = 0.5
 SEEKS = []
 
 scene = Scene()
-accent = scene.canvas.color("accent")
-success = scene.canvas.color("success")
-foreground = scene.canvas.color("foreground")
-muted = scene.canvas.color("muted")
-panel = scene.canvas.color("panel")
-rule = scene.canvas.color("rule")
+accent = scene.colors.accent
+success = scene.colors.success
+foreground = scene.colors.foreground
+muted = scene.colors.muted
+panel = scene.colors.panel
+rule = scene.colors.rule
 
 page = scene.layout.zones(Zones.rows(["1fr", "80px"]))
 bands = page[0].inset("page_padding").split(Zones.rows(5, gap="12px"))

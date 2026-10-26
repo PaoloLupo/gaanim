@@ -17,11 +17,11 @@ HOLD = 1.0
 STEP = 2 * DRAW + HOLD
 
 scene = Scene()
-accent = scene.canvas.color("accent")
-success = scene.canvas.color("success")
-danger = scene.canvas.color("danger")
-warning = scene.canvas.color("warning")
-background = scene.canvas.color("background")
+accent = scene.colors.accent
+success = scene.colors.success
+danger = scene.colors.danger
+warning = scene.colors.warning
+background = scene.colors.background
 
 # Twelve observations: a position, a group, a weight and a confidence.
 POINTS = {

@@ -17,11 +17,11 @@ MOVE = 2.0
 HOLD = 0.8
 
 scene = Scene()
-accent = scene.canvas.color("accent")
-chart = scene.canvas.color("chart")
-muted = scene.canvas.color("muted")
-rule = scene.canvas.color("rule")
-foreground = scene.canvas.color("foreground")
+accent = scene.colors.accent
+chart = scene.colors.chart
+muted = scene.colors.muted
+rule = scene.colors.rule
+foreground = scene.colors.foreground
 
 
 def label(code):

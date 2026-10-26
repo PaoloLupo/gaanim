@@ -37,8 +37,8 @@ SPREAD = 0.5
 HOLD = 1.0
 
 scene = Scene()
-foreground = scene.canvas.color("foreground")
-muted = scene.canvas.color("muted")
+foreground = scene.colors.foreground
+muted = scene.colors.muted
 
 
 def label(code):
@@ -129,10 +129,11 @@ for cell, (name, color) in zip(grid, CONSTANTS):
     shapes.append(swatch(art, color, outline=muted))
 enter(shapes)
 
-# Theme roles: scene.canvas.color(role) returns the active theme's color, so
-# a scene that switches themes keeps its meaning. primary and body are
-# aliases of foreground, secondary of muted and border of rule. Each label
-# is shortened from scene.canvas.color(...).
+# Theme roles: scene.colors.accent returns the active theme's color, so a
+# scene that switches themes keeps its meaning; scene.colors[role] reads a
+# role named in a variable. primary and body are aliases of foreground,
+# secondary of muted and border of rule. Each label is shortened from
+# scene.colors.
 scene.segment("theme_roles")
 ROLES = [
     "background", "foreground", "primary", "body", "muted", "secondary", "title", "accent",
@@ -146,8 +147,8 @@ grid = scene.layout.zones(
 shapes = []
 for index, role in enumerate(ROLES):
     row, column = index % 8, index // 8
-    label(f'color("{role}")').place(grid[4 * row + 2 * column], anchor="right")
-    shapes.append(swatch(grid[4 * row + 2 * column + 1], scene.canvas.color(role), outline=muted))
+    label(f"colors.{role}").place(grid[4 * row + 2 * column], anchor="right")
+    shapes.append(swatch(grid[4 * row + 2 * column + 1], scene.colors[role], outline=muted))
 enter(shapes)
 
 

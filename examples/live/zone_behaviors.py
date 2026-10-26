@@ -32,8 +32,8 @@ from gaanim.live import (
 )
 
 scene = Scene()
-rule = scene.canvas.color("rule")
-track = scene.canvas.color("header")
+rule = scene.colors.rule
+track = scene.colors.header
 scene.rehearsal(10, seed=6, arrive=0)
 audience = scene.audience()
 seeks = []

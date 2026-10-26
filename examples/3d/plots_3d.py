@@ -22,7 +22,7 @@ Y = Axis.linear(-3, 3).ticks(1)
 Z = Axis.linear(-2, 2).ticks(1)
 
 scene = Scene()
-accent = scene.canvas.color("accent")
+accent = scene.colors.accent
 
 # The camera looks at the origin from AZIMUTH radians around z and ELEVATION
 # radians above the floor, with z up. From DISTANCE away, a field of view as

@@ -17,8 +17,8 @@ FLOW = 3.0
 STEP = 2 * DRAW + HOLD
 
 scene = Scene()
-accent = scene.canvas.color("accent")
-danger = scene.canvas.color("danger")
+accent = scene.colors.accent
+danger = scene.colors.danger
 X = Axis.linear(-3, 3).ticks(1)
 Y = Axis.linear(-2, 2).ticks(1)
 

@@ -12,9 +12,9 @@ from gaanim import Scene, Zones, stagger
 
 scene = Scene()
 L = scene.layout
-accent = scene.canvas.color("accent")
-header = scene.canvas.color("header")
-rule = scene.canvas.color("rule")
+accent = scene.colors.accent
+header = scene.colors.header
+rule = scene.colors.rule
 seeks = []
 
 
