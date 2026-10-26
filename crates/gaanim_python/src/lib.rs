@@ -34,6 +34,7 @@ mod easing;
 mod falloff;
 mod field;
 mod geo_map;
+mod graph;
 mod live;
 mod magic_move;
 mod motion;
@@ -230,6 +231,8 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<geo_map::PyGeoMap>()?;
     m.add_class::<geo_map::PyGraticule>()?;
     m.add_class::<geo_map::PyGeoFeatures>()?;
+    m.add_class::<graph::PyGraph>()?;
+    m.add_class::<graph::PyGraphAnimation>()?;
     m.add_class::<pycamera_view::PyCameraViewAnimation>()?;
     m.add_class::<pycanvas::PyScene>()?;
     m.add_class::<pycanvas::PySceneStop>()?;

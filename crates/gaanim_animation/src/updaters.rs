@@ -1031,6 +1031,13 @@ pub enum TrackingEndpoint {
         radius: TrackingScalar,
         angle: TrackingScalar,
     },
+    /// Where the circle of `radius` around `entity`'s origin, in its local
+    /// frame, meets the line toward another endpoint (see [`rim`]).
+    Rim {
+        entity: Entity,
+        toward: Box<TrackingEndpoint>,
+        radius: f64,
+    },
     /// A pixel of an image's or a video's source, from its top-left corner
     /// with y down, through the media's frame, crop and transforms.
     MediaPixel { entity: Entity, x: f64, y: f64 },
@@ -1047,6 +1054,7 @@ impl TrackingEndpoint {
             Self::Screen(_) => true,
             Self::Offset { origin, .. } | Self::Polar { origin, .. } => origin.reads_the_screen(),
             Self::Between { from, to, .. } => from.reads_the_screen() || to.reads_the_screen(),
+            Self::Rim { toward, .. } => toward.reads_the_screen(),
             _ => false,
         }
     }
@@ -2523,6 +2531,26 @@ pub fn stand_in(entity: Entity, world: &World) -> Entity {
     stand_in_at(entity, time, world)
 }
 
+/// Where the circle of `radius` around the origin of the frame `matrix`
+/// meets the line from there toward the world point `toward`: an ellipse
+/// when the frame stretches. The origin when `toward` is there or the frame
+/// is degenerate.
+pub fn rim(matrix: DMat4, toward: DVec3, radius: f64) -> DVec3 {
+    let center = matrix.transform_point3(DVec3::ZERO);
+    let inverse = matrix.inverse();
+    if !inverse.is_finite() {
+        return center;
+    }
+    let local = inverse.transform_point3(toward);
+    let direction = DVec3::new(local.x, local.y, 0.0);
+    let length = direction.length();
+    if length > 1e-12 {
+        matrix.transform_point3(direction * (radius / length))
+    } else {
+        center
+    }
+}
+
 /// Resolve the current world-space position of a reactive endpoint.
 pub fn resolve_tracking_endpoint(ep: &TrackingEndpoint, world: &World) -> Option<DVec3> {
     match ep {
@@ -2586,6 +2614,15 @@ pub fn resolve_tracking_endpoint(ep: &TrackingEndpoint, world: &World) -> Option
             let radius = radius.evaluate(world)?;
             let angle = angle.evaluate(world)?;
             Some(origin + DVec3::new(radius * angle.cos(), radius * angle.sin(), 0.0))
+        }
+        TrackingEndpoint::Rim {
+            entity,
+            toward,
+            radius,
+        } => {
+            let matrix = entity_world_matrix(stand_in(*entity, world), world)?;
+            let toward = resolve_tracking_endpoint(toward, world)?;
+            Some(rim(matrix, toward, *radius))
         }
         TrackingEndpoint::MediaPixel { entity, x, y } => media_pixel_point(*entity, *x, *y, world),
         TrackingEndpoint::Screen(point) => {
@@ -4488,6 +4525,43 @@ mod tests {
         let transform = world.get::<SpatialTransform>(label).unwrap();
         assert!((transform.translation.y + 25.0).abs() < 1e-9);
         assert!(transform.z_angle().abs() < 1e-9);
+    }
+
+    #[test]
+    fn rim_endpoints_leave_a_shape_where_its_frame_puts_its_edge() {
+        let mut world = World::new();
+        let parent = world
+            .spawn(SpatialTransform::new_2d(1.0, 1.0).with_scale_2d(2.0, 2.0))
+            .id();
+        let node = world
+            .spawn((
+                SpatialTransform::new_2d(1.0, 0.0).with_scale_2d(1.0, 0.5),
+                ChildOf(parent),
+            ))
+            .id();
+        let rim = |toward: DVec3, world: &World| {
+            resolve_tracking_endpoint(
+                &TrackingEndpoint::Rim {
+                    entity: node,
+                    toward: Box::new(TrackingEndpoint::Static(toward)),
+                    radius: 0.5,
+                },
+                world,
+            )
+            .unwrap()
+        };
+        // The node's origin is at (3, 1), and the frames stretch its circle
+        // of 0.5 to reach 1 to the side and 0.5 up.
+        let right = rim(DVec3::new(10.0, 1.0, 0.0), &world);
+        assert!(right.distance(DVec3::new(4.0, 1.0, 0.0)) < 1e-9, "{right}");
+        let up = rim(DVec3::new(3.0, 9.0, 0.0), &world);
+        assert!(up.distance(DVec3::new(3.0, 1.5, 0.0)) < 1e-9, "{up}");
+        // A target at the origin gives the origin.
+        let center = rim(DVec3::new(3.0, 1.0, 0.0), &world);
+        assert!(
+            center.distance(DVec3::new(3.0, 1.0, 0.0)) < 1e-9,
+            "{center}"
+        );
     }
 
     #[test]

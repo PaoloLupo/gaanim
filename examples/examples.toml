@@ -646,6 +646,10 @@ path = "visualization/maps.py"
 description = "Mercator and equirectangular maps, labeled graticules, countries from a GeoJSON file, lines, places, and polygons with holes and islands that the frame clips."
 
 [[example]]
+path = "visualization/graphs.py"
+description = "Graphs in tree, layered, circular and force layouts, with and without direction or names, nodes and edges added and removed as the graph lays itself out again, and a whole new structure with animate.to."
+
+[[example]]
 path = "visualization/plots.py"
 description = "Function, parametric and implicit curves, log axes, Riemann sums and other calculus constructions, and curves that follow parameters."
 

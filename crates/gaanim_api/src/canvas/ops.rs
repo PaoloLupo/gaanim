@@ -1262,6 +1262,15 @@ pub enum CanvasEndpoint {
         radius: ScalarSource,
         angle: ScalarSource,
     },
+    /// Where the circle of `radius` around `object`'s origin, in its local
+    /// frame, meets the line toward `toward`: where a line to a round shape
+    /// leaves it, wherever the shape moves, turns or scales. The origin
+    /// itself when `toward` is there.
+    Rim {
+        object: ObjectId,
+        toward: Box<CanvasEndpoint>,
+        radius: f64,
+    },
     /// A source pixel of an image or video, from its top-left corner with y
     /// down, through the media's frame, crop and transforms.
     MediaPixel { object: ObjectId, x: f64, y: f64 },

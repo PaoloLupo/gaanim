@@ -262,6 +262,7 @@ Axes, plots, charts, vector fields and live readouts.
 | [Axes](visualization/axes.py) | Linear, log, symlog, power, category and time axes, tick steps, number formats, styles, titles and crossings. |
 | [Coordinate spaces](visualization/coordinate_spaces.py) | Cartesian, polar and complex planes, number lines, grids and numbers, coordinates that place objects and animated views. |
 | [Maps](visualization/maps.py) | Mercator and equirectangular maps, labeled graticules, countries from a GeoJSON file, lines, places, and polygons with holes and islands that the frame clips. |
+| [Graphs](visualization/graphs.py) | Graphs in tree, layered, circular and force layouts, with and without direction or names, nodes and edges added and removed as the graph lays itself out again, and a whole new structure with animate.to. |
 | [Plots](visualization/plots.py) | Function, parametric and implicit curves, log axes, Riemann sums and other calculus constructions, and curves that follow parameters. |
 | [Chart marks](visualization/chart_marks.py) | Every chart mark: points, lines, steps, areas, bars, histograms, box plots, violins, error bars, heatmaps, pies, donuts and roses, and marks that enter with a wipe. |
 | [Chart encodings](visualization/chart_encodings.py) | Color, size, opacity and label channels, scales, categorical palettes, legends and color bars, and explicit axes. |

@@ -1222,6 +1222,72 @@ grid.lines.opacity(0.5)
   none,
 )
 
+== Grafos y árboles
+
+`scene.viz.graph` dibuja redes, árboles y diagramas de nodos a partir de sus
+nodos y aristas, con la disposición calculada. Cada nodo es un grupo con un
+círculo y su nombre, y cada arista una línea reactiva (una flecha si el grafo
+es dirigido) que sale un poco fuera del borde de cada círculo y sigue a sus
+nodos cuando se mueven, escalan o giran. Son drawables normales con nombre: el
+nodo `"A"` o la arista `"A→B"`. Los cambios de estructura, como
+`animate.add_node`, vuelven a disponer el grafo: los nodos que siguen se
+mueven a su nuevo lugar y lo que entra o sale aparece o se desvanece.
+
+#api-entry(
+  name: "Visualization.graph",
+  kind: "factory",
+  params: (
+    (name: "nodes", type: "Sequence[str] | None", default: "None", desc: [Nombres de los nodos, en orden; sin ellos, los que nombran las aristas, en el orden en que aparecen.]),
+    (name: "edges", type: "Sequence[tuple[str, str]] | None", default: "None", desc: [Pares `(origen, destino)` de nombres.]),
+    (name: "layout", type: "\"tree\" | \"layered\" | \"circular\" | \"force\"", default: "\"layered\"", desc: [Árbol ordenado, capas de Sugiyama, círculo o fuerzas.]),
+    (name: "directed", type: "bool", default: "True", desc: [Flechas del primer nodo de cada arista al segundo; decide también las raíces de un árbol y el sentido de las capas.]),
+    (name: "seed", type: "int", default: "0", desc: [Lugares de partida de `"force"`.]),
+    (name: "node_radius", type: "float", default: "0.3", desc: [Radio mínimo de los nodos, que crecen para que quepa su nombre.]),
+    (name: "labels", type: "bool", default: "True", desc: [Nombres dentro de los nodos.]),
+    (name: "within", type: "\"safe\" | \"frame\" | Zone | Drawable | None", default: "None", desc: [Región que llena; por defecto, el área segura.]),
+  ),
+  desc: [Cada disposición se calcula solo a partir de los nodos y las aristas, así que el mismo grafo cae en los mismos lugares en cada ejecución y en cada `seek`. `"tree"` es un árbol ordenado que crece hacia abajo: las raíces son los nodos a los que no llega ninguna arista (el primero de cada parte si no es dirigido), cada nodo cuelga del primero que lo alcanza a lo ancho, las hojas ocupan columnas consecutivas y cada padre queda sobre el centro de sus hijos. En un grafo dirigido, `"layered"` pone cada nodo en la capa de la cadena de aristas más larga que llega a él y cuenta al revés las aristas que cierran un ciclo; sin dirección, en la capa de cuántas aristas lo separan del primer nodo de su parte. Una arista que salta capas reserva un lugar en cada capa que cruza, para que ningún nodo quede en su camino, y cada capa se reordena según sus vecinos para que se crucen menos aristas. `"circular"` reparte los nodos en un círculo, el primero arriba y en sentido horario, y `"force"` deja que las aristas atraigan a sus nodos y que todos se repelan, un número fijo de pasos. La disposición llena la región sin pasar de 2,4 unidades entre vecinos; árboles y capas se estiran a la región, y círculos y fuerzas conservan sus proporciones. `nodes` y `edges` dan la estructura actual, `node(name)` o `graph[name]` el nodo y `edge(origen, destino)` la arista. Sin nodos, un nombre repetido, una arista a un nodo desconocido o de un nodo a sí mismo, un `node_radius` no positivo o otro `layout` lanzan `ValueError`; `nodes` o `edges` con otra forma, `TypeError`; un nombre o una arista desconocidos, `KeyError`.],
+)[
+```python
+# show-code: true
+# player
+from gaanim import Scene
+scene = Scene(frame=(16, 9))
+tree = scene.viz.graph(
+    nodes=["raíz", "a", "b", "a1", "a2"],
+    edges=[("raíz", "a"), ("raíz", "b"), ("a", "a1"), ("a", "a2")],
+    layout="tree",
+)
+scene.play([tree.animate.fade_in().duration(0.5)])
+scene.play([tree.animate.add_node("b1", edges=[("b", "b1")])])
+scene.wait(0.5)
+# output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
+  name: "GraphAnimation.to / add_node / remove_node / add_edge / remove_edge",
+  kind: "method",
+  signature: "to(nodes, edges=None, *, duration=None) -> Composition · add_node(name, edges=None, *, duration=None) -> Composition · remove_node(name, *, duration=None) -> Composition · add_edge(source, target, *, duration=None) -> Composition · remove_edge(source, target, *, duration=None) -> Composition",
+  desc: [Cambian la estructura y vuelven a disponer el grafo entero. Los nodos que siguen se mueven a su lugar nuevo; los nodos y aristas nuevos aparecen en el suyo y los que se quitan se desvanecen, todo a la vez, mientras las aristas siguen a sus nodos. Los lugares están en el marco del propio grafo: si el grafo se movió, escaló o giró, las piezas quedan dentro de él, y un nodo movido a mano se mueve lo mismo que su lugar y conserva su desplazamiento. Las piezas nuevas quedan ocultas hasta que el cambio se reproduce, y los cambios siguientes, `nodes`, `edges`, `node` y `edge` parten de la estructura nueva enseguida. En `to`, una arista que las dos estructuras tienen se conserva, en orden. `duration` fija la duración de cada parte; sin ella, manda la de `Scene.play`. `animate` conserva además todo el vocabulario de `Drawable.animate`. Quitar un nodo o una arista que no existe lanza `KeyError`; una estructura inválida o una `duration` no positiva, `ValueError`.],
+)[
+```python
+# show-code: true
+# player
+from gaanim import Scene
+scene = Scene(frame=(16, 9))
+flow = scene.viz.graph(edges=[("leer", "validar"), ("validar", "guardar"), ("validar", "error")])
+scene.play([flow.animate.fade_in().duration(0.5)])
+scene.play([flow.animate.add_edge("error", "leer")])
+scene.play([flow.animate.remove_node("error")], duration=0.8)
+scene.play([flow.edge("validar", "guardar").animate.fill(scene.canvas.color("accent"))])
+scene.wait(0.5)
+# output: preview.webp
+scene.render()
+```
+]
+
 == Gráficos declarativos
 
 `ChartSpec` es una receta inmutable: datos, marca, codificaciones, ejes y guías.

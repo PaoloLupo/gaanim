@@ -880,6 +880,19 @@ fn compile_tracking_endpoint(
             alpha: compile_tracking_scalar(alpha, id_map, states),
             offset: *offset,
         },
+        CanvasEndpoint::Rim {
+            object,
+            toward,
+            radius,
+        } => id_map
+            .get(object)
+            .and_then(|runtime| states.get(*runtime))
+            .map(|state| TrackingEndpoint::Rim {
+                entity: state.entity,
+                toward: Box::new(compile_tracking_endpoint(toward, id_map, states)),
+                radius: *radius,
+            })
+            .unwrap_or(TrackingEndpoint::Static(DVec3::ZERO)),
         CanvasEndpoint::Polar {
             origin,
             radius,
@@ -9640,6 +9653,7 @@ impl SceneModel {
                 built_on(origin)
             }
             CanvasEndpoint::Between { from, to, .. } => built_on(from) || built_on(to),
+            CanvasEndpoint::Rim { object, toward, .. } => moved(object) || built_on(toward),
             _ => false,
         }
     }
@@ -9734,6 +9748,19 @@ impl SceneModel {
                 let (radius, angle) = (scalar(radius)?, scalar(angle)?);
                 let offset = DVec3::new(radius * angle.cos(), radius * angle.sin(), 0.0);
                 Some((origin + offset, DMat4::IDENTITY))
+            }
+            CanvasEndpoint::Rim {
+                object,
+                toward,
+                radius,
+            } => {
+                let runtime = *id_map.get(object)?;
+                builder.states.get(runtime)?;
+                let (toward, _) = point(toward)?;
+                Some((
+                    gaanim_animation::updaters::rim(world(runtime), toward, *radius),
+                    DMat4::IDENTITY,
+                ))
             }
             CanvasEndpoint::Anchor(anchor) => {
                 let runtime = *id_map.get(&anchor.object)?;
