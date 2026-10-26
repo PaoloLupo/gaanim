@@ -480,13 +480,18 @@ mod tests {
         // The bundled font draws `->`, `!=`, `<=` or `//` with contextual
         // alternates: one character's glyph draws both and the other draws
         // nothing. Every glyph still draws a character of the source, in order.
-        let [all] = source_glyphs(source, glyphs.clone(), &[0..source.len()])
+        let whole = 0..source.len();
+        let [all] = source_glyphs(source, glyphs.clone(), std::slice::from_ref(&whole))
             .try_into()
             .unwrap();
         assert_eq!(all, (0..glyphs.len()).collect::<Vec<_>>());
         let main = source.find("main").unwrap();
-        let tokens = source_glyphs(source, glyphs.clone(), &[main..main + 4]);
-        let drawn: String = tokens[0].iter().flat_map(|glyph| glyphs[*glyph].clone()).collect();
+        let token = main..main + 4;
+        let tokens = source_glyphs(source, glyphs.clone(), std::slice::from_ref(&token));
+        let drawn: String = tokens[0]
+            .iter()
+            .flat_map(|glyph| glyphs[*glyph].clone())
+            .collect();
         assert_eq!(drawn, "main");
     }
 
@@ -505,7 +510,7 @@ mod tests {
         assert_eq!(occurrences("dt * dt + dt", "dt"), [0..2, 5..7, 10..12]);
         assert_eq!(occurrences("dtype = dt + (dt)", "dt"), [8..10, 14..16]);
         assert_eq!(occurrences("a**2 + b**2", "**"), [1..3, 8..10]);
-        assert_eq!(occurrences("x.y.z", ".y"), [1..3]);
+        assert_eq!(occurrences("x.y.z", ".y"), vec![1..3]);
         assert!(occurrences("abc", "").is_empty());
     }
 }
