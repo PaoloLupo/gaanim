@@ -576,6 +576,22 @@ pub enum AnimationType {
         target_occurrence: Option<usize>,
         copy: bool,
     },
+    /// Edit the body of a code block into `target`, the body of its next
+    /// source: the tokens that `from` and `to` share slide to their new
+    /// places, the others leave or enter (see [`gaanim_text::code_diff`]),
+    /// and `target` takes over at the end.
+    CodeEdit {
+        target: ObjectId,
+        from: std::sync::Arc<str>,
+        to: std::sync::Arc<str>,
+    },
+    /// An effect on the glyphs of a code block's body that draw `ranges`,
+    /// byte ranges of `source`, the code the body shows.
+    CodeSelection {
+        source: std::sync::Arc<str>,
+        ranges: Vec<std::ops::Range<usize>>,
+        effect: CodeSelectionEffect,
+    },
     /// Fade out the source and fade in the target concurrently.
     FadeTransform {
         target: ObjectId,
@@ -696,6 +712,15 @@ pub enum AnimationType {
     TextPathOffset {
         to: f64,
     },
+}
+
+/// What a selection of a code block does to the glyphs it selects.
+#[derive(Debug, Clone)]
+pub enum CodeSelectionEffect {
+    /// The selected glyphs become opaque and the others fade to `dim`.
+    Select { dim: f32 },
+    /// A text selection effect on the selected glyphs.
+    Text(TextSelectionEffect),
 }
 
 #[derive(Debug, Clone)]
@@ -894,7 +919,8 @@ impl AnimationType {
             | Self::FadeOut
             | Self::TextMotion(_)
             | Self::TextAnimator(_)
-            | Self::TextSelection { .. } => true,
+            | Self::TextSelection { .. }
+            | Self::CodeSelection { .. } => true,
             Self::Properties(properties) => properties.opacity.is_some(),
             _ => false,
         }

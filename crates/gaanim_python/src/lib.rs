@@ -26,6 +26,7 @@ mod bar_race;
 mod brush;
 mod callback_recipe;
 mod character;
+mod code;
 mod color;
 mod composition;
 mod custom;
@@ -324,6 +325,8 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<poll::PyTeams>()?;
     m.add_class::<poll::PyCondition>()?;
     m.add_class::<character::PyCharacter>()?;
+    m.add_class::<code::PyCode>()?;
+    m.add_class::<code::PyCodeAnimation>()?;
     m.add_class::<live::PyLiveZone>()?;
     m.add_class::<visualization::PyReadout>()?;
     m.add_class::<visualization::PyVariable>()?;

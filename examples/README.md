@@ -82,6 +82,7 @@ Typography, code blocks, Typst layouts and animated text.
 | --- | --- |
 | [Typography](text/typography.py) | Text roles, style keywords, spacing, styled parts, inline markup and math, paragraph alignment and wrapping, anchors and selections. |
 | [Code blocks](text/code_blocks.py) | Code panels in several languages, with highlighting off, a .tmTheme, theme color options, another monospaced font and different sizes. |
+| [Code edits](text/code_edits.py) | A code panel edited token by token, then lines dimmed with select and a word tinted with highlight. |
 | [Text writing](text/text_writing.py) | write() by grapheme, word, line and part, in every order and stagger, and the chalk brush with its seed and roughness. |
 | [Text reveals](text/text_reveals.py) | Masked slide, fade, scale and blur reveals by unit, blur-in and tracking, selection reveals, and the matching conceal and unwrite exits. |
 | [Text animator](text/text_animator.py) | The text range animator: every selector shape, unit order, animated channel, unit type and sweep range. |

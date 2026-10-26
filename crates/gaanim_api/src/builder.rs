@@ -1,4 +1,6 @@
-use crate::anim::{AnimationBuilder, AnimationType, TextSelectionEffect, ValueTrackerRef};
+use crate::anim::{
+    AnimationBuilder, AnimationType, CodeSelectionEffect, TextSelectionEffect, ValueTrackerRef,
+};
 use crate::canvas::MagicMoveUnmatched;
 use bevy::prelude::{BuildChildrenTransformExt, Commands, Entity, GlobalTransform, Transform};
 use codex::{Def as CodexDef, ModifierSet};
@@ -2412,6 +2414,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 TextSelectionEffect::Marker(_) => "MarkerText",
                 _ => "TextSelection",
             },
+            AnimationType::CodeEdit { .. } => "EditCode",
+            AnimationType::CodeSelection { .. } => "CodeSelection",
             AnimationType::FadeTransform { .. }
             | AnimationType::Transform { .. }
             | AnimationType::ReplacementTransform { .. } => "Morph",
@@ -3323,6 +3327,16 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             tracing::warn!("text selection animation could not resolve fragment '{fragment}'");
             return;
         }
+        self.play_text_selection_effect(anim, selected, effect);
+    }
+
+    /// Plays `effect` on the glyphs `selected` of `anim.target`.
+    fn play_text_selection_effect(
+        &mut self,
+        anim: AnimationBuilder,
+        selected: Vec<ObjectId>,
+        effect: TextSelectionEffect,
+    ) {
         match effect {
             TextSelectionEffect::Focus => {
                 self.play_text_selection_focus_internal(anim, &selected);
@@ -3474,6 +3488,119 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                         delay: anim.delay + extra_delay,
                     });
                 }
+            }
+        }
+    }
+
+    /// The glyphs of `id`, a code block's body showing `source`, that draw
+    /// each of `ranges` of it.
+    fn code_glyphs(
+        &self,
+        id: ObjectId,
+        source: &str,
+        ranges: &[std::ops::Range<usize>],
+    ) -> Vec<Vec<ObjectId>> {
+        let Some(state) = self.states.get(id) else {
+            return vec![Vec::new(); ranges.len()];
+        };
+        gaanim_text::code_diff::source_glyphs(
+            source,
+            state.child_spans.iter().map(|child| child.characters()),
+            ranges,
+        )
+        .into_iter()
+        .map(|glyphs| {
+            glyphs
+                .into_iter()
+                .map(|index| state.child_spans[index].id)
+                .collect()
+        })
+        .collect()
+    }
+
+    /// The glyph groups of a code edit from `source`, showing `from`, to
+    /// `target`, showing `to`: one per token both keep, then every other
+    /// glyph of `source`, which leaves, and of `target`, which enters.
+    fn code_edit_groups(
+        &self,
+        source: ObjectId,
+        target: ObjectId,
+        from: &str,
+        to: &str,
+    ) -> Vec<(Vec<ObjectId>, Vec<ObjectId>)> {
+        let diff = gaanim_text::code_diff::diff(from, to);
+        let (from_ranges, to_ranges): (Vec<_>, Vec<_>) = diff.kept.into_iter().unzip();
+        let mut groups: Vec<(Vec<ObjectId>, Vec<ObjectId>)> = self
+            .code_glyphs(source, from, &from_ranges)
+            .into_iter()
+            .zip(self.code_glyphs(target, to, &to_ranges))
+            .collect();
+        // Glyphs outside every kept token, including any the diff could not
+        // place, leave or enter rather than stay as they are.
+        let kept_from: HashSet<ObjectId> =
+            groups.iter().flat_map(|(from, _)| from).copied().collect();
+        let kept_to: HashSet<ObjectId> = groups.iter().flat_map(|(_, to)| to).copied().collect();
+        let others = |id: ObjectId, kept: &HashSet<ObjectId>| -> Vec<ObjectId> {
+            self.states
+                .get(id)
+                .map(|state| {
+                    state
+                        .child_spans
+                        .iter()
+                        .map(|child| child.id)
+                        .filter(|glyph| !kept.contains(glyph))
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        groups.push((others(source, &kept_from), Vec::new()));
+        groups.push((Vec::new(), others(target, &kept_to)));
+        groups
+    }
+
+    /// Plays `effect` on the glyphs of `anim.target`, a code block's body
+    /// showing `source`, that draw `ranges` of it.
+    fn play_code_selection_internal(
+        &mut self,
+        anim: AnimationBuilder,
+        source: &str,
+        ranges: &[std::ops::Range<usize>],
+        effect: CodeSelectionEffect,
+    ) {
+        let mut selected: Vec<ObjectId> = Vec::new();
+        for glyph in self
+            .code_glyphs(anim.target, source, ranges)
+            .into_iter()
+            .flatten()
+        {
+            if !selected.contains(&glyph) {
+                selected.push(glyph);
+            }
+        }
+        match effect {
+            CodeSelectionEffect::Select { dim } => {
+                let glyphs: Vec<ObjectId> = self
+                    .states
+                    .get(anim.target)
+                    .map(|state| state.child_spans.iter().map(|child| child.id).collect())
+                    .unwrap_or_default();
+                for glyph in glyphs {
+                    let to = if selected.contains(&glyph) { 1.0 } else { dim };
+                    self.play_internal(AnimationBuilder {
+                        target: glyph,
+                        anim_type: AnimationType::FadeTo { to },
+                        duration: anim.duration,
+                        rate_func: anim.rate_func.clone(),
+                        delay: anim.delay,
+                    });
+                }
+            }
+            CodeSelectionEffect::Text(effect) => {
+                if selected.is_empty() {
+                    tracing::warn!("code selection animation selects no glyphs");
+                    return;
+                }
+                self.play_text_selection_effect(anim, selected, effect);
             }
         }
     }
@@ -3927,34 +4054,53 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             return;
         }
 
-        if let AnimationType::TextTransition {
-            target,
-            copy,
-            semantic_pairs,
-        } = anim.anim_type.clone()
-        {
-            let semantic_groups = semantic_pairs
-                .into_iter()
-                .filter_map(
-                    |(source_fragment, source_occurrence, target_fragment, target_occurrence)| {
-                        let sources = self
-                            .select_occurrence(
-                                MobjectRef { id: anim.target },
-                                &source_fragment,
-                                source_occurrence,
-                            )
-                            .child_ids;
-                        let targets = self
-                            .select_occurrence(
-                                MobjectRef { id: target },
-                                &target_fragment,
-                                target_occurrence,
-                            )
-                            .child_ids;
-                        (!sources.is_empty() && !targets.is_empty()).then_some((sources, targets))
-                    },
-                )
-                .collect();
+        // A code edit is a replacing text transition whose glyph groups come
+        // from the diff of its sources, with nothing matched beyond them.
+        let text_transition = match anim.anim_type.clone() {
+            AnimationType::TextTransition {
+                target,
+                copy,
+                semantic_pairs,
+            } => {
+                let semantic_groups = semantic_pairs
+                    .into_iter()
+                    .filter_map(
+                        |(
+                            source_fragment,
+                            source_occurrence,
+                            target_fragment,
+                            target_occurrence,
+                        )| {
+                            let sources = self
+                                .select_occurrence(
+                                    MobjectRef { id: anim.target },
+                                    &source_fragment,
+                                    source_occurrence,
+                                )
+                                .child_ids;
+                            let targets = self
+                                .select_occurrence(
+                                    MobjectRef { id: target },
+                                    &target_fragment,
+                                    target_occurrence,
+                                )
+                                .child_ids;
+                            (!sources.is_empty() && !targets.is_empty())
+                                .then_some((sources, targets))
+                        },
+                    )
+                    .collect();
+                Some((target, copy, semantic_groups, true))
+            }
+            AnimationType::CodeEdit { target, from, to } => Some((
+                target,
+                false,
+                self.code_edit_groups(anim.target, target, &from, &to),
+                false,
+            )),
+            _ => None,
+        };
+        if let Some((target, copy, semantic_groups, auto_match)) = text_transition {
             if !copy {
                 self.adopt_source_opacity(anim.target, target);
             }
@@ -3979,7 +4125,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 } else {
                     EquationTransitionMode::Replace
                 },
-                true,
+                auto_match,
                 anim.rate_func.clone(),
             );
             // A replacing transition hides its target like any transform
@@ -4053,6 +4199,15 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         } = anim.anim_type.clone()
         {
             self.play_text_selection_internal(anim, fragment, occurrence, effect);
+            return;
+        }
+        if let AnimationType::CodeSelection {
+            source,
+            ranges,
+            effect,
+        } = anim.anim_type.clone()
+        {
+            self.play_code_selection_internal(anim, &source, &ranges, effect);
             return;
         }
         if let AnimationType::TextAnimator(spec) = anim.anim_type.clone() {
@@ -4592,6 +4747,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             | AnimationType::TextSelection { .. }
             | AnimationType::TextSelectionProperties { .. }
             | AnimationType::TextSelectionTransform { .. }
+            | AnimationType::CodeEdit { .. }
+            | AnimationType::CodeSelection { .. }
             | AnimationType::FadeTransform { .. }
             | AnimationType::Wiggle { .. }
             | AnimationType::GrowFromPoint { .. }

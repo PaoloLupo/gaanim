@@ -7647,8 +7647,9 @@ impl PyTypography {
         theme: Option<PathBuf>,
         highlight: bool,
         font: Option<String>,
-    ) -> PyResult<PyDrawable> {
-        use gaanim_text::prelude::{CodeColors, CodeHighlight, CodeMarkup};
+        py: Python<'_>,
+    ) -> PyResult<Py<crate::code::PyCode>> {
+        use gaanim_text::prelude::{CodeColors, CodeHighlight};
         crate::custom::ensure_authoring_allowed()?;
         if source.trim().is_empty() {
             return Err(pyo3::exceptions::PyValueError::new_err(
@@ -7739,16 +7740,6 @@ impl PyTypography {
             None => CodeHighlight::Colors(code_colors),
         };
         let content_width = (width - 0.64).max(1.0e-6);
-        let typst_source = CodeMarkup {
-            source,
-            language,
-            font_size,
-            width: content_width,
-            font: font.as_deref(),
-            foreground: color,
-            highlight,
-        }
-        .typst();
         let panel = scene
             .rounded_rect(width, height, 0.10)
             .fill(background)
@@ -7772,12 +7763,23 @@ impl PyTypography {
                 accent,
             ))
             .at_anchor(left, height * 0.5 - 0.20, gaanim_api::canvas::Anchor::Left);
-        let body = scene.typst_in_scene_units(&typst_source).at_anchor(
-            left,
-            height * 0.5 - 0.62,
-            gaanim_api::canvas::Anchor::TopLeft,
-        );
-        Ok(PyDrawable(scene.group(&[&panel, &rule, &label, &body])))
+        let code = scene
+            .code_block(
+                &[&panel, &rule, &label],
+                source,
+                gaanim_api::canvas::CodeStyle {
+                    language: language.to_owned(),
+                    font_size,
+                    width: content_width,
+                    font,
+                    foreground: color,
+                    highlight,
+                    top_left: (left, height * 0.5 - 0.62),
+                },
+            )
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        drop(scene);
+        crate::code::PyCode::create(py, code, self.inner.clone())
     }
 }
 

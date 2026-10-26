@@ -881,6 +881,118 @@ fira = scene.text.code("x = 42", language="python", font="Fira Code")
 ```
 ]
 
+=== Editar y señalar el código
+
+`scene.text.code` devuelve un `Code`: un `Drawable` cuyo código puede cambiar.
+El panel queda como se creó y el código de dentro se dibuja a partir de su
+fuente actual. Un token es una palabra (letras, dígitos y guiones bajos) o
+cualquier otro carácter visible; los espacios separan tokens sin serlo. Las
+líneas se cuentan desde 1, y en `text` una palabra solo coincide con palabras
+completas: `"dt"` está en `dt * 2`, pero no en `dtype`.
+
+#api-entry(
+  name: "CodeAnimation.edit",
+  kind: "method",
+  params: (
+    (name: "source", type: "str", default: none, desc: [El código nuevo.]),
+  ),
+  desc: [Convierte el código del bloque en `source` token a token. Las líneas que siguen iguales salvo la sangría conservan todos sus tokens y se deslizan a su nuevo sitio; entre ellas, las líneas que cambian conservan, en orden, los tokens que comparten las dos versiones. Esos tokens se mueven, los demás se desvanecen y los nuevos aparecen. Las ediciones y selecciones siguientes parten de `source`, aunque esta animación aún no se haya reproducido. Devuelve un `Anim` para `scene.play`, que no se combina con propiedades en el mismo `Anim`. Una fuente vacía o en blanco lanza `ValueError`.],
+)[
+```python
+# show-code: true
+# player
+from gaanim import Scene
+scene = Scene(frame=(16, 9))
+snippet = scene.text.code(
+    "def area(r):\n"
+    "    return 3.14 * r * r",
+    language="python",
+    width=8,
+    height=2.4,
+    font_size=0.3,
+)
+scene.play([snippet.animate.fade_in().duration(0.5)])
+scene.wait(0.4)
+scene.play([snippet.animate.edit(
+    "import math\n"
+    "\n"
+    "def area(r):\n"
+    "    return math.pi * r ** 2"
+).duration(1.0)])
+scene.wait(0.6)
+# output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
+  name: "Code.edit",
+  kind: "method",
+  params: (
+    (name: "source", type: "str", default: none, desc: [El código nuevo.]),
+  ),
+  desc: [Muestra `source` desde el cursor, de golpe, y devuelve el `Code`. Antes de que el bloque se muestre por primera vez sustituye el código con el que se declaró; después, el código nuevo reemplaza al anterior en el cursor, dentro del panel aunque el bloque se haya movido. Una fuente vacía o en blanco lanza `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+snippet = scene.text.code("x = 1", language="python")
+scene.wait(0.5)
+snippet.edit("x = 2")
+```
+]
+
+#api-entry(
+  name: "CodeAnimation.select",
+  kind: "method",
+  params: (
+    (name: "lines", type: "int | tuple[int, int] | None", default: "None", desc: [Una línea o un par `(primera, última)`, ambas incluidas.]),
+    (name: "text", type: "str | None", default: "None", desc: [Selecciona cada aparición del texto; se combina con `lines`.]),
+    (name: "dim", type: "float", default: "0.3", desc: [Opacidad del código no seleccionado, entre 0 y 1.]),
+  ),
+  desc: [Atenúa el código fuera de la selección hasta `dim` y devuelve a opacidad plena el seleccionado. `select()`, sin `lines` ni `text`, vuelve a mostrar todas las líneas, como también lo hace una edición. Líneas fuera del bloque, un `text` que no aparece en él o un `dim` fuera de `[0, 1]` lanzan `ValueError`. `Code.select` hace lo mismo de golpe, en el cursor, y devuelve el `Code`.],
+)[
+```python
+# show-code: true
+# player
+from gaanim import Scene
+scene = Scene(frame=(16, 9))
+snippet = scene.text.code(
+    "x = load()\n"
+    "y = clean(x)\n"
+    "plot(y)",
+    language="python",
+    width=6,
+    height=2.4,
+    font_size=0.3,
+)
+scene.play([snippet.animate.fade_in().duration(0.5)])
+scene.play([snippet.animate.select(lines=2, dim=0.25).duration(0.6)])
+scene.play([snippet.animate.highlight("y").duration(0.8)])
+scene.play([snippet.animate.select().duration(0.6)])
+# output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
+  name: "CodeAnimation.highlight",
+  kind: "method",
+  params: (
+    (name: "text", type: "str | None", default: "None", desc: [Texto que se tiñe en cada aparición.]),
+    (name: "lines", type: "int | tuple[int, int] | None", default: "None", desc: [Líneas que se tiñen, como en `select`.]),
+  ),
+  desc: [Tiñe la selección con el `accent` del tema (los glifos que ya lo usan toman su `foreground`) y la devuelve a su color, sin moverla. Hace falta `text` o `lines`; sin ninguno lanza `ValueError`.],
+  none,
+)
+
+#api-entry(
+  name: "Code.source",
+  kind: "property",
+  desc: [El código que muestra el bloque tras su última edición. `Code.language` da su lenguaje y `Code.line_count` su número de líneas; un salto de línea final no empieza otra.],
+  none,
+)
+
 == Integración con Layout
 
 Un `Text` libre y el mismo `Text` dentro de una fila, columna, grid o stack usan
