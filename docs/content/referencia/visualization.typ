@@ -833,6 +833,93 @@ scene.render()
   none,
 )
 
+== Treemaps y diagramas de Sankey
+
+Dos diagramas de proporciones a partir de tablas: un treemap anida rectángulos
+cuyas áreas siguen los valores, y un diagrama de Sankey dibuja flujos entre
+nodos como cintas tan anchas como su valor. Cada pieza es un drawable normal
+con nombre: la celda `"Europe/France"`, el nodo `"power"` o la cinta
+`"coal→power"`. `animate.to(datos)` construye la nueva versión y hace un
+`magic_move` hacia ella: lo que conserva su nombre se mueve y cambia de forma,
+y el resto se desvanece. Los colores se conservan por nombre entre versiones.
+
+#api-entry(
+  name: "Visualization.treemap",
+  kind: "factory",
+  params: (
+    (name: "data", type: "DataTable | DataSource | Mapping | DataFrame", default: none, desc: [Una fila por hoja.]),
+    (name: "path", type: "str | Sequence[str]", default: none, desc: [Columnas del grupo exterior a la hoja; los números se leen como nombres.]),
+    (name: "value", type: "str", default: none, desc: [Columna numérica; las filas con la misma ruta se suman y un valor ausente cuenta como 0.]),
+    (name: "within", type: "\"safe\" | \"frame\" | Zone | Drawable | None", default: "None", desc: [Región que llena; por defecto, el área segura.]),
+    (name: "labels", type: "bool", default: "True", desc: [Nombres de las hojas en el centro y de los grupos arriba, más pequeños si no caben y omitidos si ni así.]),
+    (name: "gap / padding", type: "float", default: "0.04 / 0.06", desc: [Separación entre celdas hermanas y margen dentro de cada grupo.]),
+    (name: "colors", type: "Sequence[ColorLike] | None", default: "None", desc: [Colores de los grupos exteriores por orden de aparición; por defecto, la paleta categórica del tema.]),
+  ),
+  desc: [El área de cada grupo es la suma de sus filas, y cada nivel se reparte con el algoritmo _squarified_, de mayor a menor, para que las celdas queden cerca del cuadrado; los valores iguales conservan el orden de su primera fila. Las hojas toman el color de su grupo exterior y los grupos son paneles con su nombre arriba. `keys` da las claves de las celdas (los padres antes que sus hijos) y `cell(key)` o `treemap[key]`, su rectángulo. Una ruta vacía, columnas que faltan, valores negativos, no finitos o todos nulos, una ruta que es a la vez fila y grupo, o un `gap`/`padding` negativo lanzan `ValueError`; una clave desconocida, `KeyError`.],
+)[
+```python
+# show-code: true
+# player
+from gaanim import Scene
+scene = Scene(frame=(16, 9))
+gdp = {
+    "region": ["Asia", "Asia", "Asia", "Europe", "Europe", "America"],
+    "country": ["China", "Japan", "India", "Germany", "France", "USA"],
+    "gdp": [18, 4, 4, 4, 3, 27],
+}
+later = dict(gdp, gdp=[20, 4, 6, 4, 3, 28])
+treemap = scene.viz.treemap(gdp, path=["region", "country"], value="gdp")
+scene.play([treemap.animate.fade_in().duration(0.5)])
+scene.play([treemap.animate.to(later).duration(1.2)])
+scene.wait(0.5)
+# output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
+  name: "Visualization.sankey",
+  kind: "factory",
+  params: (
+    (name: "flows", type: "DataTable | DataSource | Mapping | DataFrame", default: none, desc: [Un flujo por fila.]),
+    (name: "source / target / value", type: "str", default: "\"source\" / \"target\" / \"value\"", desc: [Columnas con los nombres de los extremos (los números se leen como nombres) y el valor numérico; un valor ausente cuenta como 0.]),
+    (name: "within", type: "\"safe\" | \"frame\" | Zone | Drawable | None", default: "None", desc: [Región que llenan las barras.]),
+    (name: "node_width / node_gap", type: "float", default: "0.24 / 0.3", desc: [Ancho de cada barra y separación entre las barras de una capa.]),
+    (name: "align", type: "\"justify\" | \"left\" | \"right\"", default: "\"justify\"", desc: [Con `"justify"` los nodos de los que no sale ningún flujo van a la última capa; `"left"` deja cada nodo en su capa y `"right"` lo empuja tan a la derecha como permiten sus flujos.]),
+    (name: "labels", type: "bool", default: "True", desc: [Nombres junto a las barras, hacia el centro del diagrama.]),
+    (name: "colors", type: "Sequence[ColorLike] | None", default: "None", desc: [Colores de los nodos por orden de aparición.]),
+    (name: "flow_opacity", type: "float", default: "0.45", desc: [Opacidad de las cintas, que toman el color de su origen.]),
+  ),
+  desc: [Cada nodo va en la capa de la cadena de flujos más larga que llega a él y es tan alto como lo mayor entre lo que entra y lo que sale, en una sola escala para todo el diagrama. Las capas se relajan un número fijo de veces para que las cintas vayan lo más rectas posible, y los mismos flujos dan siempre la misma disposición. `nodes` da los nombres, `node(name)` la barra y `flow(source, target)` la cinta. Un flujo de un nodo a sí mismo, flujos en círculo, valores negativos, no finitos o todos nulos, columnas que faltan, un `align` desconocido, un `node_width` no positivo, un `node_gap` negativo, una región que no es más ancha que `node_width` o un `flow_opacity` fuera de `[0, 1]` lanzan `ValueError`; un nombre desconocido, `KeyError`.],
+)[
+```python
+# show-code: true
+# player
+from gaanim import Scene
+scene = Scene(frame=(16, 9))
+energy = {
+    "source": ["coal", "gas", "solar", "gas", "power", "power"],
+    "target": ["power", "power", "power", "homes", "homes", "industry"],
+    "value": [30, 20, 10, 10, 25, 35],
+}
+cleaner = dict(energy, value=[10, 20, 30, 10, 25, 35])
+diagram = scene.viz.sankey(energy)
+scene.play([diagram.animate.fade_in().duration(0.5)])
+scene.play([diagram.animate.to(cleaner).duration(1.2)])
+scene.wait(0.5)
+# output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
+  name: "TreemapAnimation.to / SankeyAnimation.to",
+  kind: "method",
+  signature: "to(data) -> Anim",
+  desc: [Cambia a `data`, leída con las mismas columnas. Las piezas que conservan su nombre se deslizan y cambian de tamaño o de forma; las demás se desvanecen y aparecen, y la nueva versión toma el relevo al final. Los cambios siguientes, `cell`, `node` y `flow` parten de `data`, aunque la animación aún no se haya reproducido. `animate` conserva además todo el vocabulario de `Drawable.animate`. Datos inválidos lanzan `ValueError`.],
+  none,
+)
+
 == Línea de tiempo
 
 Un eje de fechas con hitos rotulados. Cada rótulo va al primer carril libre de

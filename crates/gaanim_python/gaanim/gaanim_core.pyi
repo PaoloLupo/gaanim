@@ -8543,6 +8543,92 @@ class BarRace(Drawable):
         """Animation proxy: ``animate.play()`` runs the race, ``animate.to(position)`` moves to a keyframe."""
         ...
 
+class Treemap(Drawable):
+    """A treemap from ``scene.viz.treemap``: nested rectangles whose areas follow the values.
+
+    Every cell is an ordinary rectangle with a key: the names of its path
+    joined with ``/`` (``"Europe/France"``), parents before their children.
+    Groups are panels with their name at the top; leaves take the color of
+    their outermost group, which keeps it by name through ``animate.to``.
+    """
+    @property
+    def keys(self) -> list[str]:
+        """The keys of the current cells, parents before their children."""
+        ...
+    def cell(self, key: str) -> Drawable:
+        """The rectangle of the cell ``key``, as a ``Drawable``; ``treemap[key]`` is the same.
+
+        After ``animate.to`` it is the new version's cell. An unknown key
+        raises ``KeyError``.
+
+        Example:
+            scene.play([treemap.cell("Asia/China").animate.indicate()])
+        """
+        ...
+    def __getitem__(self, key: str) -> Drawable: ...
+    @property
+    def animate(self) -> TreemapAnimation:
+        """Animation proxy: ``Drawable.animate`` plus ``to``."""
+        ...
+
+class TreemapAnimation(Anim):
+    """Animation proxy of a ``Treemap``: an ``Anim`` with ``to``."""
+    def to(self, data: DataTable | DataSource | Mapping[str, Sequence[float | str | None]] | Any) -> Anim:
+        """Change the treemap to ``data``, read with the same ``path`` and ``value`` columns.
+
+        Cells whose key both versions have slide and resize to their new
+        place; the others fade out and in, and the new version takes over at
+        the end. Later changes and ``cell`` start from ``data``. Invalid
+        data raises ``ValueError``, as in ``scene.viz.treemap``.
+
+        Example:
+            scene.play([treemap.animate.to(gdp_2025).duration(1.2)])
+        """
+        ...
+
+class Sankey(Drawable):
+    """A sankey diagram from ``scene.viz.sankey``: flows between nodes as ribbons.
+
+    Nodes are bars named by their names, laid out in layers by the longest
+    chain of flows that leads to them; each flow is a ribbon from its
+    source's right edge to its target's left edge, as wide as its value on
+    the bars' scale, in its source's color. Labels sit beside the bars,
+    facing the middle of the diagram. Nodes keep their colors by name
+    through ``animate.to``.
+    """
+    @property
+    def nodes(self) -> list[str]:
+        """The node names, in the order they first appear in the flows."""
+        ...
+    def node(self, name: str) -> Drawable:
+        """The bar of the node ``name``; an unknown name raises ``KeyError``."""
+        ...
+    def flow(self, source: str, target: str) -> Drawable:
+        """The ribbon of the flow from ``source`` to ``target``; ``KeyError`` when there is none.
+
+        Example:
+            scene.play([sankey.flow("coal", "power").animate.opacity(1.0)])
+        """
+        ...
+    @property
+    def animate(self) -> SankeyAnimation:
+        """Animation proxy: ``Drawable.animate`` plus ``to``."""
+        ...
+
+class SankeyAnimation(Anim):
+    """Animation proxy of a ``Sankey``: an ``Anim`` with ``to``."""
+    def to(self, flows: DataTable | DataSource | Mapping[str, Sequence[float | str | None]] | Any) -> Anim:
+        """Change the diagram to ``flows``, read with the same columns.
+
+        Bars, labels and ribbons that both versions have move and reshape;
+        the others fade out and in, and the new version takes over at the
+        end. Invalid flows raise ``ValueError``, as in ``scene.viz.sankey``.
+
+        Example:
+            scene.play([energy.animate.to(flows_2030).duration(1.5)])
+        """
+        ...
+
 class Variable(Drawable):
     """A visible ``Parameter`` with an equation-aligned reactive readout group."""
     @property
@@ -11605,6 +11691,81 @@ class Visualization:
         Example:
             race = scene.viz.bar_race(frames, top=10, rank_smoothing=0.3, value_format="{:,.0f}")
             scene.play([race.animate.play().duration(20)])
+        """
+        ...
+    def treemap(
+        self,
+        data: DataTable | DataSource | Mapping[str, Sequence[float | str | None]] | Any,
+        *,
+        path: str | Sequence[str],
+        value: str,
+        within: Literal["safe", "frame"] | Zone | Drawable | None = None,
+        labels: bool = True,
+        gap: float = 0.04,
+        padding: float = 0.06,
+        colors: Optional[Sequence[ColorLike]] = None,
+    ) -> Treemap:
+        """A treemap of ``data``: one rectangle per row, nested by the ``path`` columns.
+
+        ``path`` names the columns from the outermost group to the leaf
+        (numbers in them read as names); ``value`` is a numeric column, and
+        rows with the same path add up, a missing value counting as 0. Each
+        group's area is the sum of its rows, and every level is laid out with
+        the squarified algorithm, largest first, so cells stay close to
+        squares; equal values keep the order of their first row. The treemap
+        fills ``within`` (the safe area by default, ``"frame"``, a ``Zone`` or
+        a ``Drawable``'s box). ``gap`` separates sibling cells, ``padding``
+        keeps room inside each group, and with ``labels`` leaves show their
+        names in the middle and groups at their top, smaller when they would
+        not fit and left out when even that does not. ``colors`` are the
+        outermost groups' colors in order of appearance (the theme's
+        categorical palette by default). An empty ``path``, missing columns,
+        negative, non-finite or all-zero values, a path that is both a row
+        and a group, or a negative ``gap`` or ``padding`` raise ``ValueError``.
+
+        Example:
+            gdp = {"region": ["Asia", "Asia", "Europe"], "country": ["China", "Japan", "Germany"], "gdp": [18, 4, 4]}
+            treemap = scene.viz.treemap(gdp, path=["region", "country"], value="gdp")
+        """
+        ...
+    def sankey(
+        self,
+        flows: DataTable | DataSource | Mapping[str, Sequence[float | str | None]] | Any,
+        *,
+        source: str = "source",
+        target: str = "target",
+        value: str = "value",
+        within: Literal["safe", "frame"] | Zone | Drawable | None = None,
+        node_width: float = 0.24,
+        node_gap: float = 0.3,
+        align: Literal["justify", "left", "right"] = "justify",
+        labels: bool = True,
+        colors: Optional[Sequence[ColorLike]] = None,
+        flow_opacity: float = 0.45,
+    ) -> Sankey:
+        """A sankey diagram of ``flows``: one ribbon per row between the nodes it names.
+
+        Each row reads its ``source`` and ``target`` node names (numbers
+        read as names) and a numeric ``value``; a missing value counts as 0.
+        Nodes are laid out in layers by the longest chain of flows that
+        leads to them: with ``align="justify"`` the nodes no flow leaves
+        go to the last layer, ``"left"`` keeps every node in its own layer and
+        ``"right"`` pushes nodes as far right as their flows allow. A node is
+        as tall as the larger of what enters and what leaves it, on one scale
+        for the whole diagram, and the layers are relaxed a fixed number of
+        times so ribbons run as straight as they can; the same flows always
+        give the same layout. The bars fill ``within`` (as in ``treemap``),
+        ``node_gap`` apart; ribbons take their source's color at
+        ``flow_opacity``. ``colors`` are the nodes' colors in order of
+        appearance. A flow from a node to itself, flows in a circle, negative,
+        non-finite or all-zero values, missing columns, an unknown ``align``,
+        a non-positive ``node_width``, a negative ``node_gap``, a region no
+        wider than ``node_width`` or a ``flow_opacity`` outside ``[0, 1]``
+        raise ``ValueError``.
+
+        Example:
+            energy = {"source": ["coal", "gas", "power"], "target": ["power", "power", "homes"], "value": [30, 20, 45]}
+            diagram = scene.viz.sankey(energy)
         """
         ...
     def rolling_number(

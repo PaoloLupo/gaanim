@@ -58,8 +58,10 @@ mod pytext;
 mod pytext_animator;
 mod pyzones;
 mod rolling_number;
+mod sankey;
 mod text_motion;
 mod transition;
+mod treemap;
 mod updater;
 mod visualization;
 
@@ -334,6 +336,10 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<progress_ring::PyProgressRing>()?;
     m.add_class::<bar_race::PyBarRace>()?;
     m.add_class::<bar_race::PyBarRaceAnimation>()?;
+    m.add_class::<treemap::PyTreemap>()?;
+    m.add_class::<treemap::PyTreemapAnimation>()?;
+    m.add_class::<sankey::PySankey>()?;
+    m.add_class::<sankey::PySankeyAnimation>()?;
     m.add_class::<visualization::PyCoordinateRef>()?;
     m.add_class::<visualization::PyCoordinateSpace>()?;
     m.add_class::<visualization::PyCoordinateSpaceAnimation>()?;

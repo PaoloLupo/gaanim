@@ -666,6 +666,14 @@ path = "visualization/bar_race.py"
 description = "Ranked bars that grow, overtake each other and leave the top, with value formats, colors and a rolling ticker."
 
 [[example]]
+path = "visualization/treemap.py"
+description = "Treemaps flat and nested, spaced and without labels, and a change of data that slides every cell kept by key."
+
+[[example]]
+path = "visualization/sankey.py"
+description = "Sankey diagrams in each alignment and with thinner bars, wider gaps and stronger ribbons, and a change of data that moves every kept bar and ribbon."
+
+[[example]]
 path = "visualization/timeline.py"
 description = "Timelines whose labelled events stack in lanes that do not overlap: sides chosen automatically, scale breaks, labels that grow left near the end and reserved spans."
 
