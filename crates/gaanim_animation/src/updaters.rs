@@ -4558,7 +4558,10 @@ mod tests {
         assert!(up.distance(DVec3::new(3.0, 1.5, 0.0)) < 1e-9, "{up}");
         // A target at the origin gives the origin.
         let center = rim(DVec3::new(3.0, 1.0, 0.0), &world);
-        assert!(center.distance(DVec3::new(3.0, 1.0, 0.0)) < 1e-9, "{center}");
+        assert!(
+            center.distance(DVec3::new(3.0, 1.0, 0.0)) < 1e-9,
+            "{center}"
+        );
     }
 
     #[test]

@@ -731,7 +731,10 @@ mod tests {
                 .collect();
             let first = reach.iter().copied().fold(f64::INFINITY, f64::min);
             let last = reach.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-            assert!((first - (radius + gap)).abs() < 1e-6, "{time}: starts {first}");
+            assert!(
+                (first - (radius + gap)).abs() < 1e-6,
+                "{time}: starts {first}"
+            );
             let end = (b - a).length() - (radius + gap);
             assert!((last - end).abs() < 1e-6, "{time}: ends {last}, not {end}");
         }
@@ -753,7 +756,9 @@ mod tests {
         let change = graph
             .add_node(&mut scene, "c", &pairs(&[("a", "c")]), Some(0.5))
             .unwrap();
-        scene.play_composition_configured(change, None, None).unwrap();
+        scene
+            .play_composition_configured(change, None, None)
+            .unwrap();
         scene.wait(0.3);
         assert_eq!(graph.nodes(), ["a", "b", "c"]);
         let (mut world, mut timeline) = compiled(&scene);
@@ -789,11 +794,17 @@ mod tests {
         // The new structure holds at once, before the change plays.
         assert_eq!(graph.nodes(), ["a", "b", "d", "e"]);
         assert_eq!(graph.edges(), pairs(&[("a", "b"), ("a", "d"), ("a", "e")]));
-        scene.play_composition_configured(change, None, None).unwrap();
+        scene
+            .play_composition_configured(change, None, None)
+            .unwrap();
         scene.wait(0.5);
         let after = places(&graph);
         let place = |places: &[(String, DVec2, f64)], name: &str| {
-            places.iter().find(|place| place.0 == name).cloned().unwrap()
+            places
+                .iter()
+                .find(|place| place.0 == name)
+                .cloned()
+                .unwrap()
         };
 
         let (mut world, mut timeline) = compiled(&scene);
@@ -841,7 +852,12 @@ mod tests {
         assert_eq!(graph(&["a"], &[], flat), Some(GraphError::InvalidRadius));
 
         let graph = scene
-            .graph(&names(&["a", "b"]), &pairs(&[("a", "b")]), region(), options())
+            .graph(
+                &names(&["a", "b"]),
+                &pairs(&[("a", "b")]),
+                region(),
+                options(),
+            )
             .unwrap();
         assert!(matches!(
             graph.add_node(&mut scene, "a", &[], None),
