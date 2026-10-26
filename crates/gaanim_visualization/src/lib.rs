@@ -6,8 +6,10 @@ pub mod chart;
 pub mod data;
 pub mod geo;
 pub mod sampling;
+pub mod sankey;
 pub mod space;
 pub mod statistics;
+pub mod treemap;
 pub mod vector_field;
 
 pub use axis::{
@@ -34,6 +36,9 @@ pub use sampling::{
     sample_function, sample_parametric, sample_parametric_surface, sample_surface,
     sample_vector_field,
 };
+pub use sankey::{
+    SankeyAlign, SankeyError, SankeyLayout, SankeyLink, SankeyNode, SankeyOptions, ribbon, sankey,
+};
 pub use space::{
     Cartesian3DVisibility, CartesianSpace, CartesianVisibility, ComplexSpace, CoordinateMap2D,
     CoordinateMap3D, LabelGeometry, NumberLine, NumberLineVisibility, PlotFrame, PolarSpace,
@@ -44,6 +49,7 @@ pub use statistics::{
     box_stats, data_mark_path, error_bar_path, histogram, line_path, scatter_points, step_path,
     violin_path,
 };
+pub use treemap::{TreemapCell, TreemapError, TreemapSpacing, squarify, treemap};
 pub use vector_field::{
     FieldSample, StreamDirection, Streamline, StreamlineOptions, VectorField, VectorFieldError,
 };

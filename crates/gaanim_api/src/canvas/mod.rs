@@ -100,6 +100,13 @@ pub use visualization::{
     PolarSpaceHandle, ProgressLabel, ProgressRing, ProgressRingOptions, StreamLinesHandle,
     StreamLinesStyle, VectorField2DHandle, VectorField3DHandle, VisualizationError,
 };
+mod sankey;
+mod treemap;
+pub use gaanim_visualization::{SankeyAlign, SankeyError, SankeyOptions, TreemapError};
+pub use sankey::{
+    SankeyChartOptions, SankeyFlowPart, SankeyHandle, SankeyNodePart, sankey_flow_key,
+};
+pub use treemap::{TreemapHandle, TreemapOptions, TreemapPart};
 mod canvas_impl;
 mod narration;
 pub use crate::export::{AudioTrack, AudioTrackError};

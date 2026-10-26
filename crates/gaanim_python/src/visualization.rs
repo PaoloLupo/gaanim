@@ -3153,7 +3153,7 @@ fn normalize_columns<'py>(columns: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Py
     ))
 }
 
-fn table_from_python(columns: &Bound<'_, PyAny>) -> PyResult<NativeDataTable> {
+pub(crate) fn table_from_python(columns: &Bound<'_, PyAny>) -> PyResult<NativeDataTable> {
     let columns = normalize_columns(columns)?;
     let mut native = Vec::with_capacity(columns.len());
     for (name, values) in columns.iter() {
