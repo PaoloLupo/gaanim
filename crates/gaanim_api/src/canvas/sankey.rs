@@ -366,7 +366,12 @@ mod tests {
         let first = flows(&[("A", "B", 3.0), ("A", "C", 1.0), ("B", "D", 2.0)]);
         let sankey = scene.sankey(&first, region, plain()).unwrap();
         scene.wait(0.5);
-        let second = flows(&[("A", "B", 1.0), ("A", "C", 3.0), ("C", "E", 2.0), ("C", "F", 1.0)]);
+        let second = flows(&[
+            ("A", "B", 1.0),
+            ("A", "C", 3.0),
+            ("C", "E", 2.0),
+            ("C", "F", 1.0),
+        ]);
         let anim = sankey.to_anim(&mut scene, &second, Some(1.0)).unwrap();
         scene.play(vec![anim]);
         scene.wait(0.5);
@@ -383,7 +388,11 @@ mod tests {
         let (mut world, mut timeline) = compiled(&scene);
         timeline.seek(&mut world, 0.25);
         let boxes = shown_boxes(&mut world);
-        assert!(expected(&first, region).iter().all(|rect| has(&boxes, *rect)));
+        assert!(
+            expected(&first, region)
+                .iter()
+                .all(|rect| has(&boxes, *rect))
+        );
         timeline.seek(&mut world, 1.9);
         let boxes = shown_boxes(&mut world);
         for rect in after {
@@ -402,10 +411,17 @@ mod tests {
             .sankey(&flows(&[("A", "B", 3.0), ("B", "C", 2.0)]), region, plain())
             .unwrap();
         let fill = |drawable: DrawableHandle| drawable.spec.lock().unwrap().fill.clone();
-        let (a, b) = (fill(sankey.node("A").unwrap()), fill(sankey.node("B").unwrap()));
+        let (a, b) = (
+            fill(sankey.node("A").unwrap()),
+            fill(sankey.node("B").unwrap()),
+        );
         assert_ne!(a, b);
         sankey
-            .to_anim(&mut scene, &flows(&[("B", "C", 2.0), ("A", "B", 1.0)]), None)
+            .to_anim(
+                &mut scene,
+                &flows(&[("B", "C", 2.0), ("A", "B", 1.0)]),
+                None,
+            )
             .unwrap();
         assert_eq!(fill(sankey.node("A").unwrap()), a);
         assert_eq!(fill(sankey.node("B").unwrap()), b);

@@ -484,7 +484,9 @@ pub(crate) mod tests {
             )
             .unwrap();
         scene.wait(0.2);
-        scene.play(vec![treemap.group.animate().shift_by(1.5, 0.0).duration(0.5)]);
+        scene.play(vec![
+            treemap.group.animate().shift_by(1.5, 0.0).duration(0.5),
+        ]);
         let anim = treemap
             .to_anim(
                 &mut scene,
