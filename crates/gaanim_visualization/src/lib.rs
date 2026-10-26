@@ -5,6 +5,7 @@ pub mod bar_race;
 pub mod chart;
 pub mod data;
 pub mod geo;
+pub mod graph;
 pub mod sampling;
 pub mod space;
 pub mod statistics;
@@ -29,6 +30,7 @@ pub use geo::{
     GeoError, GeoLine, GeoPolygon, Graticule, GraticuleLabel, GraticuleOptions, Longitudes,
     MERCATOR_MAX_LATITUDE, MapSide, MapView, Projection,
 };
+pub use graph::{GraphLayout, graph_layout};
 pub use sampling::{
     SampledPath, Sampling, SamplingError, SurfaceMesh, VectorGlyph, implicit_contours,
     sample_function, sample_parametric, sample_parametric_surface, sample_surface,

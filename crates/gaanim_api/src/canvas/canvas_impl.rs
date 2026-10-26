@@ -9401,6 +9401,15 @@ fn endpoint_is_valid(point: &CanvasEndpoint, state: &CanvasState) -> bool {
             radius,
             angle,
         } => endpoint_is_valid(origin, state) && scalar(radius) && scalar(angle),
+        CanvasEndpoint::Rim {
+            object,
+            toward,
+            radius,
+        } => {
+            state.object_specs.contains_key(object)
+                && endpoint_is_valid(toward, state)
+                && radius.is_finite()
+        }
         CanvasEndpoint::Screen(point) => endpoint_is_valid(point, state),
     }
 }

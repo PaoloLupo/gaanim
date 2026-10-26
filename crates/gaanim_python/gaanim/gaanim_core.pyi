@@ -11337,6 +11337,114 @@ class GeoFeatures(Drawable):
         """Each feature's properties, in order, as new dicts."""
         ...
 
+class Graph(Drawable):
+    """A graph or tree from ``scene.viz.graph``: named nodes joined by edges.
+
+    Every node is a group of a circle in the theme's accent and its name,
+    named by that name; every edge is a reactive line (an arrow when the
+    graph is directed) named ``"from→to"``, which leaves each circle a
+    little outside its edge and follows its nodes wherever they move, scale
+    or turn. Setters and animations on the graph act on all of it; ``node``
+    and ``edge`` give one part to style or animate. An arrow is a filled
+    shape and a line a stroke, so ``fill`` colors an arrow and ``stroke`` a
+    line.
+
+    Example:
+        tree = scene.viz.graph(nodes=["A", "B", "C"], edges=[("A", "B"), ("A", "C")], layout="tree")
+        scene.play([tree.edge("A", "B").animate.fill(scene.canvas.color("accent"))])
+    """
+    @property
+    def nodes(self) -> list[str]:
+        """The node names, in order."""
+        ...
+    @property
+    def edges(self) -> list[tuple[str, str]]:
+        """The edges as ``(from, to)`` pairs, in order."""
+        ...
+    def node(self, name: str) -> Drawable:
+        """The node ``name``, its circle and its name, as a ``Drawable``; ``graph[name]`` is the same.
+
+        An unknown name raises ``KeyError``.
+        """
+        ...
+    def __getitem__(self, name: str) -> Drawable: ...
+    def edge(self, source: str, target: str) -> Drawable:
+        """The first edge from ``source`` to ``target`` (either way when the graph is not directed).
+
+        An edge the graph does not have raises ``KeyError``.
+        """
+        ...
+    @property
+    def animate(self) -> GraphAnimation:
+        """Animation proxy: ``Drawable.animate`` plus changes of structure."""
+        ...
+
+class GraphAnimation(Anim):
+    """Animation proxy of a ``Graph``: an ``Anim`` whose changes of structure return a ``Composition``.
+
+    A change lays the whole graph out again with its layout. Nodes that
+    stay move to their new places, new nodes and edges fade in at theirs,
+    and removed ones fade out, all at once; edges follow their nodes as they
+    move. Places are in the graph's own frame, so a graph that moved,
+    scaled or turned keeps its parts inside it, and a node moved by hand
+    moves by the same change and keeps its offset. New parts stay hidden until the change plays, and later changes,
+    ``nodes``, ``edges``, ``node`` and ``edge`` start from the new structure
+    at once. ``duration`` sets the length of every part of the change;
+    without it, ``Scene.play``'s ``duration`` does. A non-positive
+    ``duration`` raises ``ValueError``.
+    """
+    def to(
+        self,
+        nodes: Sequence[str],
+        edges: Optional[Sequence[tuple[str, str]]] = None,
+        *,
+        duration: Optional[float] = None,
+    ) -> Composition:
+        """Change the graph to ``nodes`` and ``edges``, keyed by name.
+
+        An edge both structures have stays, in order: the second edge between
+        two nodes stays when the new structure has a second one too.
+        Structures ``scene.viz.graph`` rejects raise ``ValueError``.
+
+        Example:
+            scene.play([graph.animate.to(["A", "B", "D"], [("A", "B"), ("B", "D")])])
+        """
+        ...
+    def add_node(
+        self,
+        name: str,
+        edges: Optional[Sequence[tuple[str, str]]] = None,
+        *,
+        duration: Optional[float] = None,
+    ) -> Composition:
+        """Add the node ``name`` and ``edges`` (which may join any nodes), and lay the graph out again.
+
+        A name the graph has, or edges to unknown nodes, raise ``ValueError``.
+
+        Example:
+            scene.play([tree.animate.add_node("D", edges=[("C", "D")])])
+        """
+        ...
+    def remove_node(self, name: str, *, duration: Optional[float] = None) -> Composition:
+        """Remove the node ``name`` and its edges, and lay the graph out again.
+
+        An unknown name raises ``KeyError``; removing the last node raises
+        ``ValueError``.
+        """
+        ...
+    def add_edge(self, source: str, target: str, *, duration: Optional[float] = None) -> Composition:
+        """Add an edge from ``source`` to ``target``, and lay the graph out again.
+
+        Unknown nodes or an edge from a node to itself raise ``ValueError``.
+        """
+        ...
+    def remove_edge(self, source: str, target: str, *, duration: Optional[float] = None) -> Composition:
+        """Remove the first edge from ``source`` to ``target`` (either way when not directed), and lay the graph out again.
+
+        An edge the graph does not have raises ``KeyError``.
+        """
+        ...
+
 class Visualization:
     """Scene-owned API for reactive values, coordinate spaces, charts, and matrices."""
     def progress_ring(
@@ -11617,6 +11725,59 @@ class Visualization:
             atlas = scene.viz.map(lat=(-19, 1), center_lon=-75.5, within=zones["map"])
             countries = atlas.geojson("andes.geojson", key="name")
             scene.play(countries.animate.create())
+        """
+        ...
+    def graph(
+        self,
+        nodes: Optional[Sequence[str]] = None,
+        edges: Optional[Sequence[tuple[str, str]]] = None,
+        *,
+        layout: Literal["tree", "layered", "circular", "force"] = "layered",
+        directed: bool = True,
+        seed: int = 0,
+        node_radius: float = 0.3,
+        labels: bool = True,
+        within: Optional[Literal["safe", "frame"] | Zone | Drawable] = None,
+    ) -> Graph:
+        """Draw a graph of ``nodes`` joined by ``edges`` (``(from, to)`` pairs of names), laid out in ``within``.
+
+        Without ``nodes``, the graph has the nodes its edges name, in the
+        order they first appear. Every layout is computed from the nodes and
+        edges alone, so the same graph gets the same places in every run and
+        every seek:
+
+        - ``"tree"``: a tidy tree, depth going down. Roots are the nodes no
+          edge enters (the first node of each part when not ``directed``);
+          every other node hangs from the node that reaches it first,
+          breadth first, leaves take consecutive columns and parents sit
+          above the middle of their children.
+        - ``"layered"`` (the default): layers going down after Sugiyama. In a
+          directed graph, a node's layer is the length of the longest chain of
+          edges that leads to it, and edges that close a cycle count turned
+          around; without direction, it is the number of edges from the first
+          node of its part. An edge that skips layers keeps a place on each
+          layer it crosses, so no node sits in its way, and the nodes of each
+          layer are reordered by their neighbors so fewer edges cross.
+        - ``"circular"``: the nodes on a circle, the first at the top, then
+          clockwise.
+        - ``"force"``: edges pull their nodes together and every pair pushes
+          apart, from starting places that ``seed`` picks, for a fixed number
+          of steps.
+
+        The layout fills ``within`` (the safe area by default, the frame, a
+        zone or a drawable's box), up to 2.4 units between neighbors so a
+        small graph does not sprawl; trees and layers stretch to the region,
+        circles and forces keep their proportions. ``directed`` draws arrows
+        from each edge's first node to its second. Nodes are at least
+        ``node_radius`` and grow to hold their names; ``labels=False`` leaves
+        the names out. No nodes, a repeated name, an edge to an unknown node
+        or from a node to itself, a non-positive ``node_radius`` or another
+        ``layout`` raise ``ValueError``; ``nodes`` or ``edges`` of another
+        shape raise ``TypeError``.
+
+        Example:
+            tree = scene.viz.graph(nodes=["A", "B", "C"], edges=[("A", "B"), ("B", "C")], layout="tree")
+            scene.play([tree.animate.add_node("D", edges=[("C", "D")])])
         """
         ...
     def complex(
