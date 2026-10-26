@@ -9334,7 +9334,7 @@ class Image(Drawable):
 
         Example:
             face = photo.region(760, 180, 120, 140)
-            ring = face.annotate.circle(color=scene.canvas.color("accent"))
+            ring = face.annotate.circle(color=scene.colors.accent)
             scene.play([ring.animate.create()])
         """
         ...
@@ -9406,7 +9406,7 @@ class Video(Drawable):
 
         Example:
             face = photo.region(760, 180, 120, 140)
-            ring = face.annotate.circle(color=scene.canvas.color("accent"))
+            ring = face.annotate.circle(color=scene.colors.accent)
             scene.play([ring.animate.create()])
         """
         ...
@@ -11556,7 +11556,7 @@ class GeoMap:
         map, so it draws below the map's drawings.
 
         Example:
-            atlas.frame.fill(scene.canvas.color("panel"))
+            atlas.frame.fill(scene.colors.panel)
         """
         ...
     def point(self, lon: float, lat: float) -> tuple[float, float]:
@@ -11640,7 +11640,7 @@ class GeoMap:
 
         Example:
             countries = atlas.geojson("andes.geojson", key="name")
-            countries["Peru"].fill(scene.canvas.color("accent"))
+            countries["Peru"].fill(scene.colors.accent)
         """
         ...
     def graticule(
@@ -11727,7 +11727,7 @@ class Graph(Drawable):
 
     Example:
         tree = scene.viz.graph(nodes=["A", "B", "C"], edges=[("A", "B"), ("A", "C")], layout="tree")
-        scene.play([tree.edge("A", "B").animate.fill(scene.canvas.color("accent"))])
+        scene.play([tree.edge("A", "B").animate.fill(scene.colors.accent)])
     """
     @property
     def nodes(self) -> list[str]:
