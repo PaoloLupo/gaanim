@@ -643,7 +643,7 @@ description = "Mercator and equirectangular maps, labeled graticules, countries 
 
 [[example]]
 path = "visualization/graphs.py"
-description = "Graphs in tree, layered, circular and force layouts, with and without direction or names, and nodes and edges added and removed as the graph lays itself out again."
+description = "Graphs in tree, layered, circular and force layouts, with and without direction or names, nodes and edges added and removed as the graph lays itself out again, and a whole new structure with animate.to."
 
 [[example]]
 path = "visualization/plots.py"

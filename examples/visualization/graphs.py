@@ -15,6 +15,10 @@ MOVE = 1.0
 
 NODES = ["a", "b", "c", "d", "e", "f", "g"]
 EDGES = [("a", "b"), ("a", "c"), ("b", "d"), ("b", "e"), ("c", "f"), ("c", "g"), ("e", "f")]
+TEAM = ["CEO", "CTO", "CFO", "Dev", "QA", "Ops"]
+TEAM_EDGES = [("CEO", "CTO"), ("CEO", "CFO"), ("CTO", "Dev"), ("CTO", "QA"), ("CFO", "Ops")]
+REORG = ["CEO", "CTO", "COO", "Dev", "Data", "QA", "Ops"]
+REORG_EDGES = [("CEO", "CTO"), ("CEO", "COO"), ("CTO", "Dev"), ("CTO", "Data"), ("COO", "QA"), ("COO", "Ops")]
 
 scene = Scene()
 
@@ -70,10 +74,22 @@ scene.play([tree.animate.remove_node("g"), flow.animate.remove_edge("a", "c")], 
 scene.play([flow.edge("d", "g").animate.fill(scene.canvas.color("success")).duration(0.5)])
 scene.wait(HOLD)
 
+# animate.to changes the whole structure at once: the nodes both structures
+# have move, and the others fade out and in.
+scene.segment("restructure")
+(stage,) = panels(["org.animate.to(REORG, REORG_EDGES)"], columns=1)
+org = scene.viz.graph(TEAM, TEAM_EDGES, layout="tree", within=stage)
+scene.play([org.animate.fade_in().duration(FADE)])
+scene.wait(0.4)
+scene.play([org.animate.to(REORG, REORG_EDGES, duration=MOVE)])
+scene.wait(HOLD)
+
 SEGMENT = FADE + HOLD
 CHANGES = 3 * SEGMENT + FADE + 0.4
+REORG_START = CHANGES + 2 * MOVE + 0.4 + 0.5 + HOLD + FADE + 0.4
 SEEKS = [FADE / 2, SEGMENT - 0.2, 2 * SEGMENT - 0.2, 3 * SEGMENT - 0.2]
 SEEKS += [CHANGES + MOVE / 2, CHANGES + MOVE + 0.3, CHANGES + 1.5 * MOVE + 0.4, CHANGES + 2 * MOVE + 0.4 + 0.5 + HOLD - 0.2]
+SEEKS += [REORG_START + MOVE / 2, REORG_START + MOVE + HOLD - 0.2]
 
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
     scene.snapshots(snapshots, SEEKS)
