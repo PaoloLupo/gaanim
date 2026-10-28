@@ -1281,7 +1281,7 @@ flow = scene.viz.graph(edges=[("leer", "validar"), ("validar", "guardar"), ("val
 scene.play([flow.animate.fade_in().duration(0.5)])
 scene.play([flow.animate.add_edge("error", "leer")])
 scene.play([flow.animate.remove_node("error")], duration=0.8)
-scene.play([flow.edge("validar", "guardar").animate.fill(scene.canvas.color("accent"))])
+scene.play([flow.edge("validar", "guardar").animate.fill(scene.colors.accent)])
 scene.wait(0.5)
 # output: preview.webp
 scene.render()

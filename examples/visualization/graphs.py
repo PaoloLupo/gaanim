@@ -71,7 +71,7 @@ scene.wait(0.4)
 scene.play([tree.animate.add_node("h", edges=[("d", "h")]), flow.animate.add_edge("d", "g")], duration=MOVE)
 scene.wait(0.4)
 scene.play([tree.animate.remove_node("g"), flow.animate.remove_edge("a", "c")], duration=MOVE)
-scene.play([flow.edge("d", "g").animate.fill(scene.canvas.color("success")).duration(0.5)])
+scene.play([flow.edge("d", "g").animate.fill(scene.colors.success).duration(0.5)])
 scene.wait(HOLD)
 
 # animate.to changes the whole structure at once: the nodes both structures
