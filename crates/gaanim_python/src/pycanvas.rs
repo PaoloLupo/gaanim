@@ -438,62 +438,6 @@ pub(crate) fn surrounding_padding(value: Option<Bound<'_, PyAny>>) -> PyResult<[
 
 #[pymethods]
 impl PySurroundingRect {
-    fn fill<'py>(slf: PyRef<'py, Self>, paint: PyPaint) -> PyResult<PyRef<'py, Self>> {
-        crate::custom::ensure_authoring_allowed()?;
-        Ok({
-            slf.handle.drawable.clone().fill_brush(paint.0);
-            slf
-        })
-    }
-
-    fn no_fill(slf: PyRef<'_, Self>) -> PyResult<PyRef<'_, Self>> {
-        crate::custom::ensure_authoring_allowed()?;
-        Ok({
-            slf.handle.drawable.clone().no_fill();
-            slf
-        })
-    }
-
-    #[pyo3(signature = (paint, width, *, align=None))]
-    fn stroke<'py>(
-        slf: PyRef<'py, Self>,
-        paint: PyPaint,
-        width: f64,
-        align: Option<&str>,
-    ) -> PyResult<PyRef<'py, Self>> {
-        crate::custom::ensure_authoring_allowed()?;
-        let align = align
-            .map(crate::pydrawable::parse_stroke_align)
-            .transpose()?;
-        let handle = slf.handle.drawable.clone().stroke_brush(paint.0, width);
-        if let Some(align) = align {
-            handle.stroke_align(align);
-        }
-        Ok(slf)
-    }
-
-    fn no_stroke(slf: PyRef<'_, Self>) -> PyResult<PyRef<'_, Self>> {
-        crate::custom::ensure_authoring_allowed()?;
-        Ok({
-            slf.handle.drawable.clone().no_stroke();
-            slf
-        })
-    }
-
-    fn opacity<'py>(slf: PyRef<'py, Self>, value: &Bound<'_, PyAny>) -> PyResult<PyRef<'py, Self>> {
-        crate::custom::ensure_authoring_allowed()?;
-        PyDrawable(slf.handle.drawable.clone()).opacity_impl(value)?;
-        Ok(slf)
-    }
-
-    fn z_index(slf: PyRef<'_, Self>, value: i32) -> PyResult<PyRef<'_, Self>> {
-        crate::custom::ensure_authoring_allowed()?;
-        Ok({
-            slf.handle.drawable.clone().z_index(value);
-            slf
-        })
-    }
-
     /// Move and resize this frame to new live drawable or text-selection bounds.
     fn retarget(&self, targets: &Bound<'_, PyAny>) -> PyResult<PyCanvasAnim> {
         crate::custom::ensure_authoring_allowed()?;

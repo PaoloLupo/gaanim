@@ -32,12 +32,6 @@ indicatif = "0.17"
 pollster = "0.3"
 crossbeam-channel = "0.5"
 
-# Export hosts use a native viewport, including the offscreen-window path. The
-# playground's Pyodide extension (wasm32-unknown-emscripten) only records
-# bundles, and winit does not support Emscripten.
-[target.'cfg(not(target_os = "emscripten"))'.dependencies]
-bevy = { workspace = true, features = ["bevy_winit", "wayland"] }
-
 # Slide decks exported to PDF; Typst (through gaanim_text) lays out the pages.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 pdf-writer = "0.15"

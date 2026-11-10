@@ -857,7 +857,6 @@ pub fn video_config(
     config.aspect_ratio = AspectRatioPreset::Custom;
     config.video_encoder = command.encoder;
     config.transparent = command.transparent;
-    config.headless = true;
     config
 }
 
@@ -882,7 +881,6 @@ pub fn export_frames(
     config.fit = command.fit;
     config.aspect_ratio = AspectRatioPreset::Custom;
     config.transparent = command.transparent;
-    config.headless = true;
     let paths = command.frame_outputs(output, &times);
     for path in &paths {
         if let Some(parent) = path
@@ -1034,7 +1032,6 @@ pub fn export_slides_pdf(
     (config.width, config.height) = size;
     config.fit = command.fit;
     config.aspect_ratio = AspectRatioPreset::Custom;
-    config.headless = true;
     let times = frame_times(&pages);
     let mut frames = Vec::with_capacity(times.len());
     gaanim_export::prelude::capture_scene_direct_streaming(

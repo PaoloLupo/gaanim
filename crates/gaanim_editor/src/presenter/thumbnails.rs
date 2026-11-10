@@ -303,7 +303,6 @@ impl PresenterThumbnailCache {
                         config.width = width;
                         config.height = height;
                         config.aspect_ratio = AspectRatioPreset::Custom;
-                        config.headless = true;
                         capture_scene_direct_streaming(
                             config,
                             &times,

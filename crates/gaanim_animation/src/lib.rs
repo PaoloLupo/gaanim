@@ -68,9 +68,7 @@ pub use signals::{
     tangent_on_curve_system, validate_number_format,
 };
 pub use tween::{
-    AnimatableLens, CameraStateSource, DeltaTime, MorphTable, PropertyLens, Tween, TweenState,
-    evaluate_custom_tweens_system, evaluate_line_path_ranges_system, evaluate_tweens_system,
-    sync_delta_time_system,
+    AnimatableLens, CameraStateSource, DeltaTime, MorphTable, sync_delta_time_system,
 };
 pub use updaters::{
     AmbientClock, AngleArrowheads, AngleLabelPlacement, AngleSweep, DimensionLabelOrientation,
@@ -137,22 +135,6 @@ impl bevy::prelude::Plugin for GaanimAnimationPlugin {
                 live::live_zone_system,
             )
                 .in_set(SceneSet::Visualization),
-        );
-
-        // Register tween evaluation in the Animation Phase.
-        // evaluate_tweens_system runs in parallel for built-in lenses,
-        // followed by evaluate_custom_tweens_system for exclusive World access.
-        // The `PathCompletion` lens writes the trimmed `Path2D` directly
-        // from the cached `PathSource` (seeded once at spawn), so we no
-        // longer need a separate application system for it.
-        app.add_systems(
-            Update,
-            (
-                evaluate_tweens_system,
-                evaluate_line_path_ranges_system.after(evaluate_tweens_system),
-                evaluate_custom_tweens_system.after(evaluate_line_path_ranges_system),
-            )
-                .in_set(SceneSet::Animation),
         );
 
         // Outside a live presentation, the rehearsal stands in for the
