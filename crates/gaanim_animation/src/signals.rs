@@ -1993,6 +1993,51 @@ mod tests {
         straight.line_to(Point::new(4.0, 0.0));
         assert!(osculating_circle(&straight, 0.0, 0.2).is_none());
     }
+
+    /// A regeneration that rebuilds the same path leaves its components
+    /// unchanged, so the renderer keeps the fragment and seeks do not
+    /// restore it every frame, paused or not.
+    #[test]
+    fn regenerating_the_same_path_marks_no_change() {
+        use bevy::prelude::DetectChanges;
+        let mut world = World::new();
+        let entity = world
+            .spawn((
+                gaanim_scene::Path2D(Arc::new(BezPath::new())),
+                gaanim_scene::PathSource(Arc::new(BezPath::new())),
+                gaanim_scene::LocalBounds(Bounds3D::default()),
+                AlwaysRedrawRegen::new(|_| {
+                    let mut path = BezPath::new();
+                    path.move_to((0.0, 0.0));
+                    path.line_to((4.0, 2.0));
+                    path
+                }),
+            ))
+            .id();
+        let ticks = |world: &World| {
+            let entity = world.entity(entity);
+            [
+                entity
+                    .get_ref::<gaanim_scene::Path2D>()
+                    .unwrap()
+                    .last_changed(),
+                entity
+                    .get_ref::<gaanim_scene::PathSource>()
+                    .unwrap()
+                    .last_changed(),
+                entity
+                    .get_ref::<gaanim_scene::LocalBounds>()
+                    .unwrap()
+                    .last_changed(),
+            ]
+        };
+
+        always_redraw_regen_system(&mut world);
+        let drawn = ticks(&world);
+        world.increment_change_tick();
+        always_redraw_regen_system(&mut world);
+        assert_eq!(ticks(&world), drawn, "the same path was written again");
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2118,14 +2163,16 @@ pub fn always_redraw_regen_system(world: &mut World) {
         }
         let path = Arc::new(path);
         let visible = crate::writing::visible_path(&path, reveal, trim.as_ref());
+        // A path rebuilt the same as before keeps its change tick, so the
+        // renderer keeps its fragment and seeks do not restore it.
         if let Some(mut path_comp) = world.get_mut::<gaanim_scene::Path2D>(entity) {
-            path_comp.0 = visible;
+            path_comp.set_if_neq(gaanim_scene::Path2D(visible));
         }
         if let Some(mut path_source) = world.get_mut::<gaanim_scene::PathSource>(entity) {
-            path_source.0 = path;
+            path_source.set_if_neq(gaanim_scene::PathSource(path));
         }
         if let Some(mut local_bounds) = world.get_mut::<gaanim_scene::LocalBounds>(entity) {
-            local_bounds.0 = bounds;
+            local_bounds.set_if_neq(gaanim_scene::LocalBounds(bounds));
         }
         // Keep the PathReveal component alive so snapshot restore
         // can see the correct reveal factor.
