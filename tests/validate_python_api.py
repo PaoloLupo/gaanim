@@ -4337,7 +4337,9 @@ def validate_native_method_signatures(module, tree: ast.Module) -> list[str]:
     native class resolves at runtime. Inherited methods matter: a subclass
     that redeclares a base setter in Rust (as ``Text.stroke`` once did) can
     drop a parameter the stub still promises. Overloaded methods and
-    properties declare no single signature and are skipped.
+    properties declare no single signature and are skipped, and a method
+    whose code takes ``**options`` may list those options as keyword-only
+    parameters in the stub.
     """
     classes = {node.name: node for node in tree.body if isinstance(node, ast.ClassDef)}
 
@@ -4403,7 +4405,14 @@ def validate_native_method_signatures(module, tree: ast.Module) -> list[str]:
             if actual is None:
                 continue
             expected = stub_signature(function)
-            if expected != actual:
+            # `**options` in the code may stand for the keyword-only
+            # parameters the stub spells out.
+            spelled_out = (
+                actual[-1:] != []
+                and actual[-1].startswith("**")
+                and [name for name in expected if not name.endswith("=")] == actual[:-1]
+            )
+            if expected != actual and not spelled_out:
                 declared = name if owner == name else f"{name} (from {owner})"
                 failures.append(
                     f"{declared}.{method} takes {expected} in the stub, the code {actual}"

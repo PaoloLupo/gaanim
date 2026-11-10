@@ -210,8 +210,8 @@ impl PyColor {
 
     /// Parse a hex color string. Supports `#RGB`, `#RRGGBB`, `#RRGGBBAA` (with or without `#`).
     #[staticmethod]
-    fn from_hex(s: &str) -> PyResult<Self> {
-        let s = s.trim();
+    fn from_hex(value: &str) -> PyResult<Self> {
+        let s = value.trim();
         let hex = s.strip_prefix('#').unwrap_or(s);
         match hex.len() {
             3 => {
