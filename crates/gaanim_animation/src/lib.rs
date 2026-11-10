@@ -168,39 +168,91 @@ impl bevy::prelude::Plugin for GaanimAnimationPlugin {
         // Register standard signal binders and continuous updaters in the Updaters Phase.
         // Ordering: updaters run first (modify positions), then bindings copy positions,
         // then tracking lines and traced paths read the final positions.
+        // Each exclusive system only walks its own components, so it is
+        // skipped in scenes that have none.
         app.add_systems(
             Update,
             (
                 updater_system,
                 polls::poll_value_system.before(sampled_series_system),
-                sampled_series_system.after(updater_system),
+                sampled_series_system
+                    .after(updater_system)
+                    .run_if(any_with_component::<SampledSeriesDrivers>),
                 (
-                    property_binding_system.after(sampled_series_system),
+                    property_binding_system
+                        .after(sampled_series_system)
+                        .run_if(any_with_component::<PropertyBinding>),
                     curve_bindings_pre_pass_system.after(property_binding_system),
-                    position_binding_system.after(curve_bindings_pre_pass_system),
+                    position_binding_system
+                        .after(curve_bindings_pre_pass_system)
+                        .run_if(any_with_component::<PositionBinding>),
                 ),
                 (
-                    mechanism_binding_system.after(position_binding_system),
-                    endpoint_follow_system.after(mechanism_binding_system),
+                    mechanism_binding_system
+                        .after(position_binding_system)
+                        .run_if(
+                            any_with_component::<RotationBinding>
+                                .or_else(any_with_component::<RotationTranslationBinding>),
+                        ),
+                    endpoint_follow_system
+                        .after(mechanism_binding_system)
+                        .run_if(any_with_component::<EndpointFollow>),
                     // Bindings run again so a source placed by `follow` is copied
                     // in the same frame.
-                    followed_position_binding_system.after(endpoint_follow_system),
+                    followed_position_binding_system
+                        .after(endpoint_follow_system)
+                        .run_if(any_with_component::<PositionBinding>),
                 ),
-                always_redraw_regen_system.after(followed_position_binding_system),
-                reactive_3d_regen_system.after(always_redraw_regen_system),
-                tracking_line_system.after(reactive_3d_regen_system),
-                tracking_angle_system.after(tracking_line_system),
-                tracking_vector_head_system.after(tracking_angle_system),
-                endpoint_distance_system.after(tracking_vector_head_system),
-                endpoint_angle_system.after(endpoint_distance_system),
-                dimension_label_placement_system.after(endpoint_angle_system),
-                angle_label_placement_system.after(dimension_label_placement_system),
-                traced_path_system.after(angle_label_placement_system),
-                traced_path_3d_system.after(traced_path_system),
-                point_on_curve_system.after(traced_path_3d_system),
-                tangent_on_curve_system.after(point_on_curve_system),
-                normal_on_curve_system.after(tangent_on_curve_system),
-                curvature_on_curve_system.after(normal_on_curve_system),
+                always_redraw_regen_system
+                    .after(followed_position_binding_system)
+                    .run_if(any_with_component::<AlwaysRedrawRegen>),
+                reactive_3d_regen_system
+                    .after(always_redraw_regen_system)
+                    .run_if(
+                        any_with_component::<ReactiveLineRegen>
+                            .or_else(any_with_component::<ReactiveMeshRegen>),
+                    ),
+                tracking_line_system.after(reactive_3d_regen_system).run_if(
+                    any_with_component::<TrackingLine>
+                        .or_else(any_with_component::<updaters::TrackingConnector>)
+                        .or_else(any_with_component::<TrackingLine3D>),
+                ),
+                tracking_angle_system
+                    .after(tracking_line_system)
+                    .run_if(any_with_component::<TrackingAngle>),
+                tracking_vector_head_system
+                    .after(tracking_angle_system)
+                    .run_if(any_with_component::<TrackingVectorHead>),
+                endpoint_distance_system
+                    .after(tracking_vector_head_system)
+                    .run_if(any_with_component::<EndpointDistance>),
+                endpoint_angle_system
+                    .after(endpoint_distance_system)
+                    .run_if(any_with_component::<EndpointAngle>),
+                dimension_label_placement_system
+                    .after(endpoint_angle_system)
+                    .run_if(any_with_component::<DimensionLabelPlacement>),
+                angle_label_placement_system
+                    .after(dimension_label_placement_system)
+                    .run_if(any_with_component::<AngleLabelPlacement>),
+                traced_path_system
+                    .after(angle_label_placement_system)
+                    .run_if(any_with_component::<TracedPath>),
+                traced_path_3d_system
+                    .after(traced_path_system)
+                    .run_if(any_with_component::<TracedPath3D>),
+                point_on_curve_system
+                    .after(traced_path_3d_system)
+                    .run_if(any_with_component::<PointOnCurve>),
+                tangent_on_curve_system
+                    .after(point_on_curve_system)
+                    .run_if(any_with_component::<TangentOnCurve>),
+                normal_on_curve_system
+                    .after(tangent_on_curve_system)
+                    .run_if(any_with_component::<NormalOnCurve>),
+                curvature_on_curve_system
+                    .after(normal_on_curve_system)
+                    .run_if(any_with_component::<CurvatureOnCurve>),
             )
                 .in_set(SceneSet::Updaters),
         );
