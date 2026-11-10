@@ -31,7 +31,7 @@ pub use components::{
     PlaneFillData, PlaneGlyph, PlaneImage, Presence, REVEAL_SPAN, RasterImage, ReactiveOpacity,
     RenderLayer, RenderOrder, SegmentContent, ShapeDeform, SpotCone, StepRate, StrokeBrush,
     TextAdvance, TextBaseline, Transparency3D, TriangleMeshData, Visible, VolumeData, WorldBounds,
-    ZLayer, stepped,
+    ZLayer, same_shared_path, stepped,
 };
 pub use hierarchy::{GaanimScenePlugin, SceneSet};
 pub use model::{

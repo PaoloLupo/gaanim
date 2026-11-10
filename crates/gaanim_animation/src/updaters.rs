@@ -2230,19 +2230,23 @@ fn lerp_bounds(
 /// Rebuild all live surrounding rectangles after layout and transform
 /// propagation, immediately before normal bounds extraction.
 pub fn surrounding_rect_system(world: &mut World) {
-    let entities = {
-        let mut query = world.query::<(Entity, &gaanim_scene::MobjectId)>();
-        query
-            .iter(world)
-            .map(|(entity, id)| (id.0, entity))
-            .collect::<std::collections::HashMap<_, _>>()
-    };
     let frames = {
         let mut query = world.query::<(Entity, &SurroundingRect)>();
         query
             .iter(world)
             .map(|(entity, frame)| (entity, frame.clone()))
             .collect::<Vec<_>>()
+    };
+    // Most scenes have no frame: skip indexing every object.
+    if frames.is_empty() {
+        return;
+    }
+    let entities = {
+        let mut query = world.query::<(Entity, &gaanim_scene::MobjectId)>();
+        query
+            .iter(world)
+            .map(|(entity, id)| (id.0, entity))
+            .collect::<std::collections::HashMap<_, _>>()
     };
 
     for (entity, frame) in frames {
@@ -2261,9 +2265,11 @@ pub fn surrounding_rect_system(world: &mut World) {
             write_path(world, entity, path);
             if let Some(bounds) = bounds {
                 if let Some(mut local) = world.get_mut::<LocalBounds>(entity) {
-                    local.0 = bounds;
+                    local.set_if_neq(LocalBounds(bounds));
                 }
-                if let Some(mut live) = world.get_mut::<SurroundingRect>(entity) {
+                if let Some(mut live) = world.get_mut::<SurroundingRect>(entity)
+                    && live.last_bounds != Some(bounds)
+                {
                     live.last_bounds = Some(bounds);
                 }
             }
@@ -2285,7 +2291,9 @@ pub fn surrounding_rect_system(world: &mut World) {
 
         if let Some(rays) = frame.rays {
             write_path(world, entity, rays.path(bounds));
-            if let Some(mut live) = world.get_mut::<SurroundingRect>(entity) {
+            if let Some(mut live) = world.get_mut::<SurroundingRect>(entity)
+                && live.last_bounds != Some(bounds)
+            {
                 live.last_bounds = Some(bounds);
             }
             continue;
@@ -2298,7 +2306,9 @@ pub fn surrounding_rect_system(world: &mut World) {
                 bounds.max.y,
             ));
             write_path(world, entity, path);
-            if let Some(mut live) = world.get_mut::<SurroundingRect>(entity) {
+            if let Some(mut live) = world.get_mut::<SurroundingRect>(entity)
+                && live.last_bounds != Some(bounds)
+            {
                 live.last_bounds = Some(bounds);
             }
             continue;
@@ -2315,9 +2325,11 @@ pub fn surrounding_rect_system(world: &mut World) {
                 bounds.min.y,
             );
             if let Some(mut local) = world.get_mut::<LocalBounds>(entity) {
-                local.0 = bounds;
+                local.set_if_neq(LocalBounds(bounds));
             }
-            if let Some(mut live) = world.get_mut::<SurroundingRect>(entity) {
+            if let Some(mut live) = world.get_mut::<SurroundingRect>(entity)
+                && live.last_bounds != Some(bounds)
+            {
                 live.last_bounds = Some(bounds);
             }
             continue;
@@ -2342,9 +2354,11 @@ pub fn surrounding_rect_system(world: &mut World) {
         };
         write_path(world, entity, path);
         if let Some(mut local) = world.get_mut::<LocalBounds>(entity) {
-            local.0 = bounds;
+            local.set_if_neq(LocalBounds(bounds));
         }
-        if let Some(mut live) = world.get_mut::<SurroundingRect>(entity) {
+        if let Some(mut live) = world.get_mut::<SurroundingRect>(entity)
+            && live.last_bounds != Some(bounds)
+        {
             live.last_bounds = Some(bounds);
         }
     }
@@ -5431,5 +5445,55 @@ mod tests {
         .unwrap();
         assert!(invalid.clone().with_colors(Vec::new(), None).is_err());
         assert!(invalid.with_colors(vec![red], Some((1.0, 1.0))).is_err());
+    }
+
+    /// A frame whose targets hold still leaves its path, bounds and frame
+    /// state unchanged.
+    #[test]
+    fn a_still_surrounding_rect_marks_no_change() {
+        use bevy::prelude::DetectChanges;
+        let mut world = World::new();
+        let target = ObjectId::from_parts(1, 1);
+        world.spawn((
+            gaanim_scene::MobjectId(target),
+            SpatialTransform::new_2d(1.0, 2.0),
+            LocalBounds(gaanim_math::Bounds3D::new_2d(-1.0, -1.0, 1.0, 1.0)),
+        ));
+        let empty = Arc::new(BezPath::new());
+        let frame = world
+            .spawn((
+                gaanim_scene::MobjectId(ObjectId::from_parts(2, 1)),
+                SpatialTransform::default(),
+                Path2D(empty.clone()),
+                PathSource(empty),
+                LocalBounds(gaanim_math::Bounds3D::default()),
+                SurroundingRect {
+                    from: vec![target],
+                    to: vec![target],
+                    progress: 1.0,
+                    padding: [0.1; 4],
+                    corner_radius: 0.0,
+                    last_bounds: None,
+                    shape: SurroundingShape::Frame,
+                    notation: None,
+                    rays: None,
+                },
+            ))
+            .id();
+        let ticks = |world: &World| {
+            let entity = world.entity(frame);
+            [
+                entity.get_ref::<Path2D>().unwrap().last_changed(),
+                entity.get_ref::<PathSource>().unwrap().last_changed(),
+                entity.get_ref::<LocalBounds>().unwrap().last_changed(),
+                entity.get_ref::<SurroundingRect>().unwrap().last_changed(),
+            ]
+        };
+
+        surrounding_rect_system(&mut world);
+        let drawn = ticks(&world);
+        world.increment_change_tick();
+        surrounding_rect_system(&mut world);
+        assert_eq!(ticks(&world), drawn, "an unchanged frame was written again");
     }
 }

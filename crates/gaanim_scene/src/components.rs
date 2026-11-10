@@ -116,15 +116,34 @@ impl Default for GlobalOpacity {
 }
 
 /// A 2D vector geometry represented as a shared Bézier path (`Arc<kurbo::BezPath>`).
-#[derive(Component, Debug, Clone, Default, PartialEq)]
+#[derive(Component, Debug, Clone, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Path2D(pub Arc<BezPath>);
 
 /// A mirror component that caches the original, unmodified Bézier path
 /// of a Mobject for time-based trimming / interpolation during writing/drawing.
-#[derive(Component, Debug, Clone, Default, PartialEq)]
+#[derive(Component, Debug, Clone, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct PathSource(pub Arc<BezPath>);
+
+/// Whether two shared paths are equal, without comparing their elements
+/// when they are the same allocation: `BezPath` is not `Eq`, so `Arc`'s own
+/// comparison never takes that shortcut.
+pub fn same_shared_path(left: &Arc<BezPath>, right: &Arc<BezPath>) -> bool {
+    Arc::ptr_eq(left, right) || left == right
+}
+
+impl PartialEq for Path2D {
+    fn eq(&self, other: &Self) -> bool {
+        same_shared_path(&self.0, &other.0)
+    }
+}
+
+impl PartialEq for PathSource {
+    fn eq(&self, other: &Self) -> bool {
+        same_shared_path(&self.0, &other.0)
+    }
+}
 
 /// How draw animations (`PathCompletion`) reveal a path with several sub-paths.
 #[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -1460,5 +1479,24 @@ mod material_3d_tests {
         .unwrap();
         assert_eq!(from.lerp(to, 0.0), from);
         assert_eq!(from.lerp(to, 1.0), to);
+    }
+}
+
+#[cfg(test)]
+mod path_tests {
+    use super::*;
+
+    #[test]
+    fn shared_paths_compare_by_allocation_then_by_elements() {
+        let line = |x: f64| {
+            let mut path = BezPath::new();
+            path.move_to((0.0, 0.0));
+            path.line_to((x, 0.0));
+            Arc::new(path)
+        };
+        let shared = line(1.0);
+        assert_eq!(Path2D(shared.clone()), Path2D(shared.clone()));
+        assert_eq!(PathSource(shared.clone()), PathSource(line(1.0)));
+        assert_ne!(Path2D(shared), Path2D(line(2.0)));
     }
 }

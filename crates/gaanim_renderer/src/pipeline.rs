@@ -437,7 +437,7 @@ impl FragmentInputs {
 
 fn same_path(left: &Option<Arc<kurbo::BezPath>>, right: &Option<Arc<kurbo::BezPath>>) -> bool {
     match (left, right) {
-        (Some(left), Some(right)) => Arc::ptr_eq(left, right) || left == right,
+        (Some(left), Some(right)) => gaanim_scene::same_shared_path(left, right),
         (None, None) => true,
         _ => false,
     }

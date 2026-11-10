@@ -14,7 +14,7 @@ use gaanim_scene::{RasterImage, StrokeBrush};
 use crate::effects::{ChalkBrush, DropShadow, GaussianBlur, Glow, StrokeAlign, StrokeProfile};
 
 /// Everything one drawable's fragment is built from.
-#[derive(Clone, Debug, PartialEq, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct FragmentRecipe {
     /// Visible outline (`Path2D`).
     pub path: Option<Arc<kurbo::BezPath>>,
@@ -45,6 +45,59 @@ pub struct FragmentRecipe {
     pub screen: bool,
     /// Chalk look of the fill and stroke.
     pub chalk: Option<ChalkBrush>,
+}
+
+/// Recipes compare their paths by allocation first: a drawable whose path
+/// did not change shares it, and comparing its elements would cost as much as
+/// the frame the comparison saves.
+impl PartialEq for FragmentRecipe {
+    fn eq(&self, other: &Self) -> bool {
+        fn same_path(
+            left: &Option<Arc<kurbo::BezPath>>,
+            right: &Option<Arc<kurbo::BezPath>>,
+        ) -> bool {
+            match (left, right) {
+                (Some(left), Some(right)) => gaanim_scene::same_shared_path(left, right),
+                (None, None) => true,
+                _ => false,
+            }
+        }
+        // Destructured so that a new field cannot be left out.
+        let Self {
+            path,
+            source,
+            fill,
+            stroke,
+            raster,
+            lottie,
+            shadow,
+            glow,
+            blur,
+            fill_progress,
+            completion,
+            stroke_align,
+            stroke_profile,
+            stroke_view,
+            screen,
+            chalk,
+        } = self;
+        same_path(path, &other.path)
+            && same_path(source, &other.source)
+            && *fill == other.fill
+            && *stroke == other.stroke
+            && *raster == other.raster
+            && *lottie == other.lottie
+            && *shadow == other.shadow
+            && *glow == other.glow
+            && *blur == other.blur
+            && *fill_progress == other.fill_progress
+            && *completion == other.completion
+            && *stroke_align == other.stroke_align
+            && *stroke_profile == other.stroke_profile
+            && *stroke_view == other.stroke_view
+            && *screen == other.screen
+            && *chalk == other.chalk
+    }
 }
 
 /// Borrowed components a recipe is captured from.
