@@ -7035,7 +7035,10 @@ pub fn gaanim_render_system(
             Option<Res<gaanim_scene::DepthOfField>>,
         ),
         Query<&GlobalOpacity>,
-        Query<&crate::object_effects::ShaderEffect>,
+        Query<(
+            &crate::object_effects::ShaderEffect,
+            Has<crate::object_effects::DepthOfFieldBlur>,
+        )>,
         Query<&gaanim_animation::FloatSignal>,
         Option<ResMut<EffectLayers>>,
         Query<(Entity, &crate::object_effects::Matte)>,
@@ -7348,9 +7351,14 @@ pub fn gaanim_render_system(
         while let Ok(child_of) = child_query.get(opacity_group) {
             opacity_group = child_of.parent();
         }
+        // A HUD stays sharp inside a layer the depth of field blurs.
+        let mut under_hud = false;
         let effect_root = outermost_effect(entity, |node| {
+            under_hud |= hud_query.contains(node);
             (
-                effect_query.contains(node),
+                effect_query
+                    .get(node)
+                    .is_ok_and(|(_, depth_blur)| !(depth_blur && under_hud)),
                 child_query.get(node).ok().map(ChildOf::parent),
             )
         });
@@ -7746,7 +7754,12 @@ pub fn gaanim_render_system(
             let mut evaluated = evaluate_effects(
                 local_extracted,
                 time_seconds,
-                |entity| effect_query.get(entity).ok().cloned(),
+                |entity| {
+                    effect_query
+                        .get(entity)
+                        .ok()
+                        .map(|(effect, _)| effect.clone())
+                },
                 |entity| signal_query.get(entity).ok().map(|signal| signal.value),
             );
             evaluated.append(&mut frozen_effects);
@@ -7901,6 +7914,72 @@ mod tests {
 
     fn rect_path(x0: f64, y0: f64, x1: f64, y1: f64) -> Arc<kurbo::BezPath> {
         Arc::new(kurbo::Rect::new(x0, y0, x1, y1).to_path(0.1))
+    }
+
+    /// A HUD inside a parallax layer that the depth of field blurs stays
+    /// sharp: the preview and the headless path leave it out of the layer's
+    /// effect alike.
+    #[test]
+    fn a_hud_under_a_depth_blur_is_drawn_alike_in_preview_and_export() {
+        use gaanim_math::SpatialTransform;
+        let mut app = App::new();
+        app.init_resource::<GaanimRenderCache>()
+            .init_resource::<EffectLayers>()
+            .add_systems(
+                Update,
+                (
+                    gaanim_scene::transform_propagation_system,
+                    gaanim_render_system,
+                )
+                    .chain(),
+            );
+        let layer = app
+            .world_mut()
+            .spawn((
+                SpatialTransform::default(),
+                GlobalSpatialTransform::default(),
+                crate::object_effects::depth_of_field_effect(0.2).expect("blur effect"),
+                crate::object_effects::DepthOfFieldBlur(0.2),
+            ))
+            .id();
+        let mut spawn = |raw: u64, x: f64, hud: bool| {
+            let mut entity = app.world_mut().spawn((
+                MobjectId(ObjectId::from_raw(raw)),
+                SpatialTransform::default(),
+                GlobalSpatialTransform::default(),
+                GlobalOpacity(1.0),
+                RenderOrder::default(),
+                RenderLayer::Vello2D,
+                Path2D(rect_path(x, 0.0, x + 1.0, 1.0)),
+                FillBrush(Some(peniko::Brush::Solid(peniko::Color::BLACK))),
+                Visible,
+                ChildOf(layer),
+            ));
+            if hud {
+                entity.insert(gaanim_scene::HudOverlay);
+            }
+        };
+        spawn(95, 0.0, false);
+        spawn(96, 3.0, true);
+        app.update();
+
+        let live = app.world().resource::<EffectLayers>();
+        let live_layers: Vec<_> = live
+            .0
+            .iter()
+            .map(|layer| layer.scene.encoding().path_data.clone())
+            .collect();
+        let headless = compile_frame_from_world(app.world_mut(), None);
+        let headless_layers: Vec<_> = headless
+            .effects
+            .iter()
+            .map(|layer| layer.scene.encoding().path_data.clone())
+            .collect();
+        assert_eq!(live_layers.len(), 1, "the blurred layer has an effect");
+        assert_eq!(
+            live_layers, headless_layers,
+            "the preview and the export put different drawables in the blurred layer"
+        );
     }
 
     /// Frames captured while a mesh is unchanged hold it in the same `Arc`,
