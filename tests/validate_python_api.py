@@ -3906,6 +3906,21 @@ def validate_fluent_setters_keep_their_class(module):
     circle = scene.geometry.circle(1)
     if circle.move_to(1, 1) is not circle:
         failures.append("Drawable.move_to did not return the same object")
+    text = scene.text("x")
+    try:
+        chained = (
+            text.fill("red")
+            .stroke("white", 0.02, align="outside", scale_with_object=False)
+            .opacity(0.8)
+            .glow("red")
+            .scale_by(1.2)
+            .next_to(circle, module.Direction.RIGHT)
+        )
+    except Exception as error:
+        failures.append(f"chained Text setters failed: {error}")
+    else:
+        if chained is not text:
+            failures.append(f"chained Text setters returned {type(chained).__name__}")
     return failures
 
 
@@ -4282,6 +4297,120 @@ def validate_text_scene_unit_defaults(module: object) -> list[str]:
     return failures
 
 
+def stub_signature(function: ast.FunctionDef) -> list[str]:
+    """A stub function's parameters by name and kind, without ``self``/``cls``."""
+    arguments = function.args
+    names = [arg.arg for arg in arguments.posonlyargs + arguments.args]
+    if arguments.vararg is not None:
+        names.append("*" + arguments.vararg.arg)
+    names += [f"{arg.arg}=" for arg in arguments.kwonlyargs]
+    if arguments.kwarg is not None:
+        names.append("**" + arguments.kwarg.arg)
+    return [name for name in names if name not in ("self", "cls")]
+
+
+def runtime_signature(function: object) -> list[str] | None:
+    """A callable's parameters in the form of `stub_signature`, or ``None``
+    when the callable publishes no signature."""
+    try:
+        parameters = inspect.signature(function).parameters.values()
+    except (TypeError, ValueError):
+        return None
+    names = []
+    for parameter in parameters:
+        if parameter.name in ("self", "cls"):
+            continue
+        prefix, suffix = {
+            inspect.Parameter.VAR_POSITIONAL: ("*", ""),
+            inspect.Parameter.VAR_KEYWORD: ("**", ""),
+            inspect.Parameter.KEYWORD_ONLY: ("", "="),
+        }.get(parameter.kind, ("", ""))
+        names.append(prefix + parameter.name + suffix)
+    return names
+
+
+def validate_native_method_signatures(module, tree: ast.Module) -> list[str]:
+    """The methods of the native classes take what the stub declares.
+
+    Every public method a stub class declares or inherits from a stub base
+    class is compared, by parameter name and kind, with the method the
+    native class resolves at runtime. Inherited methods matter: a subclass
+    that redeclares a base setter in Rust (as ``Text.stroke`` once did) can
+    drop a parameter the stub still promises. Overloaded methods and
+    properties declare no single signature and are skipped.
+    """
+    classes = {node.name: node for node in tree.body if isinstance(node, ast.ClassDef)}
+
+    def decorator_names(function: ast.FunctionDef) -> set[str]:
+        names = set()
+        for decorator in function.decorator_list:
+            target = decorator.func if isinstance(decorator, ast.Call) else decorator
+            if isinstance(target, ast.Name):
+                names.add(target.id)
+            elif isinstance(target, ast.Attribute):
+                names.add(target.attr)
+        return names
+
+    def methods(node: ast.ClassDef) -> dict[str, ast.FunctionDef | None]:
+        """Public methods declared in this class body; ``None`` marks a name
+        that is overloaded or a property."""
+        found: dict[str, ast.FunctionDef | None] = {}
+        for child in node.body:
+            if isinstance(child, ast.AnnAssign) and isinstance(child.target, ast.Name):
+                found[child.target.id] = None
+            if not isinstance(child, ast.FunctionDef) or child.name.startswith("_"):
+                continue
+            decorators = decorator_names(child)
+            if child.name in found or decorators & {"overload", "property", "setter", "deleter"}:
+                found[child.name] = None
+            else:
+                found[child.name] = child
+        return found
+
+    def stub_lineage(node: ast.ClassDef) -> list[ast.ClassDef]:
+        lineage, pending, seen = [], [node], set()
+        while pending:
+            current = pending.pop(0)
+            if current.name in seen:
+                continue
+            seen.add(current.name)
+            lineage.append(current)
+            pending.extend(
+                classes[base.id]
+                for base in current.bases
+                if isinstance(base, ast.Name) and base.id in classes
+            )
+        return lineage
+
+    failures = []
+    for name, node in classes.items():
+        native_class = getattr(module, name, None)
+        if native_class is None:
+            continue
+        resolved: dict[str, tuple[str, ast.FunctionDef | None]] = {}
+        for owner in stub_lineage(node):
+            for method, function in methods(owner).items():
+                resolved.setdefault(method, (owner.name, function))
+        for method, (owner, function) in sorted(resolved.items()):
+            if function is None:
+                continue
+            runtime = inspect.getattr_static(native_class, method, None)
+            if runtime is None:
+                continue
+            if isinstance(runtime, (staticmethod, classmethod)):
+                runtime = getattr(native_class, method)
+            actual = runtime_signature(runtime)
+            if actual is None:
+                continue
+            expected = stub_signature(function)
+            if expected != actual:
+                declared = name if owner == name else f"{name} (from {owner})"
+                failures.append(
+                    f"{declared}.{method} takes {expected} in the stub, the code {actual}"
+                )
+    return failures
+
+
 def main() -> int:
     tree = ast.parse(STUB.read_text(encoding="utf-8"), filename=str(STUB))
     module = importlib.import_module("gaanim.gaanim_core")
@@ -4351,6 +4480,7 @@ def main() -> int:
     missing.extend(validate_matrix_logical_units(module))
     missing.extend(validate_matrix_stub_typing())
     missing.extend(validate_python_module_stubs())
+    missing.extend(validate_native_method_signatures(module, tree))
     missing.extend(validate_vector_geometry_contract(module))
     missing.extend(validate_camera_view_contract(module))
     missing.extend(validate_composition_contract(module))
