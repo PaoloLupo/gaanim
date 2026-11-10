@@ -1,0 +1,669 @@
+use super::*;
+
+fn scalar(value: f64) -> gaanim_animation::TrackingScalar {
+    gaanim_animation::TrackingScalar {
+        source: gaanim_animation::ScalarSource::constant(value),
+        parameters: Vec::new(),
+    }
+}
+
+#[test]
+fn shake_is_additive_after_bindings_without_mutating_authored_camera() {
+    let mut world = World::new();
+    let mut authored = gaanim_math::Camera::ortho_2d(1280, 720);
+    authored.position.x = 10.0;
+    world.insert_resource(authored);
+    world.spawn(gaanim_animation::CameraBinding {
+        order: 0,
+        kind: gaanim_animation::CameraBindingKind::TwoD {
+            center: Some(gaanim_animation::TrackingEndpoint::Static(
+                gaanim_core::glam::DVec3::new(20.0, 0.0, 0.0),
+            )),
+            zoom: None,
+            rotation: None,
+        },
+        influence: scalar(1.0),
+        windows: vec![gaanim_animation::CameraBindingWindow {
+            start: 0.0,
+            end: None,
+        }],
+    });
+    let mut timeline = Timeline::new();
+    let track = timeline.add_track("Camera", 0);
+    timeline.add_clip(
+        track,
+        0.0,
+        1.0,
+        clip::ClipPayload::Animation(clip::AnimationSpec {
+            target: gaanim_core::ObjectId::from_raw(0),
+            lens: clip::PropertyLensSpec::CameraShake {
+                origin: authored.position,
+                amplitude: 12.0,
+                frequency: 1.0,
+                trauma: None,
+            },
+            rate_func: gaanim_math::RateFunc::Linear,
+            delay: 0.0,
+            label: Some("Camera".into()),
+        }),
+    );
+    timeline.current_time = 0.25;
+    world.insert_resource(timeline);
+
+    camera_binding_system(&mut world);
+    camera_rig_system(&mut world);
+
+    assert_eq!(*world.resource::<gaanim_math::Camera>(), authored);
+    let rig = world.resource::<gaanim_math::CameraRigCamera>().0;
+    assert!((rig.position.x - 29.0).abs() < 1e-9);
+    assert!((rig.position.y - 3.049_028_386_654_035_7).abs() < 1e-9);
+}
+
+#[test]
+fn trauma_shake_is_a_pure_function_of_time_and_rests_at_the_end() {
+    let shake = gaanim_math::TraumaShake::default();
+    let duration = shake.natural_duration();
+    let authored = gaanim_math::Camera::ortho_2d(1280, 720);
+    let rig_at = |time: f64| {
+        let mut world = World::new();
+        world.insert_resource(authored);
+        let mut timeline = Timeline::new();
+        let track = timeline.add_track("Camera", 0);
+        timeline.add_clip(
+            track,
+            1.0,
+            duration,
+            clip::ClipPayload::Animation(clip::AnimationSpec {
+                target: gaanim_core::ObjectId::from_raw(0),
+                lens: clip::PropertyLensSpec::CameraShake {
+                    origin: authored.position,
+                    amplitude: shake.amplitude,
+                    frequency: shake.frequency,
+                    trauma: Some(shake),
+                },
+                rate_func: gaanim_math::RateFunc::Smooth,
+                delay: 0.0,
+                label: Some("Camera".into()),
+            }),
+        );
+        timeline.current_time = time;
+        world.insert_resource(timeline);
+        camera_binding_system(&mut world);
+        camera_rig_system(&mut world);
+        world.resource::<gaanim_math::CameraRigCamera>().0
+    };
+
+    let rig = rig_at(1.1);
+    let (offset, roll) = shake.sample(0.1, duration);
+    assert!(offset.length() > 0.0);
+    assert!((rig.position.truncate() - offset).length() < 1e-12);
+    assert!((rig.rotation.to_euler(gaanim_core::glam::EulerRot::XYZ).2 - roll).abs() < 1e-12);
+    assert_eq!(rig_at(1.1), rig, "evaluation must not depend on history");
+    let rest = rig_at(1.0 + duration);
+    assert_eq!(rest.position, authored.position);
+    assert_eq!(rest.rotation, authored.rotation);
+}
+
+#[test]
+fn scene_camera_phase_publishes_bound_camera_to_resolved_resource() {
+    let mut app = App::new();
+    app.add_plugins((
+        gaanim_scene::hierarchy::GaanimScenePlugin,
+        GaanimTimelinePlugin,
+    ));
+    app.insert_resource(gaanim_math::Camera::ortho_2d(1280, 720));
+    app.insert_resource(gaanim_animation::DeltaTime { dt: 0.0 });
+    app.world_mut().spawn(gaanim_animation::CameraBinding {
+        order: 0,
+        kind: gaanim_animation::CameraBindingKind::TwoD {
+            center: Some(gaanim_animation::TrackingEndpoint::Static(
+                gaanim_core::glam::DVec3::new(125.0, -30.0, 0.0),
+            )),
+            zoom: Some(scalar(1.5)),
+            rotation: None,
+        },
+        influence: scalar(1.0),
+        windows: vec![gaanim_animation::CameraBindingWindow {
+            start: 0.0,
+            end: None,
+        }],
+    });
+
+    app.update();
+
+    let resolved = app.world().resource::<gaanim_math::ResolvedCamera>();
+    assert_eq!(resolved.position.x, 125.0);
+    assert_eq!(resolved.position.y, -30.0);
+    assert!(matches!(
+        resolved.projection,
+        gaanim_math::Projection::Orthographic { zoom: 1.5 }
+    ));
+}
+
+#[test]
+fn orbit_seek_publishes_the_atomic_pose_to_the_resolved_camera() {
+    let mut app = App::new();
+    app.add_plugins((
+        gaanim_scene::hierarchy::GaanimScenePlugin,
+        GaanimTimelinePlugin,
+    ));
+    app.insert_resource(gaanim_animation::DeltaTime { dt: 0.0 });
+
+    let mut start = gaanim_math::Camera::perspective_3d(1280, 720, std::f64::consts::FRAC_PI_4);
+    start.position = gaanim_core::glam::DVec3::new(0.0, 2.0, 12.0);
+    start.target = gaanim_core::glam::DVec3::new(0.0, 1.0, 0.0);
+    start
+        .look_at(start.position, start.target, gaanim_core::glam::DVec3::Y)
+        .expect("test camera pose is valid");
+    app.insert_resource(start);
+    app.world_mut()
+        .spawn(gaanim_scene::MobjectId(gaanim_core::ObjectId::from_raw(0)));
+
+    let mut timeline = app.world_mut().remove_resource::<Timeline>().unwrap();
+    timeline.add_keyframe(0.0, snapshot::WorldSnapshot::capture(app.world_mut()));
+    let track = timeline.add_track("Camera", 0);
+    timeline.add_clip(
+        track,
+        0.0,
+        2.0,
+        clip::ClipPayload::Animation(clip::AnimationSpec {
+            target: gaanim_core::ObjectId::from_raw(0),
+            lens: clip::PropertyLensSpec::CameraOrbit {
+                from_position: start.position,
+                target: start.target,
+                up: start.up,
+                delta_yaw: std::f64::consts::FRAC_PI_2,
+                delta_pitch: -std::f64::consts::FRAC_PI_6,
+                dolly: 1.0,
+            },
+            rate_func: gaanim_math::RateFunc::Linear,
+            delay: 0.0,
+            label: Some("CameraOrbit".into()),
+        }),
+    );
+    app.insert_resource(timeline);
+
+    // Let startup capture settle, then perform the exact seek that an exporter
+    // or snapshot capture would request before the camera publication phase.
+    app.update();
+    let mut timeline = app.world_mut().remove_resource::<Timeline>().unwrap();
+    timeline.seek(app.world_mut(), 1.0);
+    app.insert_resource(timeline);
+    app.update();
+
+    let mut expected = start;
+    expected
+        .orbit_around_target(std::f64::consts::FRAC_PI_4, -std::f64::consts::PI / 12.0)
+        .expect("test orbit is valid");
+    let authored = *app.world().resource::<gaanim_math::Camera>();
+    let rig = app.world().resource::<gaanim_math::CameraRigCamera>().0;
+    let resolved = app.world().resource::<gaanim_math::ResolvedCamera>();
+    for (label, camera) in [
+        ("authored", authored),
+        ("rig", rig),
+        ("resolved", **resolved),
+    ] {
+        assert!(
+            (camera.position - expected.position).length() < 1e-9,
+            "{label} position {:?}, expected {:?}",
+            camera.position,
+            expected.position
+        );
+        assert!((camera.target - start.target).length() < 1e-9);
+        assert!(camera.rotation.dot(expected.rotation).abs() > 1.0 - 1e-12);
+    }
+}
+
+#[test]
+fn a_camera_at_an_angle_follows_a_point_in_3d_keeping_its_framing() {
+    use gaanim_core::glam::{DVec2, DVec3};
+    let mut camera = gaanim_math::Camera::ortho_2d(1280, 720);
+    camera
+        .look_at(DVec3::new(0.0, 4.0, 10.0), DVec3::ZERO, DVec3::Y)
+        .unwrap();
+    camera.set_perspective(0.8, 0.1, 100.0).unwrap();
+    let point = DVec3::new(3.0, 1.0, -2.0);
+    let rig_at = |lag: f64, time: f64| {
+        let mut world = World::new();
+        world.insert_resource(camera);
+        let mut timeline = Timeline::new();
+        let track = timeline.add_track("Camera", 0);
+        timeline.add_clip(
+            track,
+            0.0,
+            10.0,
+            clip::ClipPayload::Animation(clip::AnimationSpec {
+                target: gaanim_core::ObjectId::from_raw(0),
+                lens: clip::PropertyLensSpec::CameraFollowEndpoint {
+                    target: gaanim_animation::TrackingEndpoint::Static(point),
+                    from: camera.position,
+                    offset: DVec3::ZERO,
+                    offset_space: gaanim_animation::FollowOffsetSpace::World,
+                    lag,
+                    turn: false,
+                    hold: None,
+                    hold_target: None,
+                },
+                rate_func: gaanim_math::RateFunc::Linear,
+                delay: 0.0,
+                label: Some("Camera".into()),
+            }),
+        );
+        timeline.current_time = time;
+        world.insert_resource(timeline);
+        camera_binding_system(&mut world);
+        camera_rig_system(&mut world);
+        world.resource::<gaanim_math::CameraRigCamera>().0
+    };
+    // The point is at the center of the view, seen as the origin was.
+    let followed = rig_at(0.0, 1.0);
+    let center = followed.world_to_screen(point) - DVec2::new(640.0, 360.0);
+    assert!(center.length() < 1e-6, "{center:?}");
+    assert_eq!(followed.rotation, camera.rotation);
+    assert!((followed.target - point).length() < 1e-9);
+    assert!(
+        (followed.position - followed.target - (camera.position - camera.target)).length() < 1e-9
+    );
+    // With a lag the framing moves part of the way.
+    let lagged = rig_at(0.5, 0.5);
+    let reached = 1.0 - (-1.0f64).exp();
+    assert!((lagged.target - point * reached).length() < 1e-9);
+    assert!((lagged.position - (camera.position + point * reached)).length() < 1e-9);
+}
+
+#[test]
+fn follow_lag_is_bitwise_identical_for_direct_incremental_and_rewind_evaluation() {
+    let mut world = World::new();
+    world.insert_resource(gaanim_math::Camera::ortho_2d(1280, 720));
+    let mut timeline = Timeline::new();
+    let track = timeline.add_track("Camera", 0);
+    timeline.add_clip(
+        track,
+        0.0,
+        10.0,
+        clip::ClipPayload::Animation(clip::AnimationSpec {
+            target: gaanim_core::ObjectId::from_raw(0),
+            lens: clip::PropertyLensSpec::CameraFollowEndpoint {
+                target: gaanim_animation::TrackingEndpoint::Static(gaanim_core::glam::DVec3::new(
+                    100.0, -40.0, 0.0,
+                )),
+                from: gaanim_core::glam::DVec3::ZERO,
+                offset: gaanim_core::glam::DVec3::ZERO,
+                offset_space: gaanim_animation::FollowOffsetSpace::World,
+                lag: 0.5,
+                turn: false,
+                hold: None,
+                hold_target: None,
+            },
+            rate_func: gaanim_math::RateFunc::Linear,
+            delay: 0.0,
+            label: Some("Camera".into()),
+        }),
+    );
+    world.insert_resource(timeline);
+
+    let evaluate = |world: &mut World, time: f64| {
+        world.resource_mut::<Timeline>().current_time = time;
+        camera_binding_system(world);
+        camera_rig_system(world);
+        world.resource::<gaanim_math::CameraRigCamera>().0.position
+    };
+
+    let direct = evaluate(&mut world, 2.0);
+    let _ = evaluate(&mut world, 0.25);
+    let _ = evaluate(&mut world, 0.75);
+    let incremental = evaluate(&mut world, 2.0);
+    let _ = evaluate(&mut world, 0.1);
+    let rewind = evaluate(&mut world, 2.0);
+
+    assert_eq!(direct.x.to_bits(), incremental.x.to_bits());
+    assert_eq!(direct.y.to_bits(), incremental.y.to_bits());
+    assert_eq!(direct.x.to_bits(), rewind.x.to_bits());
+    assert_eq!(direct.y.to_bits(), rewind.y.to_bits());
+}
+
+#[test]
+fn interactive_stop_controls_are_optional_in_headless_apps() {
+    let mut app = App::new();
+    app.init_resource::<Timeline>()
+        .add_systems(Update, interactive_stop_input_system);
+
+    assert!(!app.world().contains_resource::<ButtonInput<KeyCode>>());
+    assert!(!app.world().contains_resource::<ButtonInput<MouseButton>>());
+    app.update();
+}
+
+#[test]
+fn hosts_can_reserve_clicks_without_losing_keyboard_stops() {
+    let mut timeline = Timeline::new();
+    timeline.cached_duration = 2.0;
+    timeline.current_time = 1.0;
+    timeline.set_segments(vec![timeline::SegmentMetadata {
+        id: 1,
+        name: "slide".to_owned(),
+        notes: None,
+        target: None,
+        start_time: 0.0,
+        end_time: 2.0,
+        stops: vec![timeline::SegmentStop {
+            name: None,
+            time: 1.0,
+            ambient: None,
+        }],
+    }]);
+    timeline.ignore_pointer = true;
+    let mut app = App::new();
+    app.insert_resource(timeline)
+        .init_resource::<ButtonInput<KeyCode>>()
+        .init_resource::<ButtonInput<MouseButton>>()
+        .add_systems(Update, interactive_stop_input_system);
+    let advanced = |app: &App| {
+        let timeline = app.world().resource::<Timeline>();
+        timeline.is_playing || timeline.seek_request.is_some()
+    };
+
+    app.world_mut()
+        .resource_mut::<ButtonInput<MouseButton>>()
+        .press(MouseButton::Left);
+    app.update();
+    assert!(!advanced(&app), "a reserved click does not leave the stop");
+
+    app.world_mut()
+        .resource_mut::<ButtonInput<KeyCode>>()
+        .press(KeyCode::Enter);
+    app.update();
+    assert!(advanced(&app), "Enter still advances");
+}
+
+#[test]
+fn space_pauses_between_stops_instead_of_skipping_ahead() {
+    let mut timeline = Timeline::new();
+    timeline.cached_duration = 2.0;
+    timeline.current_time = 0.3;
+    timeline.is_playing = true;
+    timeline.set_segments(vec![timeline::SegmentMetadata {
+        id: 1,
+        name: "slide".to_owned(),
+        notes: None,
+        target: None,
+        start_time: 0.0,
+        end_time: 2.0,
+        stops: vec![timeline::SegmentStop {
+            name: None,
+            time: 1.0,
+            ambient: None,
+        }],
+    }]);
+    let mut app = App::new();
+    app.insert_resource(timeline)
+        .init_resource::<ButtonInput<KeyCode>>()
+        .add_systems(Update, interactive_stop_input_system);
+
+    app.world_mut()
+        .resource_mut::<ButtonInput<KeyCode>>()
+        .press(KeyCode::Space);
+    app.update();
+    let timeline = app.world().resource::<Timeline>();
+    assert!(!timeline.is_playing, "Space pauses mid-animation");
+    assert_eq!(timeline.seek_request, None, "Space never jumps to a stop");
+
+    let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+    keys.release(KeyCode::Space);
+    keys.clear();
+    keys.press(KeyCode::Space);
+    app.update();
+    assert!(app.world().resource::<Timeline>().is_playing, "and resumes");
+}
+#[test]
+fn playback_crosses_segment_boundaries_and_pauses_only_at_explicit_stops() {
+    let mut timeline = Timeline::new();
+    timeline.current_time = 0.4;
+    timeline.cached_duration = 2.0;
+    timeline.is_playing = true;
+    timeline.set_segments(vec![
+        timeline::SegmentMetadata {
+            id: 1,
+            name: "first".to_owned(),
+            notes: None,
+            target: None,
+            start_time: 0.0,
+            end_time: 1.0,
+            stops: Vec::new(),
+        },
+        timeline::SegmentMetadata {
+            id: 2,
+            name: "second".to_owned(),
+            notes: None,
+            target: None,
+            start_time: 1.0,
+            end_time: 2.0,
+            stops: vec![timeline::SegmentStop {
+                name: Some("pause".to_owned()),
+                time: 1.2,
+                ambient: None,
+            }],
+        },
+    ]);
+
+    let mut app = App::new();
+    app.insert_resource(timeline)
+        .insert_resource(PlaybackStopPolicy::Respect)
+        .insert_resource(gaanim_animation::DeltaTime { dt: 1.0 })
+        .add_systems(Update, timeline_playback_system);
+    app.update();
+
+    let timeline = app.world().resource::<Timeline>();
+    assert_eq!(timeline.seek_request, Some(1.2));
+    assert!(!timeline.is_playing);
+}
+
+#[test]
+fn continuous_playback_ignores_authored_stops() {
+    let mut timeline = Timeline::new();
+    timeline.current_time = 0.4;
+    timeline.cached_duration = 2.0;
+    timeline.is_playing = true;
+    timeline.set_segments(vec![timeline::SegmentMetadata {
+        id: 1,
+        name: "segment".to_owned(),
+        notes: None,
+        target: None,
+        start_time: 0.0,
+        end_time: 2.0,
+        stops: vec![timeline::SegmentStop {
+            name: Some("pause".to_owned()),
+            time: 1.2,
+            ambient: None,
+        }],
+    }]);
+
+    let mut app = App::new();
+    app.insert_resource(timeline)
+        .insert_resource(PlaybackStopPolicy::Ignore)
+        .insert_resource(gaanim_animation::DeltaTime { dt: 1.0 })
+        .add_systems(Update, timeline_playback_system);
+    app.update();
+
+    let timeline = app.world().resource::<Timeline>();
+    assert_eq!(timeline.seek_request, Some(1.4));
+    assert!(timeline.is_playing);
+}
+
+#[test]
+fn continuous_playback_still_applies_rate_and_looping() {
+    let mut timeline = Timeline::new();
+    timeline.current_time = 1.4;
+    timeline.cached_duration = 3.0;
+    timeline.is_playing = true;
+    timeline.playback_rate = 2.0;
+    timeline.loop_range = Some((1.0, 2.0));
+    timeline.set_segments(vec![timeline::SegmentMetadata {
+        id: 1,
+        name: "segment".to_owned(),
+        notes: None,
+        target: None,
+        start_time: 0.0,
+        end_time: 3.0,
+        stops: vec![timeline::SegmentStop {
+            name: None,
+            time: 1.5,
+            ambient: None,
+        }],
+    }]);
+
+    let mut app = App::new();
+    app.insert_resource(timeline)
+        .insert_resource(PlaybackStopPolicy::Ignore)
+        .insert_resource(gaanim_animation::DeltaTime { dt: 0.4 })
+        .add_systems(Update, timeline_playback_system);
+    app.update();
+
+    let timeline = app.world().resource::<Timeline>();
+    assert!((timeline.seek_request.unwrap() - 1.2).abs() < 1e-9);
+    assert!(timeline.is_playing);
+}
+
+fn selected_deck() -> Timeline {
+    let mut timeline = Timeline::new();
+    timeline.cached_duration = 6.0;
+    let segment = |id, start, end, stop| timeline::SegmentMetadata {
+        id,
+        name: format!("s{id}"),
+        notes: None,
+        target: None,
+        start_time: start,
+        end_time: end,
+        stops: vec![timeline::SegmentStop {
+            name: None,
+            time: stop,
+            ambient: None,
+        }],
+    };
+    timeline.set_segments(vec![
+        segment(1, 0.0, 2.0, 1.0),
+        segment(2, 2.0, 4.0, 3.0),
+        segment(3, 4.0, 6.0, 5.0),
+    ]);
+    timeline.play_ranges = vec![(0.0, 2.0), (4.0, 6.0)];
+    timeline
+}
+
+#[test]
+fn selected_playback_skips_unselected_ranges_and_pauses_at_the_end() {
+    let timeline = selected_deck();
+    assert_eq!(timeline.selected_playback_step(1.0, 1.5), (1.5, true));
+    assert_eq!(timeline.selected_playback_step(1.9, 2.1), (4.0, true));
+    assert_eq!(timeline.selected_playback_step(3.0, 3.1), (4.0, true));
+    assert_eq!(timeline.selected_playback_step(5.9, 6.2), (6.0, false));
+    assert_eq!(timeline.selected_playback_step(6.0, 6.1), (6.0, false));
+    assert_eq!(
+        (timeline.playback_start(), timeline.playback_end()),
+        (0.0, 6.0)
+    );
+}
+
+fn ambient_deck() -> Timeline {
+    let mut timeline = Timeline::new();
+    timeline.cached_duration = 6.0;
+    timeline.set_segments(vec![timeline::SegmentMetadata {
+        id: 1,
+        name: "slide".to_owned(),
+        notes: None,
+        target: None,
+        start_time: 0.0,
+        end_time: 6.0,
+        stops: vec![
+            timeline::SegmentStop {
+                name: None,
+                time: 1.0,
+                ambient: None,
+            },
+            timeline::SegmentStop {
+                name: Some("placas".to_owned()),
+                time: 2.0,
+                ambient: Some(1.5),
+            },
+            timeline::SegmentStop {
+                name: None,
+                time: 5.0,
+                ambient: None,
+            },
+        ],
+    }]);
+    timeline
+}
+
+fn play_step(timeline: Timeline, policy: PlaybackStopPolicy, dt: f64) -> Timeline {
+    let mut app = App::new();
+    app.insert_resource(timeline)
+        .insert_resource(policy)
+        .insert_resource(gaanim_animation::DeltaTime { dt })
+        .add_systems(Update, timeline_playback_system);
+    app.update();
+    app.world_mut().remove_resource::<Timeline>().unwrap()
+}
+
+#[test]
+fn ambient_stops_loop_until_the_presentation_advances() {
+    let mut timeline = ambient_deck();
+    timeline.current_time = 1.8;
+    timeline.is_playing = true;
+    // Reaching the stop keeps playing inside its loop instead of pausing.
+    let mut timeline = play_step(timeline, PlaybackStopPolicy::Respect, 0.5);
+    assert_eq!(timeline.seek_request, Some(2.0));
+    assert!(timeline.is_playing);
+    timeline.seek_request = None;
+    timeline.current_time = 3.2;
+    let mut timeline = play_step(timeline, PlaybackStopPolicy::Respect, 0.5);
+    let wrapped = timeline.seek_request.unwrap();
+    assert!((wrapped - 2.2).abs() < 1e-9, "{wrapped}");
+    assert!(timeline.is_playing);
+
+    // The next step leaves the loop from its end and plays on.
+    timeline.seek_request = None;
+    timeline.current_time = 2.7;
+    timeline.advance();
+    assert_eq!(timeline.seek_request, Some(3.5));
+    assert!(timeline.is_playing);
+    // Going back skips the looping stop itself.
+    timeline.seek_request = None;
+    timeline.go_back();
+    assert_eq!(timeline.seek_request, Some(1.0));
+    assert!(!timeline.is_playing);
+    // Arriving at the stop from anywhere starts its loop.
+    timeline.current_time = 1.0;
+    timeline.is_playing = true;
+    timeline.advance();
+    assert_eq!(timeline.seek_request, Some(2.0));
+    assert!(timeline.is_playing);
+}
+
+#[test]
+fn exports_play_an_ambient_loop_once() {
+    let mut timeline = ambient_deck();
+    timeline.current_time = 3.2;
+    timeline.is_playing = true;
+    let timeline = play_step(timeline, PlaybackStopPolicy::Ignore, 0.5);
+    assert_eq!(timeline.seek_request, Some(3.7));
+}
+
+#[test]
+fn stop_navigation_only_visits_selected_ranges() {
+    let timeline = selected_deck();
+    assert_eq!(timeline.next_stop(1.0), Some(5.0));
+    assert_eq!(timeline.previous_stop(5.0), Some(1.0));
+    assert_eq!(timeline.next_playback_stop(2.5, 3.5), None);
+
+    let mut app = App::new();
+    let mut playing = selected_deck();
+    playing.current_time = 1.8;
+    playing.is_playing = true;
+    app.insert_resource(playing)
+        .insert_resource(PlaybackStopPolicy::Respect)
+        .insert_resource(gaanim_animation::DeltaTime { dt: 0.5 })
+        .add_systems(Update, timeline_playback_system);
+    app.update();
+    let timeline = app.world().resource::<Timeline>();
+    assert_eq!(timeline.seek_request, Some(4.0));
+    assert!(timeline.is_playing);
+}
