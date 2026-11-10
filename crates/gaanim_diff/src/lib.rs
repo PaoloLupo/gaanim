@@ -124,7 +124,6 @@ pub(crate) fn capture_canvas_as(
         None => snapshot_pixel_size(canvas.frame.preview_pixel_size()),
     };
     config.aspect_ratio = AspectRatioPreset::Custom;
-    config.headless = true;
 
     let size = (config.width, config.height);
     write_snapshots(output_dir, ids, size, |on_frame| {

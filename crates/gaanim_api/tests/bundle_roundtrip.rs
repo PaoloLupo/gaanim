@@ -618,7 +618,6 @@ fn a_video_exported_from_the_bundle_matches_the_scene_export() {
         export.height = 90;
         export.aspect_ratio = gaanim_export::prelude::AspectRatioPreset::Custom;
         export.format = gaanim_export::prelude::ExportFormat::PngSequence;
-        export.headless = true;
         (directory, export)
     };
     let (direct, config) = output("direct");
@@ -829,7 +828,6 @@ fn a_video_exported_from_a_bundle_with_effects_matches_the_scene_export() {
         export.height = 90;
         export.aspect_ratio = gaanim_export::prelude::AspectRatioPreset::Custom;
         export.format = gaanim_export::prelude::ExportFormat::PngSequence;
-        export.headless = true;
         (directory, export)
     };
     let (direct, config) = output("direct");
@@ -967,7 +965,6 @@ fn a_video_exported_from_a_bundle_with_reactive_shaders_matches_the_scene_export
         export.height = 90;
         export.aspect_ratio = gaanim_export::prelude::AspectRatioPreset::Custom;
         export.format = gaanim_export::prelude::ExportFormat::PngSequence;
-        export.headless = true;
         (directory, export)
     };
     let (direct, config) = output("direct");

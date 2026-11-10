@@ -1,5 +1,5 @@
 // The playground's Pyodide extension (wasm32-unknown-emscripten) leaves out
-// the preview and windowed code; helpers only it uses are unused there.
+// the preview code; helpers only it uses are unused there.
 #![cfg_attr(target_os = "emscripten", allow(dead_code, unused_imports))]
 
 pub mod bundle;
@@ -22,8 +22,6 @@ pub mod prelude {
         EncodingSpeed, ExportError, ExportFormat, VideoEncoder, detect_available_encoders,
         detect_best_encoder, write_png_frame,
     };
-    #[cfg(not(target_os = "emscripten"))]
-    pub use crate::exporter::export_scene;
     pub use crate::exporter::{
         BundleRenderer, CapturedFrame, capture_bundle_streaming, capture_scene_direct,
         capture_scene_direct_streaming, check_bundle_fit, compose_bundle_frame, export_bundle,
