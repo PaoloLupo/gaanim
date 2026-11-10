@@ -2125,7 +2125,7 @@ impl SurroundingRect {
 
 fn object_set_bounds(
     ids: &[gaanim_core::ObjectId],
-    entities: &std::collections::HashMap<gaanim_core::ObjectId, Entity>,
+    entities: &bevy::platform::collections::HashMap<gaanim_core::ObjectId, Entity>,
     world: &World,
 ) -> Option<gaanim_math::Bounds3D> {
     ids.iter()
@@ -2153,7 +2153,7 @@ fn frame_path(rect: gaanim_core::kurbo::Rect, corner_radius: f64) -> BezPath {
 /// back with it.
 fn line_frames(
     ids: &[gaanim_core::ObjectId],
-    entities: &std::collections::HashMap<gaanim_core::ObjectId, Entity>,
+    entities: &bevy::platform::collections::HashMap<gaanim_core::ObjectId, Entity>,
     world: &World,
     padding: [f64; 4],
     corner_radius: f64,
@@ -2241,13 +2241,7 @@ pub fn surrounding_rect_system(world: &mut World) {
     if frames.is_empty() {
         return;
     }
-    let entities = {
-        let mut query = world.query::<(Entity, &gaanim_scene::MobjectId)>();
-        query
-            .iter(world)
-            .map(|(entity, id)| (id.0, entity))
-            .collect::<std::collections::HashMap<_, _>>()
-    };
+    let entities = gaanim_scene::ObjectEntities::of(world);
 
     for (entity, frame) in frames {
         if frame.shape == SurroundingShape::Lines {

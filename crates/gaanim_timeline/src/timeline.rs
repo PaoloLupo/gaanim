@@ -2122,11 +2122,7 @@ impl Timeline {
                 // A clip starts from the state exactly at its start, which a
                 // step would show earlier.
                 self.seek_with(world, time.into_inner(), None, false);
-                let entities = world
-                    .query::<(Entity, &MobjectId)>()
-                    .iter(world)
-                    .map(|(entity, id)| (id.0, entity))
-                    .collect::<HashMap<_, _>>();
+                let entities = gaanim_scene::ObjectEntities::of(world);
                 // All clips beginning together observe one common pre-clip state.
                 for (target, lens) in lenses {
                     let Some(&entity) = entities.get(&target) else {
@@ -2296,14 +2292,8 @@ impl Timeline {
         }
 
         // Map ObjectIds to current Bevy Entities dynamically
-        let entity_map = restored_entity_map.unwrap_or_else(|| {
-            let mut entity_map = ObjectEntityMap::new();
-            let mut query = world.query::<(Entity, &gaanim_scene::MobjectId)>();
-            for (entity, mobj_id) in query.iter(world) {
-                entity_map.insert(mobj_id.0, entity);
-            }
-            entity_map
-        });
+        let entity_map =
+            restored_entity_map.unwrap_or_else(|| gaanim_scene::ObjectEntities::of(world));
 
         // A future animation still owns the property's state before its first
         // clip: it must remain at the lens' `from` value. Path2D objects are
@@ -2854,11 +2844,7 @@ impl Timeline {
         if ghosts.is_empty() && squashes.is_empty() && follows.is_empty() {
             return;
         }
-        let entity_map: HashMap<gaanim_core::ObjectId, Entity> = world
-            .query::<(Entity, &MobjectId)>()
-            .iter(world)
-            .map(|(entity, id)| (id.0, entity))
-            .collect();
+        let entity_map = gaanim_scene::ObjectEntities::of(world);
         // A drawable positioned by a follow binding is rebuilt from the
         // drawables it follows, possibly a chain of them.
         // An echo of a subtree has a copy of every member per echo, all of
@@ -3155,11 +3141,7 @@ impl Timeline {
             return;
         }
         let anchors: HashSet<_> = emitters.iter().map(|(_, anchor, ..)| *anchor).collect();
-        let entity_map: HashMap<gaanim_core::ObjectId, Entity> = world
-            .query::<(Entity, &MobjectId)>()
-            .iter(world)
-            .map(|(entity, id)| (id.0, entity))
-            .collect();
+        let entity_map = gaanim_scene::ObjectEntities::of(world);
         let object_of: HashMap<Entity, gaanim_core::ObjectId> = entity_map
             .iter()
             .map(|(id, entity)| (*entity, *id))
@@ -3598,13 +3580,13 @@ fn restore_reactive_state(world: &mut World, reactive_state: &ReactiveStates) {
     if reactive_state.is_empty() {
         return;
     }
-    let mut entity_map = ObjectEntityMap::with_capacity(reactive_state.len());
-    let mut query = world.query::<(Entity, &gaanim_scene::MobjectId)>();
-    for (entity, mobject_id) in query.iter(world) {
-        if reactive_state.contains_key(&mobject_id.0) {
-            entity_map.insert(mobject_id.0, entity);
-        }
-    }
+    let entity_map = match world.get_resource::<gaanim_scene::ObjectEntities>() {
+        Some(index) => reactive_state
+            .keys()
+            .filter_map(|id| Some((*id, index.get(*id)?)))
+            .collect::<ObjectEntityMap>(),
+        None => gaanim_scene::ObjectEntities::of(world),
+    };
 
     for (object_id, state) in reactive_state.iter() {
         let Some(&entity) = entity_map.get(object_id) else {
@@ -4216,7 +4198,7 @@ const MAX_DELAYED_DEPTH: u32 = 64;
 struct DelayedContext<'a, 'c> {
     /// Animation clips of every drawable, in start order.
     clips: &'a HashMap<gaanim_core::ObjectId, Vec<&'c Clip>>,
-    entity_map: &'a HashMap<gaanim_core::ObjectId, Entity>,
+    entity_map: &'a ObjectEntityMap,
     object_of: &'a HashMap<Entity, gaanim_core::ObjectId>,
     /// Start of the segment holding the current time.
     start: f64,
@@ -5713,13 +5695,7 @@ fn apply_morph_transition(
 ) {
     use gaanim_core::kurbo::Rect;
 
-    let entity_of: HashMap<gaanim_core::ObjectId, Entity> = {
-        let mut query = world.query::<(Entity, &MobjectId)>();
-        query
-            .iter(world)
-            .map(|(entity, id)| (id.0, entity))
-            .collect()
-    };
+    let entity_of = gaanim_scene::ObjectEntities::of(world);
     let mut placements = Vec::new();
     for mapping in mappings {
         let (Some(&source), Some(&target)) = (
