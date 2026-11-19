@@ -3423,13 +3423,15 @@ fn compile_scene_with_pins(
 ) -> ComposedFrame {
     let gpu_meshes = effects;
     let mut extraction = extract_world(world, camera, pins, true, effects, false, gpu_meshes);
-    let soft = soft_layers(&extraction.elements);
-    if effects {
-        crate::soft_effects::collect_group_shadows();
-    }
     let mut mattes = world_mattes(world);
     mattes.append(&mut extraction.frozen_mattes);
-    divert_mattes(&mut extraction.elements, &mattes);
+    let glasses = if effects {
+        let mut glasses = world_glasses(world);
+        glasses.append(&mut extraction.frozen_glasses);
+        glasses
+    } else {
+        Vec::new()
+    };
     // As dense as the output, like a replay of the captured frame.
     let output_width = world
         .get_resource::<CanvasBackground>()
@@ -3442,50 +3444,103 @@ fn compile_scene_with_pins(
     // A renderer that runs the effects draws shader backgrounds on its own
     // device too, for the canvas and for what glass shows of it.
     let mut background_requests = Vec::new();
-    let effect_layers = if effects {
-        crate::object_effects::age_effect_images();
-        let mut evaluated = world_effects(world, &extraction.elements, extraction.background_time);
-        evaluated.append(&mut extraction.frozen_effects);
-        let mut layers = soft;
-        layers.extend(divert_effects(
-            &mut extraction.elements,
-            &evaluated,
-            extraction.background_time,
-            effect_density,
-        ));
-        // Glass reads what is drawn behind it, effects included.
-        let mut glasses = world_glasses(world);
-        glasses.append(&mut extraction.frozen_glasses);
-        let background = world.get_resource::<CanvasBackground>();
-        layers.extend(divert_glass(
-            &mut extraction.elements,
-            &glasses,
-            background.map(|background| (background, background.pixel_size)),
-            extraction.background_time,
-            0.0,
-            effect_density,
-            Some(&mut background_requests),
-        ));
-        layers
-    } else {
-        Vec::new()
-    };
-    let background = world.get_resource::<CanvasBackground>();
-    let mut frame = compose_frame(
-        &extraction.elements,
-        extraction.transition.as_ref(),
-        background.map(|background| (background, background.pixel_size)),
-        extraction.background_time,
-        0.0,
-        effects.then_some(&mut background_requests),
+    let time = extraction.background_time;
+    let world_ref: &World = world;
+    let mut frame = compose_extracted(
+        &mut extraction.elements,
+        Composition {
+            effect_density: effects.then_some(effect_density),
+            mattes: &mattes,
+            glasses: &glasses,
+            transition: extraction.transition.as_ref(),
+            background: world_ref
+                .get_resource::<CanvasBackground>()
+                .map(|background| (background, background.pixel_size)),
+            time,
+            rest: 0.0,
+            requests: effects.then_some(&mut background_requests),
+        },
+        |elements| {
+            let mut evaluated = world_effects(world_ref, elements, time);
+            evaluated.append(&mut extraction.frozen_effects);
+            evaluated
+        },
     );
-    frame.effects = with_group_shadows(effect_layers, effects);
     frame.backgrounds = background_requests;
     frame.three_d = std::mem::take(&mut extraction.gpu_three_d);
     if let Some(overlay) = world.get_resource::<gaanim_animation::live::LiveOverlay>() {
         append_live_overlay(frame.top_mut(), overlay);
     }
     clear_elements(&mut extraction.elements);
+    frame
+}
+
+/// What composing a frame's elements takes beyond them.
+struct Composition<'a> {
+    /// Pixels per world unit of the images drawables with object effects
+    /// draw into, for a renderer that runs the effects; `None` draws them
+    /// plainly.
+    effect_density: Option<f64>,
+    mattes: &'a [CapturedMatte],
+    glasses: &'a [CapturedGlass],
+    transition: Option<&'a gaanim_scene::SceneTransitionFrame>,
+    /// The canvas background and the pixel size it is drawn at.
+    background: Option<(&'a CanvasBackground, (u32, u32))>,
+    time: f64,
+    /// Rest of the ambient clock, which shader backgrounds read.
+    rest: f64,
+    /// Shader backgrounds a GPU renderer draws itself; `None` draws them on
+    /// the CPU.
+    requests: Option<&'a mut Vec<ShaderBackgroundRequest>>,
+}
+
+/// Compose `elements` into a frame: through their mattes, then, for a
+/// renderer that runs object effects, into the images of their shader
+/// effects (which `effects` evaluates once the mattes have taken their
+/// elements) and of the glass in front of them. Every frame is composed
+/// here: the preview's, the headless path's and a captured frame's.
+fn compose_extracted(
+    elements: &mut Vec<ExtractedElement>,
+    mut composition: Composition<'_>,
+    effects: impl FnOnce(&[ExtractedElement]) -> Vec<CapturedEffect>,
+) -> ComposedFrame {
+    let gpu = composition.effect_density.is_some();
+    let mut layers = soft_layers(elements);
+    if gpu {
+        crate::soft_effects::collect_group_shadows();
+    }
+    // Drawables with a matte draw through it, before any effect takes them.
+    divert_mattes(elements, composition.mattes);
+    if let Some(density) = composition.effect_density {
+        crate::object_effects::age_effect_images();
+        let effects = effects(elements);
+        layers.extend(divert_effects(
+            elements,
+            &effects,
+            composition.time,
+            density,
+        ));
+        // Glass reads what is drawn behind it, effects included.
+        layers.extend(divert_glass(
+            elements,
+            composition.glasses,
+            composition.background,
+            composition.time,
+            composition.rest,
+            density,
+            composition.requests.as_deref_mut(),
+        ));
+    }
+    let mut frame = compose_frame(
+        elements,
+        composition.transition,
+        composition.background,
+        composition.time,
+        composition.rest,
+        composition.requests,
+    );
+    // Composing drew the group shadows, whose images the renderer fills too.
+    frame.effects = with_group_shadows(layers, gpu);
     frame
 }
 
@@ -4982,8 +5037,14 @@ fn evaluate_effects(
 /// The glass drawables of `world`, in entity order.
 fn world_glasses(world: &mut World) -> Vec<CapturedGlass> {
     let mut query = world.query::<(Entity, &crate::object_effects::Glass)>();
-    let mut glasses: Vec<CapturedGlass> = query
-        .iter(world)
+    glasses_in_order(query.iter(world))
+}
+
+/// `glasses` captured, in entity order.
+fn glasses_in_order<'a>(
+    glasses: impl Iterator<Item = (Entity, &'a crate::object_effects::Glass)>,
+) -> Vec<CapturedGlass> {
+    let mut glasses: Vec<CapturedGlass> = glasses
         .map(|(root, glass)| CapturedGlass {
             root,
             glass: *glass,
@@ -5156,8 +5217,14 @@ fn divert_glass(
 /// The track mattes of `world`, in entity order.
 fn world_mattes(world: &mut World) -> Vec<CapturedMatte> {
     let mut query = world.query::<(Entity, &crate::object_effects::Matte)>();
-    let mut mattes: Vec<CapturedMatte> = query
-        .iter(world)
+    mattes_in_order(query.iter(world))
+}
+
+/// `mattes` captured, in entity order.
+fn mattes_in_order<'a>(
+    mattes: impl Iterator<Item = (Entity, &'a crate::object_effects::Matte)>,
+) -> Vec<CapturedMatte> {
+    let mut mattes: Vec<CapturedMatte> = mattes
         .map(|(root, matte)| CapturedMatte {
             root,
             source: matte.source,
@@ -6242,7 +6309,7 @@ fn compose_captured_layers(
     store: &mut crate::fragment::FragmentStore,
     background: Option<(&CanvasBackground, (u32, u32))>,
     pixels_per_unit: Option<f64>,
-    mut gpu: Option<&mut Vec<ShaderBackgroundRequest>>,
+    gpu: Option<&mut Vec<ShaderBackgroundRequest>>,
     rest: f64,
     effect_density: Option<f64>,
     three_d: Option<CapturedGpuThreeD<'_>>,
@@ -6297,47 +6364,21 @@ fn compose_captured_layers(
             .iter()
             .map(|element| thawed_element(element, store, effect_density.is_some(), margin, false)),
     );
-    let mut effects = soft_layers(&elements);
-    if effect_density.is_some() {
-        crate::soft_effects::collect_group_shadows();
-    }
-    divert_mattes(&mut elements, &frame.mattes);
-    if effect_density.is_some() {
-        crate::object_effects::age_effect_images();
-    }
-    if let Some(density) = effect_density
-        && !frame.effects.is_empty()
-    {
-        effects.extend(divert_effects(
-            &mut elements,
-            &frame.effects,
-            frame.background_time,
-            density,
-        ));
-    }
-    if let Some(density) = effect_density
-        && !frame.glasses.is_empty()
-    {
-        effects.extend(divert_glass(
-            &mut elements,
-            &frame.glasses,
-            background,
-            frame.background_time,
-            rest,
-            density,
-            gpu.as_deref_mut(),
-        ));
-    }
     let transition = frame.transition.as_ref().map(CapturedTransition::frame);
-    let mut composed = compose_frame(
-        &elements,
-        transition.as_ref(),
-        background,
-        frame.background_time,
-        rest,
-        gpu,
+    let mut composed = compose_extracted(
+        &mut elements,
+        Composition {
+            effect_density,
+            mattes: &frame.mattes,
+            glasses: &frame.glasses,
+            transition: transition.as_ref(),
+            background,
+            time: frame.background_time,
+            rest,
+            requests: gpu,
+        },
+        |_| frame.effects.clone(),
     );
-    composed.effects = with_group_shadows(effects, effect_density.is_some());
     composed.three_d = three_d_frames;
     composed
 }
@@ -7040,58 +7081,19 @@ pub fn gaanim_render_system(
             false,
         );
     }
-    let soft = soft_layers(local_extracted);
-    if effect_layers.is_some() {
-        crate::soft_effects::collect_group_shadows();
-    }
-
-    // Drawables with a matte draw through it, before any effect takes them.
-    let mut mattes: Vec<CapturedMatte> = elements
-        .mattes
-        .iter()
-        .map(|(root, matte)| CapturedMatte {
-            root,
-            source: matte.source,
-            mode: matte.mode,
-        })
-        .collect();
-    mattes.sort_by_key(|matte| matte.root);
     let (mut frozen_effects, mut frozen_mattes, mut frozen_glasses) = frozen_extras(&frozen_shown);
+    let mut mattes = mattes_in_order(elements.mattes.iter());
     mattes.append(&mut frozen_mattes);
-    divert_mattes(local_extracted, &mattes);
-
-    // Drawables with a shader effect become images the canvas fills first.
-    let layers = match effect_layers.as_deref_mut() {
-        Some(_) => {
-            crate::object_effects::age_effect_images();
-            let pixels_per_unit =
-                preview_effect_density(gaanim_camera.as_deref(), preview.as_deref());
-            let mut evaluated = evaluate_effects(
-                local_extracted,
-                time_seconds,
-                |entity| {
-                    elements
-                        .shader_effects
-                        .get(entity)
-                        .ok()
-                        .map(|(effect, _)| effect.clone())
-                },
-                |entity| signal_query.get(entity).ok().map(|signal| signal.value),
-            );
-            evaluated.append(&mut frozen_effects);
-            let mut layers = soft;
-            layers.extend(divert_effects(
-                local_extracted,
-                &evaluated,
-                time_seconds,
-                pixels_per_unit,
-            ));
-            layers
-        }
-        None => Vec::new(),
+    let effect_density = effect_layers
+        .is_some()
+        .then(|| preview_effect_density(gaanim_camera.as_deref(), preview.as_deref()));
+    let glasses = if effect_density.is_some() {
+        let mut glasses = glasses_in_order(elements.glasses.iter());
+        glasses.append(&mut frozen_glasses);
+        glasses
+    } else {
+        Vec::new()
     };
-    // Assemble the global composited Scene in Bevy world coordinates.
-    let mut shader_requests = Vec::new();
     let background = canvas_bg.as_deref().map(|canvas_bg| {
         (
             canvas_bg,
@@ -7102,30 +7104,6 @@ pub fn gaanim_render_system(
             ),
         )
     });
-
-    // Glass reads what is drawn behind it, effects included.
-    let mut layers = layers;
-    if effect_layers.is_some() {
-        let mut glasses: Vec<CapturedGlass> = elements
-            .glasses
-            .iter()
-            .map(|(root, glass)| CapturedGlass {
-                root,
-                glass: *glass,
-            })
-            .collect();
-        glasses.sort_by_key(|glass| glass.root);
-        glasses.append(&mut frozen_glasses);
-        layers.extend(divert_glass(
-            local_extracted,
-            &glasses,
-            background,
-            time_seconds,
-            ambient.as_ref().map_or(0.0, |clock| clock.rest),
-            preview_effect_density(gaanim_camera.as_deref(), preview.as_deref()),
-            shader_frame.is_some().then_some(&mut shader_requests),
-        ));
-    }
     if let Some(canvas_bg) = canvas_bg.as_deref() {
         canvas_bg.evaluate_uniforms(
             &background_times(time_seconds, transition_frame.as_deref()),
@@ -7138,16 +7116,37 @@ pub fn gaanim_render_system(
             },
         );
     }
-    let mut composed = compose_frame(
-        local_extracted.as_slice(),
-        transition_frame.as_deref(),
-        background,
-        time_seconds,
-        ambient.map_or(0.0, |clock| clock.rest),
-        shader_frame.is_some().then_some(&mut shader_requests),
+    let mut shader_requests = Vec::new();
+    let mut composed = compose_extracted(
+        local_extracted,
+        Composition {
+            effect_density,
+            mattes: &mattes,
+            glasses: &glasses,
+            transition: transition_frame.as_deref(),
+            background,
+            time: time_seconds,
+            rest: ambient.as_ref().map_or(0.0, |clock| clock.rest),
+            requests: shader_frame.is_some().then_some(&mut shader_requests),
+        },
+        |extracted| {
+            let mut evaluated = evaluate_effects(
+                extracted,
+                time_seconds,
+                |entity| {
+                    elements
+                        .shader_effects
+                        .get(entity)
+                        .ok()
+                        .map(|(effect, _)| effect.clone())
+                },
+                |entity| signal_query.get(entity).ok().map(|signal| signal.value),
+            );
+            evaluated.append(&mut frozen_effects);
+            evaluated
+        },
     );
-    // Composing drew the group shadows, whose images the canvas fills too.
-    let layers = with_group_shadows(layers, effect_layers.is_some());
+    let layers = std::mem::take(&mut composed.effects);
     if let Some(published) = effect_layers.as_deref_mut()
         && !(published.0.is_empty() && layers.is_empty())
     {
