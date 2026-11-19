@@ -25,6 +25,9 @@ use std::sync::Arc;
 
 #[cfg(not(target_os = "emscripten"))]
 use crate::canvas::VelloScene2d;
+use gaanim_scene::prelude::SystemState;
+
+mod extract;
 
 /// Resource: stores the canvas background paint and logical frame bounds.
 ///
@@ -1575,13 +1578,9 @@ fn inherited_z_layer(
     0
 }
 
-/// World rectangle of the opacity layer that composites an element.
-///
-/// Vello records every layer in each tile its clip covers, so frame-sized
-/// clips for hundreds of translucent elements overflow its fixed tile command
-/// buffer and the frame renders black. The layer therefore covers only what
-/// the element draws: `extent` (see [`fragment_extent`]) when known, else its
-/// world bounds, plus an antialiasing `margin`.
+/// World rectangle of the opacity layer that composites an element: its
+/// [`opacity_layer_extent`] padded by [`pad_opacity_layer`].
+#[cfg(test)]
 fn opacity_layer_bounds(
     extent: Option<(kurbo::Rect, f64)>,
     world_bounds: Option<&WorldBounds>,
@@ -1594,6 +1593,12 @@ fn opacity_layer_bounds(
 
 /// What an opacity layer covers before its antialiasing margin: a world
 /// rectangle and how far strokes and effects reach beyond it.
+///
+/// Vello records every layer in each tile its clip covers, so frame-sized
+/// clips for hundreds of translucent elements overflow its fixed tile command
+/// buffer and the frame renders black. The layer therefore covers only what
+/// the element draws: `extent` (see [`fragment_extent`]) when known, else its
+/// world bounds.
 fn opacity_layer_extent(
     extent: Option<(kurbo::Rect, f64)>,
     world_bounds: Option<&WorldBounds>,
@@ -3638,6 +3643,68 @@ struct ExtractedFragment {
     effect_shadow: Option<Arc<crate::fragment::EffectShadow>>,
 }
 
+/// The queries [`extract_world`] reads, kept with the world between frames.
+#[derive(Resource)]
+struct ExtractionState(SystemState<extract::ElementQueries<'static, 'static>>);
+
+/// The headless fragment cache: a drawable reuses its last fragment while
+/// its recipe and Lottie frame are unchanged; the rest are dropped with the
+/// frame.
+struct CapturedFragments<'a> {
+    previous: &'a mut HashMap<Entity, ExtractedFragment>,
+    kept: &'a mut HashMap<Entity, ExtractedFragment>,
+}
+
+impl extract::FragmentSource for CapturedFragments<'_> {
+    fn fragment(&mut self, request: extract::FragmentRequest<'_>) -> extract::ElementFragment {
+        let recipe = fragment_recipe(request.parts);
+        let lottie_scene = request.lottie.map(|lottie| lottie.scene());
+        let gpu = request.gpu;
+        let mut fragment = self
+            .previous
+            .remove(&request.entity)
+            .filter(|cached| {
+                cached.lottie.as_ref().map(Arc::as_ptr) == lottie_scene.map(Arc::as_ptr)
+                    && cached.gpu == gpu
+                    && *cached.recipe == recipe
+            })
+            .unwrap_or_else(|| {
+                let built = crate::fragment::build_fragment_with(
+                    &recipe,
+                    lottie_scene.map(Arc::as_ref),
+                    gpu,
+                );
+                ExtractedFragment {
+                    recipe: Arc::new(recipe),
+                    lottie: lottie_scene.cloned(),
+                    scene: Arc::new(built.scene),
+                    overlay: built.overlay.map(Arc::new),
+                    gpu,
+                    soft: built.soft.into(),
+                    effect_shadow: None,
+                }
+            });
+        if request.effect_casts_shadow && fragment.effect_shadow.is_none() {
+            fragment.effect_shadow = crate::fragment::build_effect_shadow(
+                &fragment.recipe,
+                lottie_scene.map(Arc::as_ref),
+            );
+        }
+        let built = extract::ElementFragment {
+            scene: Arc::clone(&fragment.scene),
+            soft: Arc::clone(&fragment.soft),
+            overlay: fragment.overlay.clone(),
+            effect_shadow: fragment
+                .effect_shadow
+                .clone()
+                .filter(|_| request.effect_casts_shadow),
+            recipe: Some(Arc::clone(&fragment.recipe)),
+        };
+        self.kept.insert(request.entity, fragment);
+        built
+    }
+}
+
 /// With `gpu`, fragments draw their soft effects as images that the
 /// elements' [`ExtractedElement::soft`] layers fill.
 fn extract_world(
@@ -3657,12 +3724,10 @@ fn extract_world(
         .remove_resource::<ExtractedFragments>()
         .unwrap_or_default();
     let mut fragments = HashMap::with_capacity(previous_fragments.len());
-    let replaying_pins = pins.as_ref().is_some_and(|pins| pins.recorded);
     let background_time = world
         .get_resource::<gaanim_animation::PlaybackState>()
         .map_or(0.0, |state| state.current_time);
     let mut extracted = Vec::new();
-    let mut culled_entities = std::collections::HashSet::new();
     let transition_frame = world
         .get_resource::<gaanim_scene::SceneTransitionFrame>()
         .filter(|frame| !frame.is_empty())
@@ -3708,438 +3773,40 @@ fn extract_world(
         }
     });
 
-    let mut camera_views = {
-        let mut screens = world.query_filtered::<(
-            Entity,
-            &CameraView,
-            &GlobalSpatialTransform,
-            &LocalBounds,
-            &Path2D,
-            Option<&PathSource>,
-        ), With<Visible>>();
-        let mut sources = world.query::<(
-            &GlobalSpatialTransform,
-            Option<&LocalBounds>,
-            Option<&PathSource>,
-            Option<&WorldBounds>,
-            Option<&gaanim_scene::GroupMarker>,
-        )>();
-        resolve_camera_views(
-            screens
-                .iter(world)
-                .filter(|(_, view, ..)| view.shown_at(background_time)),
-            |entity| {
-                let (transform, local, source, bounds, group) = sources.get(world, entity).ok()?;
-                camera_source_frame(transform, local, source, bounds, group.is_some())
+    // The queries are kept with the world, so each extraction does not build
+    // them again.
+    let mut state = world
+        .remove_resource::<ExtractionState>()
+        .unwrap_or_else(|| ExtractionState(SystemState::new(world)));
+    let replaying_pins = pins.as_ref().is_some_and(|pins| pins.recorded);
+    let (camera_views, frozen_shown) = {
+        let queries = state
+            .0
+            .get(world)
+            .expect("the extraction only reads the world");
+        let (camera_views, frozen_shown) =
+            queries.camera_views(background_time, world.get_resource::<FrozenViews>());
+        let mut frame = extract::ElementFrame {
+            camera_views: &camera_views,
+            cull: cam_bounds,
+            transition: transition_frame.as_ref(),
+            opacity_fallback,
+            antialias,
+            gpu,
+            pins: match pins.as_deref_mut() {
+                Some(pins) if pins.recorded => extract::Pins::Replay,
+                Some(pins) => extract::Pins::Record(&mut pins.elements),
+                None => extract::Pins::Off,
             },
-            |zoom| zoom.evaluate(world),
-            |entity| {
-                world
-                    .get::<crate::effects::ViewCamera>(entity)
-                    .map(|camera| camera.0)
-            },
-        )
+        };
+        let mut source = CapturedFragments {
+            previous: &mut previous_fragments,
+            kept: &mut fragments,
+        };
+        extract::extract_elements(&queries, &mut frame, &mut source, &mut extracted);
+        (camera_views, frozen_shown)
     };
-    // Only a scene with snapshots has frozen views.
-    let frozen_shown = if world.contains_resource::<FrozenViews>() {
-        let mut snapshots = world.query_filtered::<(
-            Entity,
-            &CameraSnapshot,
-            &GlobalSpatialTransform,
-            &Path2D,
-        ), With<Visible>>();
-        let frozen = world.resource::<FrozenViews>();
-        snapshot_views(snapshots.iter(world), frozen, &mut camera_views)
-    } else {
-        Vec::new()
-    };
-
-    let mut query_mobjects = world.query_filtered::<(
-        Entity,
-        &MobjectId,
-        &GlobalSpatialTransform,
-        &GlobalOpacity,
-        &RenderOrder,
-        &RenderLayer,
-        Option<&Path2D>,
-        Option<&PathSource>,
-        Option<&FillBrush>,
-        Option<&StrokeBrush>,
-        Option<&RasterImage>,
-        Option<&LottiePlayer>,
-        Option<&gaanim_scene::ObjectTag>,
-    ), (With<Visible>, Without<gaanim_scene::DrawnIn3D>)>();
-
-    let mut query_effects = world.query::<(
-        Option<&DropShadow>,
-        Option<&Glow>,
-        Option<&GaussianBlur>,
-        Option<&FillDrawProgress>,
-        Option<&ClipMask>,
-        Option<&WorldBounds>,
-        Option<&gaanim_scene::GroupMarker>,
-        Option<&WriteTipGlow>,
-        Option<&StrokeAlign>,
-        Option<&StrokeProfile>,
-        Has<StrokeScalesWithObject>,
-        Option<&ChalkBrush>,
-    )>();
-
-    let mut child_query = world.query::<&ChildOf>();
-    let mut order_query = world.query::<(
-        &RenderOrder,
-        Has<gaanim_scene::SegmentContent>,
-        Option<&gaanim_scene::ZLayer>,
-    )>();
-    let segmented = order_query.iter(world).any(|(_, member, _)| member);
-    let mut blend_query = world.query::<&ElementBlend>();
-
-    for (
-        entity,
-        _mobj_id,
-        transform,
-        global_opacity,
-        render_order,
-        render_layer,
-        path_opt,
-        path_source_opt,
-        fill_opt,
-        stroke_opt,
-        raster_image_opt,
-        lottie_opt,
-        _tag,
-    ) in query_mobjects.iter(world)
-    {
-        if *render_layer != RenderLayer::Vello2D {
-            continue;
-        }
-        if opacity_is_empty(global_opacity) {
-            continue;
-        }
-
-        let Ok((
-            shadow_opt,
-            glow_opt,
-            blur_opt,
-            fill_progress_opt,
-            clip_opt,
-            world_bounds_opt,
-            is_group_opt,
-            tip_glow_opt,
-            stroke_align_opt,
-            stroke_profile_opt,
-            stroke_scales,
-            chalk_opt,
-        )) = query_effects.get(world, entity)
-        else {
-            continue;
-        };
-
-        if is_group_opt.is_some() {
-            continue;
-        }
-
-        if let Some(ref bounds) = cam_bounds {
-            let mut is_ancestor_culled = false;
-            let mut current = entity;
-            while let Ok(child_of) = child_query.get(world, current) {
-                let parent = child_of.parent();
-                if culled_entities.contains(&parent) {
-                    is_ancestor_culled = true;
-                    break;
-                }
-                current = parent;
-            }
-
-            if is_ancestor_culled {
-                culled_entities.insert(entity);
-                continue;
-            }
-
-            if let Some(w_bounds) = world_bounds_opt
-                && !bounds.intersects(&w_bounds.0)
-                && !seen_by_camera_views(&camera_views, &w_bounds.0)
-            {
-                culled_entities.insert(entity);
-                continue;
-            }
-        }
-        let camera_view = camera_views.get(&entity);
-
-        let empty_bez = kurbo::BezPath::new();
-        let elem_path = if path_reveal_is_empty(tip_glow_opt) {
-            &empty_bez
-        } else {
-            path_opt.map(|p| p.0.as_ref()).unwrap_or(&empty_bez)
-        };
-        let elem_stroke = stroke_opt.and_then(|s| s.brush.as_ref());
-        let elem_stroke_style = stroke_opt.map(|s| &s.style);
-        let stroke_view = if !stroke_scales
-            && (elem_stroke.is_some() || glow_opt.is_some() || chalk_opt.is_some())
-        {
-            scene_unit_stroke_transform(transform.affine_2d)
-        } else {
-            None
-        };
-
-        let mut opacity_group = entity;
-        while let Ok(child_of) = child_query.get(world, opacity_group) {
-            opacity_group = child_of.parent();
-        }
-        // A HUD stays sharp inside a layer the depth of field blurs.
-        let mut under_hud = false;
-        let effect_root = outermost_effect(entity, |node| {
-            under_hud |= world.get::<gaanim_scene::HudOverlay>(node).is_some();
-            let depth_blur = world
-                .get::<crate::object_effects::DepthOfFieldBlur>(node)
-                .is_some();
-            (
-                world
-                    .get::<crate::object_effects::ShaderEffect>(node)
-                    .is_some()
-                    && !(depth_blur && under_hud),
-                child_query.get(world, node).ok().map(ChildOf::parent),
-            )
-        });
-        let matte_root = outermost_effect(entity, |node| {
-            (
-                world.get::<crate::object_effects::Matte>(node).is_some(),
-                child_query.get(world, node).ok().map(ChildOf::parent),
-            )
-        });
-        let matte_of = outermost_effect(entity, |node| {
-            (
-                world
-                    .get::<crate::object_effects::MatteSource>(node)
-                    .is_some(),
-                child_query.get(world, node).ok().map(ChildOf::parent),
-            )
-        });
-        let glass_root = outermost_effect(entity, |node| {
-            (
-                world.get::<crate::object_effects::Glass>(node).is_some(),
-                child_query.get(world, node).ok().map(ChildOf::parent),
-            )
-        });
-        let group_opacity = world
-            .get::<GlobalOpacity>(opacity_group)
-            .map_or(1.0, |opacity| opacity.0);
-        let blend = blend_query
-            .get(world, entity)
-            .ok()
-            .map(|blend| blend.0)
-            // An explicit normal blend paints plainly, without its own layer.
-            .filter(|blend| *blend != peniko::BlendMode::default());
-        let mut parts = FragmentParts {
-            path: path_opt,
-            source: path_source_opt,
-            fill: fill_opt,
-            stroke: stroke_opt,
-            raster: raster_image_opt,
-            lottie: lottie_opt.is_some(),
-            shadow: shadow_opt,
-            glow: glow_opt,
-            blur: blur_opt,
-            fill_progress: fill_progress_opt,
-            tip_glow: tip_glow_opt,
-            stroke_align: stroke_align_opt,
-            stroke_profile: stroke_profile_opt,
-            stroke_view,
-            screen: camera_view.is_some(),
-            chalk: chalk_opt,
-        };
-        let group_shadow = crate::fragment::group_shadow(
-            &parts,
-            opacity_group != entity
-                && clip_opt.is_none()
-                && blend.is_none()
-                && camera_view.is_none(),
-        )
-        .map(Arc::new);
-        if group_shadow.is_some() {
-            parts.shadow = None;
-        }
-        // Inside a shader effect, a drawable's own shadow may be cast from
-        // what the effect draws instead (see `divert_effects`), so the
-        // fragment without it is built too.
-        let effect_casts_shadow = gpu && effect_root.is_some() && parts.shadow.is_some();
-        let recipe = fragment_recipe(parts);
-        let lottie_scene = lottie_opt.map(|lottie| lottie.scene());
-        let mut fragment = previous_fragments
-            .remove(&entity)
-            .filter(|cached| {
-                cached.lottie.as_ref().map(Arc::as_ptr) == lottie_scene.map(Arc::as_ptr)
-                    && cached.gpu == gpu
-                    && *cached.recipe == recipe
-            })
-            .unwrap_or_else(|| {
-                let built = crate::fragment::build_fragment_with(
-                    &recipe,
-                    lottie_scene.map(Arc::as_ref),
-                    gpu,
-                );
-                ExtractedFragment {
-                    recipe: Arc::new(recipe),
-                    lottie: lottie_scene.cloned(),
-                    scene: Arc::new(built.scene),
-                    overlay: built.overlay.map(Arc::new),
-                    gpu,
-                    soft: built.soft.into(),
-                    effect_shadow: None,
-                }
-            });
-        if effect_casts_shadow && fragment.effect_shadow.is_none() {
-            fragment.effect_shadow = crate::fragment::build_effect_shadow(
-                &fragment.recipe,
-                lottie_scene.map(Arc::as_ref),
-            );
-        }
-        let effect_shadow = fragment
-            .effect_shadow
-            .clone()
-            .filter(|_| effect_casts_shadow);
-        let recipe = Arc::clone(&fragment.recipe);
-        let scene = Arc::clone(&fragment.scene);
-        let soft = Arc::clone(&fragment.soft);
-        let overlay = fragment.overlay.clone();
-        fragments.insert(entity, fragment);
-        // Only translucent or blended elements open a layer; a Lottie draws
-        // geometry that `Path2D` does not describe.
-        let opacity_extent = if global_opacity.0 >= 1.0 && blend.is_none() || lottie_opt.is_some() {
-            None
-        } else {
-            Some(opacity_layer_extent(
-                fragment_extent(
-                    elem_path,
-                    transform.affine_2d,
-                    elem_stroke
-                        .and(elem_stroke_style)
-                        .map(|style| {
-                            aligned_pen(style, stroke_align_opt.copied().unwrap_or_default())
-                        })
-                        .as_deref(),
-                    stroke_view,
-                    shadow_opt,
-                    glow_opt,
-                    blur_opt,
-                ),
-                world_bounds_opt,
-                opacity_fallback,
-            ))
-        };
-        let opacity_bounds = opacity_extent.map_or(opacity_fallback, |(rect, reach)| {
-            pad_opacity_layer(rect, reach, antialias, opacity_fallback)
-        });
-        let effect_extent = effect_root
-            .and_then(|_| {
-                fragment_extent(
-                    elem_path,
-                    transform.affine_2d,
-                    elem_stroke
-                        .and(elem_stroke_style)
-                        .map(|style| {
-                            aligned_pen(style, stroke_align_opt.copied().unwrap_or_default())
-                        })
-                        .as_deref(),
-                    stroke_view,
-                    shadow_opt,
-                    glow_opt,
-                    blur_opt,
-                )
-            })
-            .map(reached_rect);
-        // A capture keeps the extent, so a replay at another resolution pads
-        // the layer for its own pixels; an unbounded reach keeps the fallback.
-        let opacity_extent = opacity_extent.filter(|(_, reach)| reach.is_finite());
-        let exempt = pins.is_some() && world.get::<MotionBlurExempt>(entity).is_some();
-        if exempt && replaying_pins {
-            continue;
-        }
-        let outline = glass_root.and_then(|_| recipe.path.clone());
-        extracted.push(ExtractedElement {
-            soft,
-            entity,
-            recipe: Some(recipe),
-            lottie: lottie_opt.map(|lottie| Arc::clone(lottie.scene())),
-            transform: transform.affine_2d,
-            opacity: global_opacity.0,
-            opacity_bounds,
-            opacity_extent,
-            opacity_group,
-            group_opacity,
-            group_shadow,
-            effect_shadow,
-            effect_root,
-            effect_extent,
-            matte_root,
-            matte_of,
-            glass_root,
-            outline,
-            render_order: stacked_render_order(
-                *render_order,
-                entity,
-                |e| child_query.get(world, e).ok().map(ChildOf::parent),
-                |e| {
-                    order_query
-                        .get(world, e)
-                        .map_or(0, |(order, _, _)| order.z_index)
-                },
-            ),
-            z_layer: inherited_z_layer(
-                entity,
-                |e| child_query.get(world, e).ok().map(ChildOf::parent),
-                |e| {
-                    order_query
-                        .get(world, e)
-                        .ok()
-                        .and_then(|(_, _, layer)| layer.map(|layer| layer.0))
-                },
-            ),
-            scene,
-            clip_mask: clip_opt.cloned(),
-            blend,
-            transition_side: transition_frame
-                .as_ref()
-                .map_or_else(Default::default, |frame| {
-                    frame.side_of(entity, |e| {
-                        child_query.get(world, e).ok().map(ChildOf::parent)
-                    })
-                }),
-            persistent: segmented
-                && outside_segments(
-                    entity,
-                    |e| child_query.get(world, e).ok().map(ChildOf::parent),
-                    |e| order_query.get(world, e).is_ok_and(|(_, member, _)| member),
-                ),
-            post_exempt: world.get::<PostProcessExempt>(entity).is_some(),
-            lineage: if camera_views.is_empty() {
-                Vec::new()
-            } else {
-                element_lineage(entity, |e| {
-                    child_query.get(world, e).ok().map(ChildOf::parent)
-                })
-            },
-            view_bounds: world_bounds_opt.map(|bounds| bounds_rect(&bounds.0)),
-            in_views: world.get::<gaanim_scene::HudOverlay>(entity).is_none(),
-            layer: world
-                .get::<ViewLayer>(entity)
-                .map(|layer| Arc::clone(&layer.0)),
-            screen: camera_view.map(|view| ExtractedScreen {
-                view: Arc::clone(view),
-                overlay,
-            }),
-            echo_rank: world
-                .get::<gaanim_animation::EchoGhost>(entity)
-                .map_or(0, |echo| echo.rank),
-            tip: world.get::<gaanim_animation::StrokeTip>(entity).is_some(),
-            backdrop: world
-                .get::<gaanim_scene::LayoutBackdrop>(entity)
-                .map(|backdrop| backdrop.depth),
-        });
-        if exempt && let (Some(pins), Some(element)) = (pins.as_deref_mut(), extracted.last()) {
-            pins.elements.push(element.clone());
-        }
-    }
+    world.insert_resource(state);
     if let Some(pins) = pins {
         if replaying_pins {
             extracted.extend(pins.elements.iter().cloned());
@@ -6934,35 +6601,6 @@ type CameraScreenQuery<'w, 's> = Query<
     With<Visible>,
 >;
 
-/// Visible snapshots of camera views and what they froze.
-type CameraSnapshotQueries<'w, 's> = (
-    Query<
-        'w,
-        's,
-        (
-            Entity,
-            &'static CameraSnapshot,
-            &'static GlobalSpatialTransform,
-            &'static Path2D,
-        ),
-        With<Visible>,
-    >,
-    Option<ResMut<'w, FrozenViews>>,
-);
-
-/// Everything the render system reads to compose camera views, and the
-/// drawables left out of the post-process.
-type CameraViewQueries<'w, 's> = (
-    CameraScreenQuery<'w, 's>,
-    CameraSourceQuery<'w, 's>,
-    Query<'w, 's, (), With<gaanim_scene::HudOverlay>>,
-    Query<'w, 's, &'static ViewLayer>,
-    Query<'w, 's, &'static gaanim_animation::FloatSignal>,
-    Query<'w, 's, (), With<PostProcessExempt>>,
-    CameraSnapshotQueries<'w, 's>,
-    Query<'w, 's, &'static crate::effects::ViewCamera>,
-);
-
 /// Transforms and bounds of the drawables that camera views frame.
 type CameraSourceQuery<'w, 's> = Query<
     'w,
@@ -6975,6 +6613,203 @@ type CameraSourceQuery<'w, 's> = Query<
         Option<&'static gaanim_scene::GroupMarker>,
     ),
 >;
+
+/// The preview's fragment cache, by object: a fragment is kept until one of
+/// its inputs changes, which change ticks reveal and a comparison of the
+/// timeline-driven values confirms.
+#[cfg(not(target_os = "emscripten"))]
+struct PreviewFragments<'a> {
+    cache: &'a mut GaanimRenderCache,
+    /// The timeline-driven inputs of the drawable just inspected, when they
+    /// were captured to look for a change.
+    current_inputs: Option<FragmentInputs>,
+}
+
+#[cfg(not(target_os = "emscripten"))]
+impl extract::FragmentSource for PreviewFragments<'_> {
+    fn inspect(
+        &mut self,
+        mobject: &extract::MobjectItem<'_, '_>,
+        effects: &extract::EffectsItem<'_, '_>,
+        stroke_view: Option<kurbo::Affine>,
+        screen: bool,
+    ) {
+        let cache = &mut *self.cache;
+        let (
+            _,
+            mobj_id,
+            _,
+            _,
+            _,
+            _,
+            path_ref,
+            path_source_ref,
+            fill_level_ref,
+            fill_ref,
+            stroke_ref,
+            raster_image_ref,
+            reactive_readout_ref,
+            lottie_ref,
+        ) = mobject;
+        let (
+            shadow_ref,
+            glow_ref,
+            blur_ref,
+            _,
+            fill_progress_ref,
+            _,
+            _,
+            tip_glow_ref,
+            visible_ref,
+            stroke_align_ref,
+            stroke_profile_ref,
+            _,
+            chalk_ref,
+        ) = effects;
+        // Invalidate before skipping hidden or culled objects. Their new
+        // geometry may stop changing before they become visible again (e.g.
+        // a rewound Lottie).
+        let previous_view = match stroke_view {
+            Some(view) => cache.stroke_views.insert(mobj_id.0, view),
+            None => cache.stroke_views.remove(&mobj_id.0),
+        };
+        // Fill-level geometry is derived later in the frame. Track the source
+        // value too, so a retained fragment can never outlive a rewind or a
+        // segment replay that changes only this component.
+        // Only `Visible` entities are visited, so the change ticks of
+        // components rewritten while an entity was hidden (e.g. rewound
+        // before its write/create clip) are already stale when it reappears.
+        // Compare its inputs again whenever it becomes visible.
+        let revealed = visible_ref.as_ref().is_some_and(|r| r.is_added());
+        let timeline_inputs_touched = revealed
+            || path_ref.as_ref().is_some_and(|r| r.is_changed())
+            || path_source_ref.as_ref().is_some_and(|r| r.is_changed())
+            || fill_level_ref.as_ref().is_some_and(|r| r.is_changed())
+            || fill_ref.as_ref().is_some_and(|r| r.is_changed())
+            || stroke_ref.as_ref().is_some_and(|r| r.is_changed())
+            || fill_progress_ref.as_ref().is_some_and(|r| r.is_changed())
+            || tip_glow_ref.as_ref().is_some_and(|r| r.is_changed());
+        self.current_inputs = timeline_inputs_touched.then(|| {
+            FragmentInputs::capture(
+                path_ref.as_deref(),
+                path_source_ref.as_deref(),
+                fill_level_ref.as_deref(),
+                fill_ref.as_deref(),
+                stroke_ref.as_deref(),
+                fill_progress_ref.as_deref(),
+                tip_glow_ref.as_deref(),
+            )
+        });
+        let changed = self
+            .current_inputs
+            .as_ref()
+            .is_some_and(|inputs| cache.fragment_inputs.get(&mobj_id.0) != Some(inputs))
+            || stroke_view != previous_view
+            || raster_image_ref.as_ref().is_some_and(|r| r.is_changed())
+            || reactive_readout_ref
+                .as_ref()
+                .is_some_and(|r| r.is_changed())
+            // A Lottie is sampled while hidden too, and marked changed only
+            // when its scene changes; that tick is stale once it reappears.
+            || lottie_ref
+                .as_ref()
+                .is_some_and(|r| r.is_changed() || revealed)
+            || shadow_ref.as_ref().is_some_and(|r| r.is_changed())
+            || glow_ref.as_ref().is_some_and(|r| r.is_changed())
+            || blur_ref.as_ref().is_some_and(|r| r.is_changed())
+            // `ClipMask` is not part of the fragment: it is applied when the
+            // frame is composed, and its presence reaches the fragment only
+            // through the shared group shadow, which is tracked below.
+            || stroke_align_ref.as_ref().is_some_and(|r| r.is_changed())
+            || stroke_profile_ref.as_ref().is_some_and(|r| r.is_changed())
+            || chalk_ref.as_ref().is_some_and(|r| r.is_changed())
+            // Becoming or ceasing to be a screen moves the stroke.
+            || cache.screen_overlays.contains_key(&mobj_id.0) != screen;
+        if changed {
+            cache.fragment_cache.remove(&mobj_id.0);
+        }
+    }
+
+    fn fragment(&mut self, request: extract::FragmentRequest<'_>) -> extract::ElementFragment {
+        let cache = &mut *self.cache;
+        let id = request.id;
+        let parts = request.parts;
+        // A fragment keeps its shadow only while its group does not draw it.
+        let shared = request.shared_shadow;
+        if cache.shared_shadows.contains(&id) != shared {
+            cache.fragment_cache.remove(&id);
+            if shared {
+                cache.shared_shadows.insert(id);
+            } else {
+                cache.shared_shadows.remove(&id);
+            }
+        }
+        if !cache.fragment_cache.contains_key(&id) {
+            let inputs = self.current_inputs.take().unwrap_or_else(|| {
+                FragmentInputs::capture(
+                    parts.path,
+                    parts.source,
+                    request.fill_level,
+                    parts.fill,
+                    parts.stroke,
+                    parts.fill_progress,
+                    parts.tip_glow,
+                )
+            });
+            cache.fragment_inputs.insert(id, inputs);
+        }
+        let lottie = request.lottie.map(|lottie| lottie.scene().as_ref());
+        let mut rebuilt_overlay = None;
+        let mut rebuilt_soft = None;
+        let scene = cache.fragment_cache.entry(id).or_insert_with(|| {
+            let built =
+                crate::fragment::build_fragment_with(&fragment_recipe(parts), lottie, request.gpu);
+            rebuilt_overlay = Some(built.overlay);
+            rebuilt_soft = Some(built.soft);
+            Arc::new(built.scene)
+        });
+        let scene = Arc::clone(scene);
+        if rebuilt_soft.is_some() || !request.effect_casts_shadow {
+            cache.effect_shadows.remove(&id);
+        }
+        let effect_shadow = if request.effect_casts_shadow {
+            match cache.effect_shadows.get(&id) {
+                Some(effect_shadow) => Some(Arc::clone(effect_shadow)),
+                None => crate::fragment::build_effect_shadow(&fragment_recipe(parts), lottie)
+                    .inspect(|effect_shadow| {
+                        cache.effect_shadows.insert(id, Arc::clone(effect_shadow));
+                    }),
+            }
+        } else {
+            None
+        };
+        match rebuilt_soft {
+            Some(soft) if soft.is_empty() => {
+                cache.soft_layers.remove(&id);
+            }
+            Some(soft) => {
+                cache.soft_layers.insert(id, soft.into());
+            }
+            None => {}
+        }
+        match rebuilt_overlay {
+            Some(Some(overlay)) => {
+                cache.screen_overlays.insert(id, Arc::new(overlay));
+            }
+            Some(None) => {
+                cache.screen_overlays.remove(&id);
+            }
+            None => {}
+        }
+        extract::ElementFragment {
+            scene,
+            soft: cache.soft_layers.get(&id).cloned().unwrap_or_default(),
+            overlay: cache.screen_overlays.get(&id).cloned(),
+            effect_shadow,
+            recipe: None,
+        }
+    }
+}
 
 /// System: Extracts, composites, and renders all visible gaanim 2D Mobjects.
 ///
@@ -7001,31 +6836,13 @@ pub fn gaanim_render_system(
     playback_state: Option<Res<gaanim_animation::PlaybackState>>,
     canvas_bg: Option<Res<CanvasBackground>>,
     transition_frame: Option<Res<gaanim_scene::SceneTransitionFrame>>,
-    child_query: Query<&ChildOf>,
-    order_query: Query<(
-        &RenderOrder,
-        Has<gaanim_scene::SegmentContent>,
-        Option<&gaanim_scene::ZLayer>,
-    )>,
+    elements: extract::ElementQueries,
     (
-        blend_query,
-        echo_query,
-        tip_query,
-        backdrop_query,
         three_d_query,
         (lighting, light_query, glow_query, transparency, depth_of_field),
-        opacity_query,
-        effect_query,
         signal_query,
         mut effect_layers,
-        matte_query,
-        matte_source_query,
-        glass_query,
     ): (
-        Query<&ElementBlend>,
-        Query<&gaanim_animation::EchoGhost>,
-        TipQuery,
-        Query<&gaanim_scene::LayoutBackdrop>,
         ThreeDQuery,
         (
             Option<Res<gaanim_scene::Lighting3D>>,
@@ -7034,52 +6851,9 @@ pub fn gaanim_render_system(
             Option<Res<gaanim_scene::Transparency3D>>,
             Option<Res<gaanim_scene::DepthOfField>>,
         ),
-        Query<&GlobalOpacity>,
-        Query<(
-            &crate::object_effects::ShaderEffect,
-            Has<crate::object_effects::DepthOfFieldBlur>,
-        )>,
         Query<&gaanim_animation::FloatSignal>,
         Option<ResMut<EffectLayers>>,
-        Query<(Entity, &crate::object_effects::Matte)>,
-        Query<(), With<crate::object_effects::MatteSource>>,
-        Query<(Entity, &crate::object_effects::Glass)>,
     ),
-    query_mobjects: Query<
-        (
-            Entity,
-            Ref<MobjectId>,
-            Ref<GlobalSpatialTransform>,
-            Ref<GlobalOpacity>,
-            Ref<RenderOrder>,
-            Ref<RenderLayer>,
-            Option<Ref<Path2D>>,
-            Option<Ref<PathSource>>,
-            Option<Ref<FillLevel>>,
-            Option<Ref<FillBrush>>,
-            Option<Ref<StrokeBrush>>,
-            Option<Ref<RasterImage>>,
-            Option<Ref<ReactiveReadout>>,
-            Option<Ref<LottiePlayer>>,
-            Option<&gaanim_scene::ObjectTag>,
-        ),
-        (With<Visible>, Without<gaanim_scene::DrawnIn3D>),
-    >,
-    query_effects: Query<(
-        Option<Ref<DropShadow>>,
-        Option<Ref<Glow>>,
-        Option<Ref<GaussianBlur>>,
-        Option<Ref<ClipMask>>,
-        Option<Ref<FillDrawProgress>>,
-        Option<&WorldBounds>,
-        Option<&gaanim_scene::GroupMarker>,
-        Option<Ref<WriteTipGlow>>,
-        Option<Ref<Visible>>,
-        Option<Ref<StrokeAlign>>,
-        Option<Ref<StrokeProfile>>,
-        Has<StrokeScalesWithObject>,
-        Option<Ref<ChalkBrush>>,
-    )>,
     mut query_vello_scene: Query<&mut VelloScene2d, With<MainVelloScene>>,
     (
         mut shader_frame,
@@ -7104,50 +6878,16 @@ pub fn gaanim_render_system(
         Local<crate::three_d::MeshSources>,
         Query<(&Camera, &Transform, &Projection), With<crate::canvas::VelloView>>,
     ),
-    (
-        camera_screens,
-        camera_sources,
-        hud_query,
-        layer_query,
-        float_signals,
-        exempt_query,
-        (snapshot_query, mut frozen_views),
-        view_camera_query,
-    ): CameraViewQueries,
-    mut scratch: Local<(
-        Vec<ExtractedElement>,
-        std::collections::HashSet<Entity>,
-        OwnViewScratch,
-    )>,
+    mut frozen_views: Option<ResMut<FrozenViews>>,
+    mut scratch: Local<(Vec<ExtractedElement>, OwnViewScratch)>,
 ) {
-    let (local_extracted, local_culled, own_scratch) = &mut *scratch;
+    let (local_extracted, own_scratch) = &mut *scratch;
     local_extracted.clear();
-    local_culled.clear();
 
     let time_seconds = playback_state
         .as_ref()
         .map_or(0.0, |state| state.current_time);
-    let mut camera_views = resolve_camera_views(
-        camera_screens
-            .iter()
-            .filter(|(_, view, ..)| view.shown_at(time_seconds)),
-        |entity| {
-            let (transform, local, source, bounds, group) = camera_sources.get(entity).ok()?;
-            camera_source_frame(transform, local, source, bounds, group.is_some())
-        },
-        |zoom| {
-            zoom.source
-                .evaluate(time_seconds, |logical| {
-                    let (_, entity) = zoom.parameters.iter().find(|(id, _)| *id == logical)?;
-                    float_signals.get(*entity).ok().map(|signal| signal.value)
-                })
-                .ok()
-        },
-        |entity| view_camera_query.get(entity).ok().map(|camera| camera.0),
-    );
-    let frozen_shown = frozen_views.as_deref().map_or_else(Vec::new, |frozen| {
-        snapshot_views(snapshot_query.iter(), frozen, &mut camera_views)
-    });
+    let (camera_views, frozen_shown) = elements.camera_views(time_seconds, frozen_views.as_deref());
 
     // Viewport pixels per world unit, as in the culling bounds below.
     let antialias = antialias_margin(gaanim_camera.as_ref().and_then(|cam| match cam.projection {
@@ -7181,7 +6921,6 @@ pub fn gaanim_render_system(
                 None
             }
         });
-    let segmented = order_query.iter().any(|(_, member, _)| member);
     let opacity_fallback = canvas_bg
         .as_ref()
         .map(|background| {
@@ -7194,447 +6933,22 @@ pub fn gaanim_render_system(
         })
         .unwrap_or_else(|| kurbo::Rect::new(-4096.0, -4096.0, 4096.0, 4096.0));
 
-    for (
-        entity,
-        mobj_id,
-        transform,
-        global_opacity,
-        render_order,
-        render_layer,
-        path_ref,
-        path_source_ref,
-        fill_level_ref,
-        fill_ref,
-        stroke_ref,
-        raster_image_ref,
-        reactive_readout_ref,
-        lottie_ref,
-        _tag,
-    ) in &query_mobjects
-    {
-        // Look up effects, bounds and group marker components on-demand to keep Query tuple size small
-        let (
-            shadow_ref,
-            glow_ref,
-            blur_ref,
-            clip_ref,
-            fill_progress_ref,
-            world_bounds_opt,
-            is_group_opt,
-            tip_glow_ref,
-            visible_ref,
-            stroke_align_ref,
-            stroke_profile_ref,
-            stroke_scales,
-            chalk_ref,
-        ) = query_effects.get(entity).unwrap_or((
-            None, None, None, None, None, None, None, None, None, None, None, false, None,
-        ));
-        let camera_view = camera_views.get(&entity);
-
-        // Invalidate before skipping hidden or culled objects. Their new geometry
-        // may stop changing before they become visible again (e.g. a rewound Lottie).
-        let stroke_view = if !stroke_scales
-            && (stroke_ref
-                .as_ref()
-                .is_some_and(|stroke| stroke.brush.is_some())
-                || glow_ref.is_some()
-                || chalk_ref.is_some())
-        {
-            scene_unit_stroke_transform(transform.affine_2d)
-        } else {
-            None
-        };
-        let previous_view = match stroke_view {
-            Some(view) => cache.stroke_views.insert(mobj_id.0, view),
-            None => cache.stroke_views.remove(&mobj_id.0),
-        };
-        // Fill-level geometry is derived later in the frame. Track the source
-        // value too, so a retained fragment can never outlive a rewind or a
-        // segment replay that changes only this component.
-        // This system only visits `Visible` entities, so the change ticks of
-        // components rewritten while an entity was hidden (e.g. rewound
-        // before its write/create clip) are already stale when it reappears.
-        // Compare its inputs again whenever it becomes visible.
-        let revealed = visible_ref.as_ref().is_some_and(|r| r.is_added());
-        let timeline_inputs_touched = revealed
-            || path_ref.as_ref().is_some_and(|r| r.is_changed())
-            || path_source_ref.as_ref().is_some_and(|r| r.is_changed())
-            || fill_level_ref.as_ref().is_some_and(|r| r.is_changed())
-            || fill_ref.as_ref().is_some_and(|r| r.is_changed())
-            || stroke_ref.as_ref().is_some_and(|r| r.is_changed())
-            || fill_progress_ref.as_ref().is_some_and(|r| r.is_changed())
-            || tip_glow_ref.as_ref().is_some_and(|r| r.is_changed());
-        let current_inputs = timeline_inputs_touched.then(|| {
-            FragmentInputs::capture(
-                path_ref.as_deref(),
-                path_source_ref.as_deref(),
-                fill_level_ref.as_deref(),
-                fill_ref.as_deref(),
-                stroke_ref.as_deref(),
-                fill_progress_ref.as_deref(),
-                tip_glow_ref.as_deref(),
-            )
-        });
-        let changed = current_inputs
-            .as_ref()
-            .is_some_and(|inputs| cache.fragment_inputs.get(&mobj_id.0) != Some(inputs))
-            || stroke_view != previous_view
-            || raster_image_ref.as_ref().is_some_and(|r| r.is_changed())
-            || reactive_readout_ref
-                .as_ref()
-                .is_some_and(|r| r.is_changed())
-            // A Lottie is sampled while hidden too, and marked changed only
-            // when its scene changes; that tick is stale once it reappears.
-            || lottie_ref
-                .as_ref()
-                .is_some_and(|r| r.is_changed() || revealed)
-            || shadow_ref.as_ref().is_some_and(|r| r.is_changed())
-            || glow_ref.as_ref().is_some_and(|r| r.is_changed())
-            || blur_ref.as_ref().is_some_and(|r| r.is_changed())
-            // `ClipMask` is not part of the fragment: it is applied when the
-            // frame is composed, and its presence reaches the fragment only
-            // through the shared group shadow, which is tracked below.
-            || stroke_align_ref.as_ref().is_some_and(|r| r.is_changed())
-            || stroke_profile_ref.as_ref().is_some_and(|r| r.is_changed())
-            || chalk_ref.as_ref().is_some_and(|r| r.is_changed())
-            // Becoming or ceasing to be a screen moves the stroke.
-            || cache.screen_overlays.contains_key(&mobj_id.0) != camera_view.is_some();
-
-        if changed {
-            cache.fragment_cache.remove(&mobj_id.0);
-        }
-
-        // 2. Perform camera frustum culling and hierarchical culling propagation
-        if let Some(bounds) = cam_bounds {
-            // Check if any ancestor of this entity is already culled
-            let mut is_ancestor_culled = false;
-            let mut current = entity;
-            while let Ok(child_of) = child_query.get(current) {
-                let parent = child_of.parent();
-                if local_culled.contains(&parent) {
-                    is_ancestor_culled = true;
-                    break;
-                }
-                current = parent;
-            }
-
-            if is_ancestor_culled {
-                local_culled.insert(entity);
-                continue;
-            }
-
-            // Check if this entity's own bounds are out of camera bounds
-            if let Some(w_bounds) = world_bounds_opt
-                && !bounds.intersects(&w_bounds.0)
-                && !seen_by_camera_views(&camera_views, &w_bounds.0)
-            {
-                local_culled.insert(entity);
-                continue;
-            }
-        }
-
-        // Only process visible Vello2D elements
-        if *render_layer != RenderLayer::Vello2D {
-            continue;
-        }
-        if opacity_is_empty(&global_opacity) {
-            continue;
-        }
-
-        // Groups do not draw visual geometry directly, they only act as spatial nodes.
-        if is_group_opt.is_some() {
-            continue;
-        }
-
-        let mut opacity_group = entity;
-        while let Ok(child_of) = child_query.get(opacity_group) {
-            opacity_group = child_of.parent();
-        }
-        // A HUD stays sharp inside a layer the depth of field blurs.
-        let mut under_hud = false;
-        let effect_root = outermost_effect(entity, |node| {
-            under_hud |= hud_query.contains(node);
-            (
-                effect_query
-                    .get(node)
-                    .is_ok_and(|(_, depth_blur)| !(depth_blur && under_hud)),
-                child_query.get(node).ok().map(ChildOf::parent),
-            )
-        });
-        let matte_root = outermost_effect(entity, |node| {
-            (
-                matte_query.contains(node),
-                child_query.get(node).ok().map(ChildOf::parent),
-            )
-        });
-        let matte_of = outermost_effect(entity, |node| {
-            (
-                matte_source_query.contains(node),
-                child_query.get(node).ok().map(ChildOf::parent),
-            )
-        });
-        let glass_root = outermost_effect(entity, |node| {
-            (
-                glass_query.contains(node),
-                child_query.get(node).ok().map(ChildOf::parent),
-            )
-        });
-        let outline = glass_root
-            .and(path_ref.as_ref())
-            .map(|path| Arc::clone(&path.0));
-        let group_opacity = opacity_query
-            .get(opacity_group)
-            .map_or(1.0, |opacity| opacity.0);
-        let blend = blend_query
-            .get(entity)
-            .ok()
-            .map(|blend| blend.0)
-            // An explicit normal blend paints plainly, without its own layer.
-            .filter(|blend| *blend != peniko::BlendMode::default());
-        let parts = FragmentParts {
-            path: path_ref.as_deref(),
-            source: path_source_ref.as_deref(),
-            fill: fill_ref.as_deref(),
-            stroke: stroke_ref.as_deref(),
-            raster: raster_image_ref.as_deref(),
-            lottie: lottie_ref.is_some(),
-            shadow: shadow_ref.as_deref(),
-            glow: glow_ref.as_deref(),
-            blur: blur_ref.as_deref(),
-            fill_progress: fill_progress_ref.as_deref(),
-            tip_glow: tip_glow_ref.as_deref(),
-            stroke_align: stroke_align_ref.as_deref(),
-            stroke_profile: stroke_profile_ref.as_deref(),
-            stroke_view,
-            screen: camera_view.is_some(),
-            chalk: chalk_ref.as_deref(),
-        };
-        let gpu = effect_layers.is_some();
-        let group_shadow = crate::fragment::group_shadow(
-            &parts,
-            opacity_group != entity
-                && clip_ref.is_none()
-                && blend.is_none()
-                && camera_view.is_none(),
-        )
-        .map(Arc::new);
-        // A fragment keeps its shadow only while its group does not draw it.
-        let shared = group_shadow.is_some();
-        // Inside a shader effect, a drawable's own shadow may be cast from
-        // what the effect draws instead (see `divert_effects`), so the
-        // fragment without it is built too.
-        let effect_casts_shadow = gpu && effect_root.is_some() && shadow_ref.is_some() && !shared;
-        if cache.shared_shadows.contains(&mobj_id.0) != shared {
-            cache.fragment_cache.remove(&mobj_id.0);
-            if shared {
-                cache.shared_shadows.insert(mobj_id.0);
-            } else {
-                cache.shared_shadows.remove(&mobj_id.0);
-            }
-        }
-
-        if !cache.fragment_cache.contains_key(&mobj_id.0) {
-            let inputs = current_inputs.unwrap_or_else(|| {
-                FragmentInputs::capture(
-                    path_ref.as_deref(),
-                    path_source_ref.as_deref(),
-                    fill_level_ref.as_deref(),
-                    fill_ref.as_deref(),
-                    stroke_ref.as_deref(),
-                    fill_progress_ref.as_deref(),
-                    tip_glow_ref.as_deref(),
-                )
-            });
-            cache.fragment_inputs.insert(mobj_id.0, inputs);
-        }
-        let mut rebuilt_overlay = None;
-        let mut rebuilt_soft = None;
-        let fragment = cache.fragment_cache.entry(mobj_id.0).or_insert_with(|| {
-            let recipe = fragment_recipe(FragmentParts {
-                shadow: if shared { None } else { parts.shadow },
-                ..parts
-            });
-            let built = crate::fragment::build_fragment_with(
-                &recipe,
-                lottie_ref.as_deref().map(|lottie| lottie.scene().as_ref()),
-                gpu,
-            );
-            rebuilt_overlay = Some(built.overlay);
-            rebuilt_soft = Some(built.soft);
-            Arc::new(built.scene)
-        });
-        let fragment = Arc::clone(fragment);
-        if rebuilt_soft.is_some() || !effect_casts_shadow {
-            cache.effect_shadows.remove(&mobj_id.0);
-        }
-        let effect_shadow = if effect_casts_shadow {
-            match cache.effect_shadows.get(&mobj_id.0) {
-                Some(effect_shadow) => Some(Arc::clone(effect_shadow)),
-                None => crate::fragment::build_effect_shadow(
-                    &fragment_recipe(parts),
-                    lottie_ref.as_deref().map(|lottie| lottie.scene().as_ref()),
-                )
-                .inspect(|effect_shadow| {
-                    cache
-                        .effect_shadows
-                        .insert(mobj_id.0, Arc::clone(effect_shadow));
-                }),
-            }
-        } else {
-            None
-        };
-        match rebuilt_soft {
-            Some(soft) if soft.is_empty() => {
-                cache.soft_layers.remove(&mobj_id.0);
-            }
-            Some(soft) => {
-                cache.soft_layers.insert(mobj_id.0, soft.into());
-            }
-            None => {}
-        }
-        let soft = cache
-            .soft_layers
-            .get(&mobj_id.0)
-            .cloned()
-            .unwrap_or_default();
-        match rebuilt_overlay {
-            Some(Some(overlay)) => {
-                cache.screen_overlays.insert(mobj_id.0, Arc::new(overlay));
-            }
-            Some(None) => {
-                cache.screen_overlays.remove(&mobj_id.0);
-            }
-            None => {}
-        }
-
-        // Only translucent or blended elements open a layer; a Lottie draws
-        // geometry that `Path2D` does not describe.
-        let opacity_bounds = if global_opacity.0 >= 1.0 && blend.is_none() || lottie_ref.is_some() {
-            opacity_fallback
-        } else {
-            let visible_path = if path_reveal_is_empty(tip_glow_ref.as_deref()) {
-                None
-            } else {
-                path_ref.as_ref().map(|path| path.0.as_ref())
-            };
-            let stroke_align = stroke_align_ref.as_deref().copied().unwrap_or_default();
-            let stroke_style = stroke_ref
-                .as_deref()
-                .filter(|stroke| stroke.brush.is_some())
-                .map(|stroke| aligned_pen(&stroke.style, stroke_align));
-            opacity_layer_bounds(
-                visible_path.and_then(|path| {
-                    fragment_extent(
-                        path,
-                        transform.affine_2d,
-                        stroke_style.as_deref(),
-                        stroke_view,
-                        shadow_ref.as_deref(),
-                        glow_ref.as_deref(),
-                        blur_ref.as_deref(),
-                    )
-                }),
-                world_bounds_opt,
-                opacity_fallback,
-                antialias,
-            )
-        };
-        let effect_extent = effect_root
-            .and_then(|_| {
-                let path = path_ref
-                    .as_ref()
-                    .filter(|_| !path_reveal_is_empty(tip_glow_ref.as_deref()))?;
-                let stroke_align = stroke_align_ref.as_deref().copied().unwrap_or_default();
-                let stroke_style = stroke_ref
-                    .as_deref()
-                    .filter(|stroke| stroke.brush.is_some())
-                    .map(|stroke| aligned_pen(&stroke.style, stroke_align));
-                fragment_extent(
-                    path.0.as_ref(),
-                    transform.affine_2d,
-                    stroke_style.as_deref(),
-                    stroke_view,
-                    shadow_ref.as_deref(),
-                    glow_ref.as_deref(),
-                    blur_ref.as_deref(),
-                )
-            })
-            .map(reached_rect);
-        local_extracted.push(ExtractedElement {
-            soft,
-            entity,
-            recipe: None,
-            lottie: None,
-            transform: transform.affine_2d,
-            opacity: global_opacity.0,
-            opacity_bounds,
-            opacity_extent: None,
-            opacity_group,
-            group_opacity,
-            group_shadow,
-            effect_shadow,
-            effect_root,
-            effect_extent,
-            matte_root,
-            matte_of,
-            glass_root,
-            outline,
-            render_order: stacked_render_order(
-                *render_order,
-                entity,
-                |e| child_query.get(e).ok().map(ChildOf::parent),
-                |e| order_query.get(e).map_or(0, |(order, _, _)| order.z_index),
-            ),
-            z_layer: inherited_z_layer(
-                entity,
-                |e| child_query.get(e).ok().map(ChildOf::parent),
-                |e| {
-                    order_query
-                        .get(e)
-                        .ok()
-                        .and_then(|(_, _, layer)| layer.map(|layer| layer.0))
-                },
-            ),
-            scene: fragment,
-            clip_mask: clip_ref.as_ref().map(|c| (**c).clone()),
-            blend,
-            transition_side: transition_frame
-                .as_deref()
-                .filter(|frame| !frame.is_empty())
-                .map_or_else(Default::default, |frame| {
-                    frame.side_of(entity, |e| child_query.get(e).ok().map(ChildOf::parent))
-                }),
-            persistent: segmented
-                && outside_segments(
-                    entity,
-                    |e| child_query.get(e).ok().map(ChildOf::parent),
-                    |e| order_query.get(e).is_ok_and(|(_, member, _)| member),
-                ),
-            post_exempt: exempt_query.contains(entity),
-            lineage: if camera_views.is_empty() {
-                Vec::new()
-            } else {
-                element_lineage(entity, |e| child_query.get(e).ok().map(ChildOf::parent))
-            },
-            view_bounds: world_bounds_opt.map(|bounds| bounds_rect(&bounds.0)),
-            in_views: !hud_query.contains(entity),
-            layer: layer_query
-                .get(entity)
-                .ok()
-                .map(|layer| Arc::clone(&layer.0)),
-            screen: camera_view.map(|view| ExtractedScreen {
-                view: Arc::clone(view),
-                overlay: cache.screen_overlays.get(&mobj_id.0).cloned(),
-            }),
-            echo_rank: echo_query.get(entity).map_or(0, |echo| echo.rank),
-            tip: tip_query.contains(entity),
-            backdrop: backdrop_query
-                .get(entity)
-                .ok()
-                .map(|backdrop| backdrop.depth),
-        });
-    }
+    let mut source = PreviewFragments {
+        cache: &mut cache,
+        current_inputs: None,
+    };
+    let mut frame = extract::ElementFrame {
+        camera_views: &camera_views,
+        cull: cam_bounds,
+        transition: transition_frame
+            .as_deref()
+            .filter(|frame| !frame.is_empty()),
+        opacity_fallback,
+        antialias,
+        gpu: effect_layers.is_some(),
+        pins: extract::Pins::Off,
+    };
+    extract::extract_elements(&elements, &mut frame, &mut source, local_extracted);
     let mut gpu_frames = Vec::new();
     if let Some(camera) = gaanim_camera.as_deref() {
         // With the GPU path, the meshes draw into images of the canvas's
@@ -7672,7 +6986,7 @@ pub fn gaanim_render_system(
                 light_query.iter(),
             ),
             three_d_query.iter().map(three_d_source),
-            |entity| child_query.get(entity).ok().map(ChildOf::parent),
+            |entity| elements.parents.get(entity).ok().map(ChildOf::parent),
             any_effect.then_some(&mut effects_of as &mut EffectsOf),
             transition_frame.as_deref(),
             !camera_views.is_empty(),
@@ -7732,7 +7046,8 @@ pub fn gaanim_render_system(
     }
 
     // Drawables with a matte draw through it, before any effect takes them.
-    let mut mattes: Vec<CapturedMatte> = matte_query
+    let mut mattes: Vec<CapturedMatte> = elements
+        .mattes
         .iter()
         .map(|(root, matte)| CapturedMatte {
             root,
@@ -7755,7 +7070,8 @@ pub fn gaanim_render_system(
                 local_extracted,
                 time_seconds,
                 |entity| {
-                    effect_query
+                    elements
+                        .shader_effects
                         .get(entity)
                         .ok()
                         .map(|(effect, _)| effect.clone())
@@ -7790,7 +7106,8 @@ pub fn gaanim_render_system(
     // Glass reads what is drawn behind it, effects included.
     let mut layers = layers;
     if effect_layers.is_some() {
-        let mut glasses: Vec<CapturedGlass> = glass_query
+        let mut glasses: Vec<CapturedGlass> = elements
+            .glasses
             .iter()
             .map(|(root, glass)| CapturedGlass {
                 root,
@@ -7812,7 +7129,13 @@ pub fn gaanim_render_system(
     if let Some(canvas_bg) = canvas_bg.as_deref() {
         canvas_bg.evaluate_uniforms(
             &background_times(time_seconds, transition_frame.as_deref()),
-            |entity| float_signals.get(entity).ok().map(|signal| signal.value),
+            |entity| {
+                elements
+                    .float_signals
+                    .get(entity)
+                    .ok()
+                    .map(|signal| signal.value)
+            },
         );
     }
     let mut composed = compose_frame(

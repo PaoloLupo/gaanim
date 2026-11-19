@@ -6,4 +6,8 @@ pub use crate::components::{
 };
 pub use crate::hierarchy::{GaanimScenePlugin, SceneSet};
 pub use bevy::ecs::{archetype::ArchetypeId, change_detection::Tick, component::ComponentId};
+pub use bevy::ecs::{
+    query::QueryItem,
+    system::{SystemParam, SystemState},
+};
 pub use bevy::prelude::{ChildOf, Entity, World};
