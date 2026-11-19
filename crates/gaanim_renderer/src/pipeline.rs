@@ -6934,12 +6934,13 @@ pub fn gaanim_render_system(
         .as_ref()
         .map_or(0.0, |state| state.current_time);
     let (camera_views, frozen_shown) = elements.camera_views(time_seconds, frozen_views.as_deref());
-
-    // Viewport pixels per world unit, as in the culling bounds below.
-    let antialias = antialias_margin(gaanim_camera.as_ref().and_then(|cam| match cam.projection {
-        gaanim_math::Projection::Orthographic { zoom } => Some(zoom * cam.viewport.scale),
-        _ => None,
-    }));
+    // Two of the pixels the preview draws, as the headless path takes two of
+    // the output's; without a camera, both fall back to one world unit.
+    let antialias = antialias_margin(
+        gaanim_camera
+            .as_deref()
+            .map(|camera| preview_effect_density(Some(camera), preview.as_deref())),
+    );
 
     // 1. Calculate orthographic camera bounds for culling, but while the
     // side a transition takes away keeps a camera of its own, which may
