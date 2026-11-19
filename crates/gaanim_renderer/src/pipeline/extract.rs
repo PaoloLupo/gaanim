@@ -280,6 +280,15 @@ pub(super) fn extract_elements(
         {
             continue;
         }
+        let pen = stroke
+            .as_deref()
+            .filter(|stroke| stroke.brush.is_some())
+            .map(|stroke| {
+                aligned_pen(
+                    &stroke.style,
+                    stroke_align.as_deref().copied().unwrap_or_default(),
+                )
+            });
         if let Some(bounds) = &frame.cull {
             let mut current = entity;
             let mut ancestor_culled = false;
@@ -290,12 +299,25 @@ pub(super) fn extract_elements(
                 }
                 current = parent;
             }
-            if ancestor_culled
-                || world_bounds.is_some_and(|world| {
-                    !bounds.intersects(&world.0)
-                        && !seen_by_camera_views(frame.camera_views, &world.0)
-                })
-            {
+            // What a drawable draws beyond its bounds (a glow, a shadow) may
+            // reach into the view from outside it.
+            let outside = |world: &WorldBounds| {
+                if bounds.intersects(&world.0) {
+                    return false;
+                }
+                let reach = fragment_reach(
+                    transform.affine_2d,
+                    pen.as_deref(),
+                    stroke_view,
+                    shadow.as_deref(),
+                    glow.as_deref(),
+                    blur.as_deref(),
+                );
+                let reach = gaanim_core::glam::DVec3::new(reach, reach, 0.0);
+                let drawn = gaanim_math::Bounds3D::new(world.0.min - reach, world.0.max + reach);
+                !bounds.intersects(&drawn) && !seen_by_camera_views(frame.camera_views, &drawn)
+            };
+            if ancestor_culled || world_bounds.is_some_and(outside) {
                 culled.insert(entity);
                 continue;
             }
@@ -391,15 +413,6 @@ pub(super) fn extract_elements(
             .as_ref()
             .filter(|_| !path_reveal_is_empty(tip_glow.as_deref()))
             .map(|path| path.0.as_ref());
-        let pen = stroke
-            .as_deref()
-            .filter(|stroke| stroke.brush.is_some())
-            .map(|stroke| {
-                aligned_pen(
-                    &stroke.style,
-                    stroke_align.as_deref().copied().unwrap_or_default(),
-                )
-            });
         let extent = || {
             visible_path.and_then(|path| {
                 fragment_extent(

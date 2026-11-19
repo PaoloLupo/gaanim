@@ -1725,6 +1725,22 @@ fn fragment_extent(
         return None;
     }
     let rect = transform.transform_rect_bbox(kurbo::Shape::bounding_box(path));
+    Some((
+        rect,
+        fragment_reach(transform, stroke, stroke_view, shadow, glow, blur),
+    ))
+}
+
+/// How far a drawable placed by `transform` draws beyond its path: half its
+/// stroke, its glow, blur and drop shadow, in world units.
+fn fragment_reach(
+    transform: kurbo::Affine,
+    stroke: Option<&kurbo::Stroke>,
+    stroke_view: Option<kurbo::Affine>,
+    shadow: Option<&DropShadow>,
+    glow: Option<&Glow>,
+    blur: Option<&GaussianBlur>,
+) -> f64 {
     // Square caps reach half the width diagonally; miter joins up to the limit.
     let stroke_reach = stroke.map_or(0.0, |stroke| {
         let corner = match stroke.join {
@@ -1747,8 +1763,7 @@ fn fragment_extent(
     let scale = stroke_view.map_or(norm(transform), |view| {
         norm(transform).max(norm(transform * view.inverse()))
     });
-    let reach = (stroke_reach + glow_reach + blur_reach + shadow_reach) * scale;
-    Some((rect, reach))
+    (stroke_reach + glow_reach + blur_reach + shadow_reach) * scale
 }
 
 /// Two output pixels in world units, the antialiasing margin of opacity
@@ -7715,6 +7730,50 @@ mod tests {
         assert!(
             transform_index(&scene, view * kurbo::Affine::translate((3.5, 2.0))).is_some(),
             "the view zooms by the morphed sizes"
+        );
+    }
+
+    /// Culling keeps a drawable outside the camera's margin whose glow
+    /// reaches into the frame, and still leaves out one that draws nothing
+    /// there.
+    #[test]
+    fn culling_keeps_what_reaches_into_the_frame() {
+        let camera = gaanim_math::Camera::ortho_2d_frame(16.0, 9.0, 1920, 1080);
+        // The frame ends at x = 8 and the culling margin at about 9.3.
+        let drawn = |x: f64, glow: Option<f64>| {
+            let mut world = World::new();
+            let square = kurbo::Rect::new(x, -0.5, x + 1.0, 0.5);
+            let mut entity = world.spawn((
+                MobjectId(ObjectId::from_raw(97)),
+                GlobalSpatialTransform::default(),
+                GlobalOpacity(1.0),
+                RenderOrder::default(),
+                RenderLayer::Vello2D,
+                Path2D(Arc::new(square.to_path(0.01))),
+                FillBrush(Some(peniko::Brush::Solid(peniko::Color::WHITE))),
+                WorldBounds(gaanim_math::Bounds3D::new_2d(x, -0.5, x + 1.0, 0.5)),
+                Visible,
+            ));
+            if let Some(radius) = glow {
+                entity.insert(Glow {
+                    radius,
+                    intensity: 1.0,
+                    color: peniko::Color::WHITE,
+                });
+            }
+            !compile_scene_from_world(&mut world, Some(&camera))
+                .encoding()
+                .path_data
+                .is_empty()
+        };
+        assert!(
+            drawn(9.5, Some(2.0)),
+            "a glow reaching into the frame was culled"
+        );
+        assert!(!drawn(9.5, None), "a drawable outside the margin was drawn");
+        assert!(
+            !drawn(30.0, Some(2.0)),
+            "a glow far from the frame was drawn"
         );
     }
 
