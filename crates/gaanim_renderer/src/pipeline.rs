@@ -6922,6 +6922,11 @@ pub fn gaanim_render_system(
     mut frozen_views: Option<ResMut<FrozenViews>>,
     mut scratch: Local<(Vec<ExtractedElement>, OwnViewScratch)>,
 ) {
+    // A transition frame that changes nothing is no transition, as in the
+    // headless path.
+    let transition_frame = transition_frame
+        .as_deref()
+        .filter(|frame| !frame.is_empty());
     let (local_extracted, own_scratch) = &mut *scratch;
     local_extracted.clear();
 
@@ -6939,9 +6944,7 @@ pub fn gaanim_render_system(
     // 1. Calculate orthographic camera bounds for culling, but while the
     // side a transition takes away keeps a camera of its own, which may
     // show what this one does not.
-    let outgoing_camera = transition_frame
-        .as_deref()
-        .is_some_and(|frame| frame.outgoing_camera.is_some());
+    let outgoing_camera = transition_frame.is_some_and(|frame| frame.outgoing_camera.is_some());
     let cam_bounds = gaanim_camera
         .as_ref()
         .filter(|_| !outgoing_camera)
@@ -6981,9 +6984,7 @@ pub fn gaanim_render_system(
     let mut frame = extract::ElementFrame {
         camera_views: &camera_views,
         cull: cam_bounds,
-        transition: transition_frame
-            .as_deref()
-            .filter(|frame| !frame.is_empty()),
+        transition: transition_frame,
         opacity_fallback,
         antialias,
         gpu: effect_layers.is_some(),
@@ -7029,13 +7030,26 @@ pub fn gaanim_render_system(
             three_d_query.iter().map(three_d_source),
             |entity| elements.parents.get(entity).ok().map(ChildOf::parent),
             any_effect.then_some(&mut effects_of as &mut EffectsOf),
-            transition_frame.as_deref(),
+            transition_frame,
             !camera_views.is_empty(),
             opacity_fallback,
             local_extracted,
             (!own_views.is_empty()).then_some((&mut *captured, &mut *held)),
             meshes,
         );
+        // Snapshots' 3D content first, then own views', as the headless path
+        // appends them.
+        if let (Some((size, _)), Some(frozen)) = (placement, frozen_views.as_deref_mut())
+            && !frozen_shown.is_empty()
+        {
+            gpu_frames.extend(frozen_three_d_frames(
+                frozen_three_d_in_order(&frozen_shown).into_iter(),
+                &mut frozen.store.three_d,
+                size.1,
+                VIEW_THREE_D_SLOT,
+                local_extracted,
+            ));
+        }
         if !own_views.is_empty() {
             own_view_three_d(&own_views, captured);
             if let Some((size, _)) = placement {
@@ -7049,17 +7063,6 @@ pub fn gaanim_render_system(
                     local_extracted,
                 ));
             }
-        }
-        if let (Some((size, _)), Some(frozen)) = (placement, frozen_views.as_deref_mut())
-            && !frozen_shown.is_empty()
-        {
-            gpu_frames.extend(frozen_three_d_frames(
-                frozen_three_d_in_order(&frozen_shown).into_iter(),
-                &mut frozen.store.three_d,
-                size.1,
-                VIEW_THREE_D_SLOT,
-                local_extracted,
-            ));
         }
     }
     if let Some(frame) = gpu_three_d.as_mut() {
@@ -7106,7 +7109,7 @@ pub fn gaanim_render_system(
     });
     if let Some(canvas_bg) = canvas_bg.as_deref() {
         canvas_bg.evaluate_uniforms(
-            &background_times(time_seconds, transition_frame.as_deref()),
+            &background_times(time_seconds, transition_frame),
             |entity| {
                 elements
                     .float_signals
@@ -7123,7 +7126,7 @@ pub fn gaanim_render_system(
             effect_density,
             mattes: &mattes,
             glasses: &glasses,
-            transition: transition_frame.as_deref(),
+            transition: transition_frame,
             background,
             time: time_seconds,
             rest: ambient.as_ref().map_or(0.0, |clock| clock.rest),
