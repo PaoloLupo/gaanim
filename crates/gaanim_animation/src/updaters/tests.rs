@@ -1874,3 +1874,53 @@ fn a_fill_series_colors_a_group_through_its_ramp() {
     assert!(invalid.clone().with_colors(Vec::new(), None).is_err());
     assert!(invalid.with_colors(vec![red], Some((1.0, 1.0))).is_err());
 }
+
+/// A frame whose targets hold still leaves its path, bounds and frame
+/// state unchanged.
+#[test]
+fn a_still_surrounding_rect_marks_no_change() {
+    use bevy::prelude::DetectChanges;
+    let mut world = World::new();
+    let target = ObjectId::from_parts(1, 1);
+    world.spawn((
+        gaanim_scene::MobjectId(target),
+        SpatialTransform::new_2d(1.0, 2.0),
+        LocalBounds(gaanim_math::Bounds3D::new_2d(-1.0, -1.0, 1.0, 1.0)),
+    ));
+    let empty = Arc::new(BezPath::new());
+    let frame = world
+        .spawn((
+            gaanim_scene::MobjectId(ObjectId::from_parts(2, 1)),
+            SpatialTransform::default(),
+            Path2D(empty.clone()),
+            PathSource(empty),
+            LocalBounds(gaanim_math::Bounds3D::default()),
+            SurroundingRect {
+                from: vec![target],
+                to: vec![target],
+                progress: 1.0,
+                padding: [0.1; 4],
+                corner_radius: 0.0,
+                last_bounds: None,
+                shape: SurroundingShape::Frame,
+                notation: None,
+                rays: None,
+            },
+        ))
+        .id();
+    let ticks = |world: &World| {
+        let entity = world.entity(frame);
+        [
+            entity.get_ref::<Path2D>().unwrap().last_changed(),
+            entity.get_ref::<PathSource>().unwrap().last_changed(),
+            entity.get_ref::<LocalBounds>().unwrap().last_changed(),
+            entity.get_ref::<SurroundingRect>().unwrap().last_changed(),
+        ]
+    };
+
+    surrounding_rect_system(&mut world);
+    let drawn = ticks(&world);
+    world.increment_change_tick();
+    surrounding_rect_system(&mut world);
+    assert_eq!(ticks(&world), drawn, "an unchanged frame was written again");
+}

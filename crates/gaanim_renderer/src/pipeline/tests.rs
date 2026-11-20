@@ -2602,3 +2602,121 @@ fn culling_keeps_what_reaches_into_the_frame() {
         "a glow far from the frame was drawn"
     );
 }
+
+#[test]
+fn a_boolean_written_by_a_restore_is_rebuilt_while_its_sources_hold_still() {
+    let mut app = App::new();
+    let left = app
+        .world_mut()
+        .spawn((
+            Path2D(rect_path(0.0, 0.0, 10.0, 10.0)),
+            GlobalSpatialTransform::default(),
+        ))
+        .id();
+    let right = app
+        .world_mut()
+        .spawn((
+            Path2D(rect_path(5.0, 0.0, 15.0, 10.0)),
+            GlobalSpatialTransform::default(),
+        ))
+        .id();
+    let result = app
+        .world_mut()
+        .spawn((
+            BooleanBinding {
+                sources: vec![left, right],
+                op: gaanim_objects::boolean::BooleanOp::Intersection,
+                tolerance: 0.25,
+                rule: gaanim_objects::boolean::BooleanFillRule::NonZero,
+            },
+            GlobalSpatialTransform::default(),
+            Path2D::default(),
+            PathSource::default(),
+            LocalBounds::default(),
+        ))
+        .id();
+    app.add_systems(Update, resolve_dynamic_boolean_system);
+    let bounds = |app: &App| app.world().get::<Path2D>(result).unwrap().0.bounding_box();
+    app.update();
+    let built = app.world().get::<Path2D>(result).unwrap().0.clone();
+
+    // Sources holding still keep the built path, allocation and all.
+    app.update();
+    assert!(Arc::ptr_eq(
+        &built,
+        &app.world().get::<Path2D>(result).unwrap().0
+    ));
+
+    // Something else writes the result, as a seek's restore does.
+    app.world_mut().get_mut::<Path2D>(result).unwrap().0 = rect_path(0.0, 0.0, 1.0, 1.0);
+    app.update();
+    assert_eq!(bounds(&app), kurbo::Rect::new(5.0, 0.0, 10.0, 10.0));
+
+    // A moved source rebuilds it.
+    app.world_mut()
+        .get_mut::<GlobalSpatialTransform>(right)
+        .unwrap()
+        .affine_2d = kurbo::Affine::translate((2.0, 0.0));
+    app.update();
+    assert_eq!(bounds(&app), kurbo::Rect::new(7.0, 0.0, 10.0, 10.0));
+}
+
+/// Drawables clipped by the same sources share their union, and masks
+/// whose inputs hold still are not written again.
+#[test]
+fn still_clip_masks_are_not_rebuilt_and_follow_their_sources() {
+    let mut app = App::new();
+    let source = app
+        .world_mut()
+        .spawn((
+            Path2D(rect_path(0.0, 0.0, 10.0, 10.0)),
+            GlobalSpatialTransform::default(),
+        ))
+        .id();
+    let clipped = |app: &mut App| {
+        app.world_mut()
+            .spawn((
+                GlobalSpatialTransform::default(),
+                LocalBounds::default(),
+                ClipMask {
+                    path: kurbo::BezPath::new(),
+                    rule: peniko::Fill::NonZero,
+                    sources: vec![source],
+                    invert: false,
+                },
+            ))
+            .id()
+    };
+    let (first, second) = (clipped(&mut app), clipped(&mut app));
+    app.add_systems(Update, resolve_dynamic_clip_masks_system);
+    let mask = |app: &App, entity| {
+        app.world()
+            .get::<ClipMask>(entity)
+            .unwrap()
+            .path
+            .bounding_box()
+    };
+    let ticks = |app: &App| {
+        [first, second].map(|entity| {
+            app.world()
+                .entity(entity)
+                .get_ref::<ClipMask>()
+                .unwrap()
+                .last_changed()
+        })
+    };
+    app.update();
+    assert_eq!(mask(&app, first), kurbo::Rect::new(0.0, 0.0, 10.0, 10.0));
+    assert_eq!(mask(&app, second), mask(&app, first));
+    let drawn = ticks(&app);
+    app.update();
+    assert_eq!(ticks(&app), drawn, "a still mask was written again");
+
+    app.world_mut()
+        .get_mut::<GlobalSpatialTransform>(source)
+        .unwrap()
+        .affine_2d = kurbo::Affine::translate((3.0, 0.0));
+    app.update();
+    assert_eq!(mask(&app, first), kurbo::Rect::new(3.0, 0.0, 13.0, 10.0));
+    assert_eq!(mask(&app, second), mask(&app, first));
+}

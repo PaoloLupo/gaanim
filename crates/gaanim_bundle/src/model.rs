@@ -3248,6 +3248,9 @@ impl DeltaEncoder {
         let samples = std::mem::take(&mut frame.motion_blur);
         self.write_frame(w, frame);
         w.len(samples.len());
+        if samples.is_empty() {
+            return;
+        }
         let mut sub = DeltaEncoder {
             previous: self.previous.clone(),
         };
@@ -3381,6 +3384,9 @@ impl DeltaDecoder {
     pub fn read(&mut self, r: &mut Reader<'_>) -> Result<FrameRecord> {
         let mut frame = self.read_frame(r)?;
         let count = r.len()?;
+        if count == 0 {
+            return Ok(frame);
+        }
         let mut sub = DeltaDecoder {
             previous: self.previous.clone(),
             version: self.version,
@@ -3465,40 +3471,48 @@ impl DeltaDecoder {
                 elements
             }
             FRAME_DELTA => {
+                // A delta is written only between frames whose keys are
+                // unique, and the previous frame is replaced by this one:
+                // its elements move into this frame instead of being copied.
                 let previous = self
                     .previous
-                    .as_ref()
+                    .as_mut()
                     .ok_or_else(|| corrupt("delta frame without a previous frame"))?;
-                let mut by_key: HashMap<u32, ElementRecord> = previous
+                let previous_order: Vec<u32> = previous
                     .elements
                     .iter()
-                    .map(|element| (element.key, element.clone()))
+                    .map(|element| element.key)
                     .collect();
+                let mut by_key: HashMap<u32, ElementRecord> =
+                    std::mem::take(&mut previous.elements)
+                        .into_iter()
+                        .map(|element| (element.key, element))
+                        .collect();
                 let changed = r.len()?;
-                let mut changed_order = Vec::with_capacity(changed.min(1 << 20));
                 for _ in 0..changed {
                     let element = ElementRecord::read(r, self.version)?;
-                    changed_order.push(element.key);
                     by_key.insert(element.key, element);
                 }
                 let order = if r.bool()? {
-                    previous
-                        .elements
-                        .iter()
-                        .map(|element| element.key)
-                        .collect()
+                    previous_order
                 } else {
                     read_keys(r)?
                 };
-                order
-                    .into_iter()
-                    .map(|key| {
-                        by_key
-                            .get(&key)
+                let mut elements: Vec<ElementRecord> = Vec::with_capacity(order.len());
+                for key in order {
+                    let element = match by_key.remove(&key) {
+                        Some(element) => element,
+                        // A key drawn twice, as no delta writes, copies the
+                        // element it already moved.
+                        None => elements
+                            .iter()
+                            .find(|element| element.key == key)
                             .cloned()
-                            .ok_or_else(|| corrupt("frame references an unknown element"))
-                    })
-                    .collect::<Result<Vec<_>>>()?
+                            .ok_or_else(|| corrupt("frame references an unknown element"))?,
+                    };
+                    elements.push(element);
+                }
+                elements
             }
             _ => return Err(corrupt("invalid frame kind")),
         };

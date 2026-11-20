@@ -899,11 +899,18 @@ pub fn world_bounds_propagation_system(
 }
 
 /// System: Approximate WorldBounds for entities without LocalBounds using transform position.
+///
+/// Only entities whose world transform changed, or whose world bounds
+/// another system wrote (a snapshot restore), are recomputed.
 #[allow(clippy::type_complexity)]
 pub fn world_bounds_fallback_system(
     mut query: Query<
         (&GlobalSpatialTransform, &mut WorldBounds),
-        (Without<LocalBounds>, Without<GroupMarker>),
+        (
+            Without<LocalBounds>,
+            Without<GroupMarker>,
+            Or<(Changed<GlobalSpatialTransform>, Changed<WorldBounds>)>,
+        ),
     >,
 ) {
     for (global, mut world) in &mut query {
@@ -926,76 +933,97 @@ pub fn world_bounds_fallback_system(
 }
 
 /// System: Propagate WorldBounds bottom-up for nested group hierarchies.
+///
+/// A group's bounds are the union of what its children contribute: a child
+/// with world bounds contributes them (a group its own union), and a child
+/// without passes on what its own children contribute. A group with nothing
+/// inside has default bounds. Only the groups at or above an entity whose
+/// world bounds, children or group marker changed are recomputed, deepest
+/// first.
 #[allow(clippy::type_complexity)]
 pub fn hierarchical_bounds_system(
-    root_query: Query<Entity, (With<bevy::prelude::Children>, Without<ChildOf>)>,
-    empty_root_group_query: Query<
-        Entity,
-        (
-            With<GroupMarker>,
-            Without<bevy::prelude::Children>,
-            Without<ChildOf>,
-        ),
-    >,
-    children_query: Query<&bevy::prelude::Children>,
-    mut bounds_query: Query<&mut WorldBounds>,
+    mut bounds: ParamSet<(Query<Entity, Changed<WorldBounds>>, Query<&mut WorldBounds>)>,
+    regrouped: Query<Entity, Or<(Changed<Children>, Changed<GroupMarker>)>>,
+    mut emptied: RemovedComponents<Children>,
+    parents: Query<&ChildOf>,
+    children_query: Query<&Children>,
     is_group_query: Query<(), With<GroupMarker>>,
 ) {
-    for root in &root_query {
-        compute_bounds_recursive(root, &children_query, &mut bounds_query, &is_group_query);
+    let starts: Vec<Entity> = bounds
+        .p0()
+        .iter()
+        .chain(regrouped.iter())
+        .chain(emptied.read())
+        .collect();
+    let mut bounds_query = bounds.p1();
+    let mut visited = EntityHashSet::default();
+    let mut groups = Vec::new();
+    for start in starts {
+        let mut entity = start;
+        // Stop at an entity already visited: its ancestors are queued.
+        while visited.insert(entity) {
+            if is_group_query.contains(entity) && bounds_query.contains(entity) {
+                groups.push(entity);
+            }
+            match parents.get(entity) {
+                Ok(parent) => entity = parent.parent(),
+                Err(_) => break,
+            }
+        }
     }
-
-    // Reset bounds of empty root groups (GroupMarker without children).
-    // These are not reached by the recursive traversal, which only descends
-    // through Children. Resetting here mirrors the old cleanup pass and
-    // prevents stale bounds from persisting after all children are removed.
-    for entity in &empty_root_group_query {
-        if let Ok(mut b) = bounds_query.get_mut(entity)
-            && b.0 != gaanim_math::Bounds3D::default()
+    if groups.is_empty() {
+        return;
+    }
+    let depth = |mut entity: Entity| {
+        let mut depth = 0usize;
+        while let Ok(parent) = parents.get(entity) {
+            entity = parent.parent();
+            depth += 1;
+        }
+        depth
+    };
+    let mut groups: Vec<_> = groups
+        .into_iter()
+        .map(|group| (depth(group), group))
+        .collect();
+    groups.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+    for (_, group) in groups {
+        let bounds = children_query
+            .get(group)
+            .ok()
+            .and_then(|children| {
+                children
+                    .iter()
+                    .copied()
+                    .filter_map(|child| bounds_contribution(child, &children_query, &bounds_query))
+                    .reduce(|union, bounds| union.union(&bounds))
+            })
+            .unwrap_or_default();
+        if let Ok(mut b) = bounds_query.get_mut(group)
+            && b.0 != bounds
         {
-            b.0 = gaanim_math::Bounds3D::default();
+            b.0 = bounds;
         }
     }
 }
 
-fn compute_bounds_recursive(
+/// What `entity` adds to its group's bounds: its world bounds, or for an
+/// entity without any, what its children add.
+fn bounds_contribution(
     entity: Entity,
-    children_query: &Query<&bevy::prelude::Children>,
-    bounds_query: &mut Query<&mut WorldBounds>,
-    is_group_query: &Query<(), With<GroupMarker>>,
-) -> gaanim_math::Bounds3D {
-    let mut union_bounds = gaanim_math::Bounds3D::new(
-        gaanim_core::glam::DVec3::splat(f64::INFINITY),
-        gaanim_core::glam::DVec3::splat(f64::NEG_INFINITY),
-    );
-
-    if let Ok(children) = children_query.get(entity) {
-        for &child in children.iter() {
-            let child_bounds =
-                compute_bounds_recursive(child, children_query, bounds_query, is_group_query);
-            if child_bounds.min.x != f64::INFINITY {
-                union_bounds = union_bounds.union(&child_bounds);
-            }
-        }
+    children_query: &Query<&Children>,
+    bounds_query: &Query<&mut WorldBounds>,
+) -> Option<gaanim_math::Bounds3D> {
+    if let Ok(bounds) = bounds_query.get(entity) {
+        return Some(bounds.0);
     }
-
-    if is_group_query.contains(entity) {
-        if let Ok(mut b) = bounds_query.get_mut(entity) {
-            let bounds = if union_bounds.min.x != f64::INFINITY {
-                union_bounds
-            } else {
-                gaanim_math::Bounds3D::default()
-            };
-            if b.0 != bounds {
-                b.0 = bounds;
-            }
-            return bounds;
-        }
-    } else if let Ok(b) = bounds_query.get(entity) {
-        return b.0;
-    }
-
-    union_bounds
+    children_query
+        .get(entity)
+        .ok()?
+        .iter()
+        .copied()
+        .filter_map(|child| bounds_contribution(child, children_query, bounds_query))
+        .reduce(|union, bounds| union.union(&bounds))
 }
 
 /// System: Propagate styling changes (FillBrush/StrokeBrush) from groups to their children.
@@ -2552,6 +2580,76 @@ mod tests {
                     .abs_diff_eq(normal, 1e-9)
             );
         }
+    }
+
+    /// Group bounds follow what changes inside them, through children
+    /// without bounds of their own, and only groups above a change are
+    /// written.
+    #[test]
+    fn group_bounds_follow_changes_below_them() {
+        use bevy::prelude::DetectChanges;
+        use gaanim_core::glam::DVec3;
+        use gaanim_math::Bounds3D;
+        let square = |x: f64| WorldBounds(Bounds3D::new_2d(x, 0.0, x + 1.0, 1.0));
+        let mut world = World::new();
+        let root = world.spawn((GroupMarker, WorldBounds::default())).id();
+        let group = world
+            .spawn((GroupMarker, WorldBounds::default(), ChildOf(root)))
+            .id();
+        let a = world.spawn((square(0.0), ChildOf(group))).id();
+        let b = world.spawn((square(2.0), ChildOf(group))).id();
+        // No bounds of its own: it passes on its child's.
+        let pass = world.spawn(ChildOf(root)).id();
+        world.spawn((square(-5.0), ChildOf(pass)));
+        let other = world.spawn((GroupMarker, WorldBounds::default())).id();
+        let other_leaf = world.spawn((square(9.0), ChildOf(other))).id();
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(hierarchical_bounds_system);
+        schedule.run(&mut world);
+        let bounds = |world: &World, entity| world.get::<WorldBounds>(entity).unwrap().0;
+        assert_eq!(bounds(&world, group), Bounds3D::new_2d(0.0, 0.0, 3.0, 1.0));
+        assert_eq!(bounds(&world, root), Bounds3D::new_2d(-5.0, 0.0, 3.0, 1.0));
+        assert_eq!(bounds(&world, other), Bounds3D::new_2d(9.0, 0.0, 10.0, 1.0));
+
+        let ticks = |world: &World| {
+            [root, group, other].map(|entity| {
+                world
+                    .entity(entity)
+                    .get_ref::<WorldBounds>()
+                    .unwrap()
+                    .last_changed()
+            })
+        };
+        let drawn = ticks(&world);
+        world.increment_change_tick();
+        schedule.run(&mut world);
+        assert_eq!(ticks(&world), drawn, "a still frame rewrote group bounds");
+
+        *world.get_mut::<WorldBounds>(other_leaf).unwrap() = square(20.0);
+        schedule.run(&mut world);
+        assert_eq!(bounds(&world, other).max, DVec3::new(21.0, 1.0, 0.0));
+        assert_eq!(
+            ticks(&world)[..2],
+            drawn[..2],
+            "a change elsewhere wrote this group"
+        );
+
+        *world.get_mut::<WorldBounds>(b).unwrap() = square(4.0);
+        schedule.run(&mut world);
+        assert_eq!(bounds(&world, group), Bounds3D::new_2d(0.0, 0.0, 5.0, 1.0));
+        assert_eq!(bounds(&world, root), Bounds3D::new_2d(-5.0, 0.0, 5.0, 1.0));
+
+        // An emptied group falls back to default bounds, which its parent
+        // still counts.
+        world.despawn(a);
+        world.despawn(b);
+        schedule.run(&mut world);
+        assert_eq!(bounds(&world, group), Bounds3D::default());
+        assert_eq!(
+            bounds(&world, root),
+            Bounds3D::new_2d(-5.0, 0.0, -4.0, 1.0).union(&Bounds3D::default())
+        );
     }
 
     #[test]

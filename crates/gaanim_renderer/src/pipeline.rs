@@ -2458,29 +2458,114 @@ fn opacity_is_empty(opacity: &GlobalOpacity) -> bool {
     opacity.0 <= f32::EPSILON
 }
 
+/// What a derived path was last built from: its target's world transform,
+/// each source's path and world transform, and the settings that shape it.
+/// Source paths are kept alive, so a new path never reuses an old one's
+/// address and compares by allocation.
+#[derive(Clone)]
+pub struct DerivedPathInputs<S> {
+    target: kurbo::Affine,
+    sources: Vec<(Entity, Option<(Arc<kurbo::BezPath>, kurbo::Affine)>)>,
+    settings: S,
+}
+
+impl<S> DerivedPathInputs<S> {
+    fn new(
+        target: kurbo::Affine,
+        sources: &[Entity],
+        paths: &Query<(&Path2D, &GlobalSpatialTransform)>,
+        settings: S,
+    ) -> Self {
+        Self {
+            target,
+            sources: sources
+                .iter()
+                .map(|&source| {
+                    let shape = paths
+                        .get(source)
+                        .ok()
+                        .map(|(path, transform)| (path.0.clone(), transform.affine_2d));
+                    (source, shape)
+                })
+                .collect(),
+            settings,
+        }
+    }
+
+    /// Each source that exists, in world space.
+    fn world_paths(&self) -> impl Iterator<Item = kurbo::BezPath> + '_ {
+        self.sources
+            .iter()
+            .filter_map(|(_, shape)| shape.as_ref())
+            .map(|(path, transform)| {
+                let mut path = (**path).clone();
+                path.apply_affine(*transform);
+                path
+            })
+    }
+}
+
+impl<S: PartialEq> PartialEq for DerivedPathInputs<S> {
+    fn eq(&self, other: &Self) -> bool {
+        self.target == other.target
+            && self.settings == other.settings
+            && self.sources.len() == other.sources.len()
+            && self.sources.iter().zip(&other.sources).all(
+                |((entity, shape), (other_entity, other_shape))| {
+                    entity == other_entity
+                        && match (shape, other_shape) {
+                            (Some((path, transform)), Some((other_path, other_transform))) => {
+                                Arc::ptr_eq(path, other_path) && transform == other_transform
+                            }
+                            (None, None) => true,
+                            _ => false,
+                        }
+                },
+            )
+    }
+}
+
 /// Resolve source paths for vector clipping after global transforms are known.
 ///
 /// `ClipMask` stores source leaf entities rather than a compiler-time snapshot;
 /// this deliberately keeps clipping correct when either the target or its mask
 /// is translated, scaled, rotated, or morphed by the timeline.
+///
+/// A mask is rebuilt only when what it is built from changed, or when
+/// something else wrote it (a seek's restore), and drawables clipped by the
+/// same sources (the glyphs of a masked text) share one union per frame.
 pub fn resolve_dynamic_clip_masks_system(
-    mut masks: Query<(&GlobalSpatialTransform, &LocalBounds, &mut ClipMask)>,
+    mut masks: Query<(Entity, &GlobalSpatialTransform, &LocalBounds, &mut ClipMask)>,
     sources: Query<(&Path2D, &GlobalSpatialTransform)>,
+    mut built: Local<HashMap<Entity, DerivedPathInputs<(gaanim_math::Bounds3D, bool)>>>,
 ) {
-    for (target_transform, target_bounds, mut mask) in &mut masks {
+    let mut unions: HashMap<Vec<Entity>, kurbo::BezPath> = HashMap::new();
+    let mut present = std::collections::HashSet::new();
+    for (entity, target_transform, target_bounds, mut mask) in &mut masks {
         if mask.sources.is_empty() {
             continue;
         }
-        let mut world = kurbo::BezPath::new();
-        for source in &mask.sources {
-            let Ok((path, transform)) = sources.get(*source) else {
-                continue;
-            };
-            let mut path = (*path.0).clone();
-            path.apply_affine(transform.affine_2d);
-            world.extend(path);
+        present.insert(entity);
+        let inputs = DerivedPathInputs::new(
+            target_transform.affine_2d,
+            &mask.sources,
+            &sources,
+            (target_bounds.0, mask.invert),
+        );
+        if !mask.is_changed() && built.get(&entity) == Some(&inputs) {
+            continue;
         }
-        let mut local = world;
+        let mut local = unions
+            .entry(mask.sources.clone())
+            .or_insert_with(|| {
+                inputs
+                    .world_paths()
+                    .fold(kurbo::BezPath::new(), |mut union, path| {
+                        union.extend(path);
+                        union
+                    })
+            })
+            .clone();
         local.apply_affine(target_transform.affine_2d.inverse());
         if mask.invert {
             // The renderer's layer clips to filled geometry. A stable enclosing
@@ -2507,7 +2592,9 @@ pub fn resolve_dynamic_clip_masks_system(
         if mask.path != local {
             mask.path = local;
         }
+        built.insert(entity, inputs);
     }
+    built.retain(|entity, _| present.contains(entity));
 }
 
 /// Rebuild live booleans from their source paths after propagation. The output
@@ -2515,27 +2602,52 @@ pub fn resolve_dynamic_clip_masks_system(
 #[allow(clippy::type_complexity)]
 pub fn resolve_dynamic_boolean_system(
     mut queries: ParamSet<(
-        Query<(Entity, &BooleanBinding, &GlobalSpatialTransform)>,
+        Query<(
+            Entity,
+            &BooleanBinding,
+            &GlobalSpatialTransform,
+            Option<Ref<Path2D>>,
+        )>,
         Query<(&Path2D, &GlobalSpatialTransform)>,
         Query<(&mut Path2D, &mut PathSource, &mut LocalBounds), With<BooleanBinding>>,
     )>,
+    mut built: Local<
+        HashMap<
+            Entity,
+            DerivedPathInputs<(
+                gaanim_objects::boolean::BooleanOp,
+                f64,
+                gaanim_objects::boolean::BooleanFillRule,
+            )>,
+        >,
+    >,
 ) {
+    // A result is rebuilt only when its inputs changed or something else
+    // wrote it (a seek's restore).
     let jobs = queries
         .p0()
         .iter()
-        .map(|(entity, binding, transform)| (entity, binding.clone(), *transform))
+        .map(|(entity, binding, transform, path)| {
+            let written = path.is_some_and(|path| path.is_changed());
+            (entity, binding.clone(), *transform, written)
+        })
         .collect::<Vec<_>>();
     let mut resolved_jobs = Vec::with_capacity(jobs.len());
+    let mut present = std::collections::HashSet::new();
     {
         let sources = queries.p1();
-        for (entity, binding, target_transform) in jobs {
-            let mut operands = binding.sources.iter().filter_map(|entity| {
-                sources.get(*entity).ok().map(|(path, transform)| {
-                    let mut world = (*path.0).clone();
-                    world.apply_affine(transform.affine_2d);
-                    world
-                })
-            });
+        for (entity, binding, target_transform, written) in jobs {
+            present.insert(entity);
+            let inputs = DerivedPathInputs::new(
+                target_transform.affine_2d,
+                &binding.sources,
+                &sources,
+                (binding.op, binding.tolerance, binding.rule),
+            );
+            if !written && built.get(&entity) == Some(&inputs) {
+                continue;
+            }
+            let mut operands = inputs.world_paths();
             let mut output = operands.next().unwrap_or_default();
             for operand in operands {
                 let resolved = gaanim_objects::boolean::apply_with_options(
@@ -2555,9 +2667,11 @@ pub fn resolve_dynamic_boolean_system(
                         });
             }
             output.apply_affine(target_transform.affine_2d.inverse());
+            built.insert(entity, inputs);
             resolved_jobs.push((entity, output));
         }
     }
+    built.retain(|entity, _| present.contains(entity));
 
     let mut results = queries.p2();
     for (entity, output) in resolved_jobs {
@@ -2584,28 +2698,44 @@ pub fn resolve_fill_level_system(
             &FillLevelBinding,
             &FillLevel,
             &GlobalSpatialTransform,
+            Option<Ref<Path2D>>,
         )>,
         Query<(&Path2D, &GlobalSpatialTransform)>,
         Query<(&mut Path2D, &mut PathSource, &mut LocalBounds), With<FillLevelBinding>>,
     )>,
+    mut built: Local<HashMap<Entity, DerivedPathInputs<(f64, FillDirection)>>>,
 ) {
+    // A result is rebuilt only when its inputs changed or something else
+    // wrote it (a seek's restore).
     let jobs = queries
         .p0()
         .iter()
-        .map(|(entity, binding, level, transform)| (entity, binding.clone(), *level, *transform))
+        .map(|(entity, binding, level, transform, path)| {
+            let written = path.is_some_and(|path| path.is_changed());
+            (entity, binding.clone(), *level, *transform, written)
+        })
         .collect::<Vec<_>>();
     let mut resolved_jobs = Vec::with_capacity(jobs.len());
+    let mut present = std::collections::HashSet::new();
     {
         let sources = queries.p1();
-        for (entity, binding, level, target_transform) in jobs {
-            let mut mask = kurbo::BezPath::new();
-            for source_entity in &binding.sources {
-                if let Ok((source, transform)) = sources.get(*source_entity) {
-                    let mut world = (*source.0).clone();
-                    world.apply_affine(transform.affine_2d);
-                    mask.extend(world);
-                }
+        for (entity, binding, level, target_transform, written) in jobs {
+            present.insert(entity);
+            let inputs = DerivedPathInputs::new(
+                target_transform.affine_2d,
+                &binding.sources,
+                &sources,
+                (level.0, binding.direction),
+            );
+            if !written && built.get(&entity) == Some(&inputs) {
+                continue;
             }
+            let mask = inputs
+                .world_paths()
+                .fold(kurbo::BezPath::new(), |mut mask, path| {
+                    mask.extend(path);
+                    mask
+                });
             let bbox = mask.bounding_box();
             let level = level.0.clamp(0.0, 1.0);
             let band = match binding.direction {
@@ -2639,9 +2769,11 @@ pub fn resolve_fill_level_system(
                         out
                     });
             output.apply_affine(target_transform.affine_2d.inverse());
+            built.insert(entity, inputs);
             resolved_jobs.push((entity, output));
         }
     }
+    built.retain(|entity, _| present.contains(entity));
 
     let mut results = queries.p2();
     for (entity, output) in resolved_jobs {
