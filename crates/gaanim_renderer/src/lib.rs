@@ -158,13 +158,6 @@ impl Plugin for GaanimRendererPlugin {
             app.add_plugins(GaanimDerivedGeometryPlugin);
         }
 
-        // Register cache cleanup systems before extraction.
-        // Sweep dead fragments by comparing active ObjectIds against cache keys.
-        app.add_systems(
-            Update,
-            pipeline::gaanim_render_cache_sweep_system.before(gaanim_scene::SceneSet::Extraction),
-        );
-
         // Register the extraction and composition system in the scene extraction phase
         // A playback bundle shows recorded frames through the same
         // composition instead of the world's drawables.

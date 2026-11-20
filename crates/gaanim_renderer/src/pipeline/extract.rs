@@ -8,21 +8,21 @@
 use super::*;
 use gaanim_scene::prelude::{QueryItem, SystemParam};
 
-/// What both extractions read of a drawable.
+/// What both extractions read of a drawable. What a fragment is built from
+/// is read with its change tick, which the preview trusts to skip comparing
+/// recipes of drawables that did not change (see [`FragmentRequest::changed`]).
 pub(super) type MobjectData = (
     Entity,
-    Ref<'static, MobjectId>,
-    Ref<'static, GlobalSpatialTransform>,
-    Ref<'static, GlobalOpacity>,
-    Ref<'static, RenderOrder>,
-    Ref<'static, RenderLayer>,
+    &'static MobjectId,
+    &'static GlobalSpatialTransform,
+    &'static GlobalOpacity,
+    &'static RenderOrder,
+    &'static RenderLayer,
     Option<Ref<'static, Path2D>>,
     Option<Ref<'static, PathSource>>,
-    Option<Ref<'static, FillLevel>>,
     Option<Ref<'static, FillBrush>>,
     Option<Ref<'static, StrokeBrush>>,
     Option<Ref<'static, RasterImage>>,
-    Option<Ref<'static, ReactiveReadout>>,
     Option<Ref<'static, LottiePlayer>>,
 );
 
@@ -32,12 +32,11 @@ pub(super) type EffectsData = (
     Option<Ref<'static, DropShadow>>,
     Option<Ref<'static, Glow>>,
     Option<Ref<'static, GaussianBlur>>,
-    Option<Ref<'static, ClipMask>>,
+    Option<&'static ClipMask>,
     Option<Ref<'static, FillDrawProgress>>,
     Option<&'static WorldBounds>,
     Option<&'static gaanim_scene::GroupMarker>,
     Option<Ref<'static, WriteTipGlow>>,
-    Option<Ref<'static, Visible>>,
     Option<Ref<'static, StrokeAlign>>,
     Option<Ref<'static, StrokeProfile>>,
     Has<StrokeScalesWithObject>,
@@ -179,19 +178,18 @@ pub(super) struct ElementFrame<'a> {
 
 /// What a drawable's fragment is built from.
 pub(super) struct FragmentRequest<'a> {
-    pub entity: Entity,
     pub id: ObjectId,
     /// Without the drop shadow when the drawable's group draws it.
     pub parts: FragmentParts<'a>,
-    /// The group draws the drawable's shadow.
-    pub shared_shadow: bool,
     /// The fragment without its shadow is needed too (see
     /// [`ExtractedElement::effect_shadow`]).
     pub effect_casts_shadow: bool,
     pub lottie: Option<&'a LottiePlayer>,
-    /// Read by the preview's cache, which tracks it with the fragment.
-    pub fill_level: Option<&'a FillLevel>,
     pub gpu: bool,
+    /// One of the components the fragment is built from changed since the
+    /// extracting system last ran. Meaningful only to a system that runs
+    /// once per frame, as the preview's does.
+    pub changed: bool,
 }
 
 /// A built fragment and what goes with it.
@@ -207,17 +205,6 @@ pub(super) struct ElementFragment {
 
 /// Where an extraction gets its fragments: each renderer keeps its own cache.
 pub(super) trait FragmentSource {
-    /// Sees every visible drawable, before it is filtered or culled, so a
-    /// cache can drop a fragment whose inputs changed while it was not drawn.
-    fn inspect(
-        &mut self,
-        _mobject: &MobjectItem<'_, '_>,
-        _effects: &EffectsItem<'_, '_>,
-        _stroke_view: Option<kurbo::Affine>,
-        _screen: bool,
-    ) {
-    }
-
     /// The fragment of a drawable that is drawn this frame.
     fn fragment(&mut self, request: FragmentRequest<'_>) -> ElementFragment;
 }
@@ -240,7 +227,6 @@ pub(super) fn extract_elements(
         let entity = mobject.0;
         let camera_view = frame.camera_views.get(&entity);
         let stroke_view = stroke_view(&mobject, &effects);
-        source.inspect(&mobject, &effects, stroke_view, camera_view.is_some());
 
         let (
             _,
@@ -251,11 +237,9 @@ pub(super) fn extract_elements(
             render_layer,
             path,
             path_source,
-            fill_level,
             fill,
             stroke,
             raster,
-            _,
             lottie,
         ) = &mobject;
         let (
@@ -267,7 +251,6 @@ pub(super) fn extract_elements(
             world_bounds,
             group,
             tip_glow,
-            _,
             stroke_align,
             stroke_profile,
             _,
@@ -383,22 +366,36 @@ pub(super) fn extract_elements(
             opacity_group != entity && clip.is_none() && blend.is_none() && camera_view.is_none(),
         )
         .map(Arc::new);
-        let shared_shadow = group_shadow.is_some();
-        if shared_shadow {
+        if group_shadow.is_some() {
             parts.shadow = None;
         }
         // Inside a shader effect, a drawable's own shadow may be cast from
         // what the effect draws instead (see `divert_effects`), so the
         // fragment without it is built too.
         let effect_casts_shadow = frame.gpu && effect_root.is_some() && parts.shadow.is_some();
+        let changed = [
+            path.as_ref().map(Ref::is_changed),
+            path_source.as_ref().map(Ref::is_changed),
+            fill.as_ref().map(Ref::is_changed),
+            stroke.as_ref().map(Ref::is_changed),
+            raster.as_ref().map(Ref::is_changed),
+            lottie.as_ref().map(Ref::is_changed),
+            shadow.as_ref().map(Ref::is_changed),
+            glow.as_ref().map(Ref::is_changed),
+            blur.as_ref().map(Ref::is_changed),
+            fill_progress.as_ref().map(Ref::is_changed),
+            tip_glow.as_ref().map(Ref::is_changed),
+            stroke_align.as_ref().map(Ref::is_changed),
+            stroke_profile.as_ref().map(Ref::is_changed),
+            chalk.as_ref().map(Ref::is_changed),
+        ]
+        .contains(&Some(true));
         let fragment = source.fragment(FragmentRequest {
-            entity,
             id: mobj_id.0,
             parts,
-            shared_shadow,
+            changed,
             effect_casts_shadow,
             lottie: lottie.as_deref(),
-            fill_level: fill_level.as_deref(),
             gpu: frame.gpu,
         });
         // A sub-frame draws the copy recorded at the frame's own time; the
@@ -486,7 +483,7 @@ pub(super) fn extract_elements(
             ),
             scene: fragment.scene,
             soft: fragment.soft,
-            clip_mask: clip.as_deref().cloned(),
+            clip_mask: clip.cloned(),
             blend,
             transition_side: frame
                 .transition
@@ -536,14 +533,11 @@ fn stroke_view(
     mobject: &MobjectItem<'_, '_>,
     effects: &EffectsItem<'_, '_>,
 ) -> Option<kurbo::Affine> {
-    let scales = effects.11;
-    let strokes = mobject
-        .10
-        .as_ref()
-        .is_some_and(|stroke| stroke.brush.is_some())
-        || effects.1.is_some()
-        || effects.12.is_some();
+    let (_, _, transform, _, _, _, _, _, _, stroke, ..) = mobject;
+    let (_, glow, .., scales, chalk) = effects;
+    let strokes =
+        stroke.is_some_and(|stroke| stroke.brush.is_some()) || glow.is_some() || chalk.is_some();
     (!scales && strokes)
-        .then(|| scene_unit_stroke_transform(mobject.2.affine_2d))
+        .then(|| scene_unit_stroke_transform(transform.affine_2d))
         .flatten()
 }

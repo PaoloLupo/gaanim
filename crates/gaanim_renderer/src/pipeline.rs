@@ -11,7 +11,7 @@ use crate::fragment::{FragmentParts, FragmentRecipe, fragment_recipe};
 use crate::lottie::LottiePlayer;
 use crate::stroke::{draw_stroke, scene_unit_stroke_transform};
 use bevy::prelude::*;
-use gaanim_animation::{FillDrawProgress, ReactiveReadout, WriteTipGlow};
+use gaanim_animation::{FillDrawProgress, WriteTipGlow};
 use gaanim_core::ObjectId;
 use gaanim_core::kurbo::Shape;
 use gaanim_core::peniko;
@@ -374,87 +374,40 @@ pub struct MainVelloScene;
 #[derive(Component, Debug, Clone, Copy, Default)]
 pub struct GaanimFullWindowClearCamera;
 
-/// Retained GPU cache of precompiled local Vello scenes for each Mobject.
+/// The fragments the interactive preview drew in its last frame, by object.
 ///
-/// Under the "Fragment Retain" system, local shapes, fills, and strokes are compiled into
-/// standalone scene fragments and cached. They are only invalidated and rebuilt when
-/// the Mobject's visual components (geometry or brushes) change.
+/// A drawable's fragment holds its encoded paths, fills, strokes, shadows
+/// and glows; it is reused while the drawable's recipe and Lottie frame are
+/// unchanged, as the headless path's [`ExtractedFragments`] are, and dropped
+/// once a frame does not draw it.
 #[derive(Resource, Default)]
 pub struct GaanimRenderCache {
-    pub fragment_cache: HashMap<ObjectId, Arc<vello::Scene>>,
-    stroke_views: HashMap<ObjectId, kurbo::Affine>,
-    fragment_inputs: HashMap<ObjectId, FragmentInputs>,
-    /// Strokes of camera view screens, split from their fragments so they
-    /// draw above the view. An entry marks a fragment built as a screen.
-    screen_overlays: HashMap<ObjectId, Arc<vello::Scene>>,
-    /// Fragments built without their drop shadow, which the composition
-    /// draws for their group.
-    shared_shadows: std::collections::HashSet<ObjectId>,
-    /// Layers of the soft effects of fragments built for a canvas that runs
-    /// object effects (see [`crate::soft_effects`]).
-    soft_layers: HashMap<ObjectId, Arc<[crate::object_effects::EffectLayer]>>,
-    /// Fragments without their drop shadow, for drawables inside a shader
-    /// effect (see [`ExtractedElement::effect_shadow`]).
-    effect_shadows: HashMap<ObjectId, Arc<crate::fragment::EffectShadow>>,
+    fragments: FragmentCache,
 }
 
-/// Values of the timeline-driven components a retained fragment was built from.
-///
-/// Every playback frame is an exact seek: it restores the t=0 keyframe and
-/// replays each earlier clip, so these components are rewritten (and flagged as
-/// changed by Bevy) even when their final value is identical to the previous
-/// frame. Comparing the values keeps completed and not-yet-started objects
-/// retained instead of re-encoding the whole scene on every frame.
-#[derive(Clone)]
-struct FragmentInputs {
-    path: Option<Arc<kurbo::BezPath>>,
-    path_source: Option<Arc<kurbo::BezPath>>,
-    fill_level: Option<FillLevel>,
-    fill: Option<FillBrush>,
-    stroke: Option<StrokeBrush>,
-    fill_progress: Option<FillDrawProgress>,
-    tip_glow: Option<WriteTipGlow>,
-}
-
-impl FragmentInputs {
-    fn capture(
-        path: Option<&Path2D>,
-        path_source: Option<&PathSource>,
-        fill_level: Option<&FillLevel>,
-        fill: Option<&FillBrush>,
-        stroke: Option<&StrokeBrush>,
-        fill_progress: Option<&FillDrawProgress>,
-        tip_glow: Option<&WriteTipGlow>,
-    ) -> Self {
-        Self {
-            path: path.map(|path| Arc::clone(&path.0)),
-            path_source: path_source.map(|source| Arc::clone(&source.0)),
-            fill_level: fill_level.copied(),
-            fill: fill.cloned(),
-            stroke: stroke.cloned(),
-            fill_progress: fill_progress.copied(),
-            tip_glow: tip_glow.cloned(),
-        }
+impl GaanimRenderCache {
+    /// The fragment drawn for `id` in the last frame.
+    pub fn fragment(&self, id: ObjectId) -> Option<&Arc<vello::Scene>> {
+        self.fragments.get(id)
     }
-}
 
-fn same_path(left: &Option<Arc<kurbo::BezPath>>, right: &Option<Arc<kurbo::BezPath>>) -> bool {
-    match (left, right) {
-        (Some(left), Some(right)) => Arc::ptr_eq(left, right) || left == right,
-        (None, None) => true,
-        _ => false,
+    /// Every fragment drawn in the last frame.
+    pub fn fragments(&self) -> impl Iterator<Item = (ObjectId, &Arc<vello::Scene>)> {
+        self.fragments.iter()
     }
-}
 
-impl PartialEq for FragmentInputs {
-    fn eq(&self, other: &Self) -> bool {
-        same_path(&self.path, &other.path)
-            && same_path(&self.path_source, &other.path_source)
-            && self.fill_level == other.fill_level
-            && self.fill == other.fill
-            && self.stroke == other.stroke
-            && self.fill_progress == other.fill_progress
-            && self.tip_glow == other.tip_glow
+    /// How many fragments the last frame drew.
+    pub fn len(&self) -> usize {
+        self.fragments.fragments.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.fragments.fragments.is_empty()
+    }
+
+    /// Forget every fragment, so the next frame encodes each drawable anew.
+    pub fn clear(&mut self) {
+        self.fragments.fragments.clear();
     }
 }
 
@@ -3347,29 +3300,6 @@ pub(crate) fn fitted_canvas_viewport(
     })
 }
 
-/// System: Cleans up stale fragment cache entries when Mobject entities are destroyed.
-///
-/// Run this system before `gaanim_render_system` so the cache stays consistent.
-pub fn gaanim_render_cache_sweep_system(
-    mut cache: ResMut<GaanimRenderCache>,
-    mut removed: RemovedComponents<MobjectId>,
-    query_mobj_ids: Query<&MobjectId>,
-) {
-    // Only sweep when entities with MobjectId were actually removed.
-    // On static frames this is a no-op (zero cost).
-    if removed.read().next().is_none() {
-        return;
-    }
-    let active: std::collections::HashSet<ObjectId> = query_mobj_ids.iter().map(|m| m.0).collect();
-    cache.fragment_cache.retain(|id, _| active.contains(id));
-    cache.soft_layers.retain(|id, _| active.contains(id));
-    cache.effect_shadows.retain(|id, _| active.contains(id));
-    cache.stroke_views.retain(|id, _| active.contains(id));
-    cache.fragment_inputs.retain(|id, _| active.contains(id));
-    cache.screen_overlays.retain(|id, _| active.contains(id));
-    cache.shared_shadows.retain(|id| active.contains(id));
-}
-
 /// Standalone function: extracts all visible Vello2D mobjects from a Bevy World
 /// and compiles them into a single composited `vello::Scene`.
 ///
@@ -3696,12 +3626,53 @@ fn world_background_values(
 /// [`CapturedThreeDHeld`]).
 #[derive(Resource, Default)]
 pub struct ExtractedFragments {
-    fragments: HashMap<Entity, ExtractedFragment>,
+    fragments: FragmentCache,
     three_d: CapturedThreeDHeld,
+}
+
+/// Built fragments by object: a drawable whose recipe and Lottie frame are
+/// unchanged reuses its fragment instead of encoding its paths, shadows and
+/// glows again. A frame keeps only the fragments it asks for. The preview's
+/// [`GaanimRenderCache`] and the headless path's [`ExtractedFragments`] each
+/// hold one, since they build fragments for different renderers.
+#[derive(Default)]
+struct FragmentCache {
+    fragments: HashMap<ObjectId, ExtractedFragment>,
+    /// The frame being extracted: fragments asked for are marked with it, and
+    /// the rest are dropped when the frame ends.
+    generation: u64,
+}
+
+impl FragmentCache {
+    /// The fragment source of one frame; `capture` hands each element the
+    /// recipe its fragment was built from, and `trust_ticks` reuses fragments
+    /// of unchanged drawables without building their recipes, for a system
+    /// that runs once per frame.
+    fn frame(&mut self, capture: bool, trust_ticks: bool) -> CachedFragments<'_> {
+        self.generation += 1;
+        CachedFragments {
+            cache: self,
+            capture,
+            trust_ticks,
+        }
+    }
+
+    fn get(&self, id: ObjectId) -> Option<&Arc<vello::Scene>> {
+        self.fragments.get(&id).map(|fragment| &fragment.scene)
+    }
+
+    fn iter(&self) -> impl Iterator<Item = (ObjectId, &Arc<vello::Scene>)> {
+        self.fragments
+            .iter()
+            .map(|(id, fragment)| (*id, &fragment.scene))
+    }
 }
 
 struct ExtractedFragment {
     recipe: Arc<FragmentRecipe>,
+    key: FragmentKey,
+    /// The last frame that drew it.
+    generation: u64,
     lottie: Option<Arc<vello::Scene>>,
     scene: Arc<vello::Scene>,
     overlay: Option<Arc<vello::Scene>>,
@@ -3717,43 +3688,111 @@ struct ExtractedFragment {
 #[derive(Resource)]
 struct ExtractionState(SystemState<extract::ElementQueries<'static, 'static>>);
 
-/// The headless fragment cache: a drawable reuses its last fragment while
-/// its recipe and Lottie frame are unchanged; the rest are dropped with the
-/// frame.
-struct CapturedFragments<'a> {
-    previous: &'a mut HashMap<Entity, ExtractedFragment>,
-    kept: &'a mut HashMap<Entity, ExtractedFragment>,
+/// What a fragment is built from beyond its components' values: which of
+/// them the drawable has (a removed component leaves no change tick), its
+/// stroke pen correction and whether it is a camera view screen.
+#[derive(Clone, Copy, PartialEq)]
+struct FragmentKey {
+    present: u16,
+    stroke_view: Option<kurbo::Affine>,
+    screen: bool,
 }
 
-impl extract::FragmentSource for CapturedFragments<'_> {
+impl FragmentKey {
+    fn of(parts: &FragmentParts<'_>) -> Self {
+        let present = [
+            parts.path.is_some(),
+            parts.source.is_some(),
+            parts.fill.is_some(),
+            parts.stroke.is_some(),
+            parts.raster.is_some(),
+            parts.lottie,
+            parts.shadow.is_some(),
+            parts.glow.is_some(),
+            parts.blur.is_some(),
+            parts.fill_progress.is_some(),
+            parts.tip_glow.is_some(),
+            parts.stroke_align.is_some(),
+            parts.stroke_profile.is_some(),
+            parts.chalk.is_some(),
+        ]
+        .iter()
+        .enumerate()
+        .fold(0, |bits, (index, present)| {
+            bits | (u16::from(*present) << index)
+        });
+        Self {
+            present,
+            stroke_view: parts.stroke_view,
+            screen: parts.screen,
+        }
+    }
+}
+
+/// One frame's use of a [`FragmentCache`]: what it does not ask for is
+/// dropped when the frame ends.
+struct CachedFragments<'a> {
+    cache: &'a mut FragmentCache,
+    capture: bool,
+    /// Reuse a fragment without comparing recipes while none of its
+    /// components changed (see [`extract::FragmentRequest::changed`]).
+    trust_ticks: bool,
+}
+
+impl Drop for CachedFragments<'_> {
+    fn drop(&mut self) {
+        let generation = self.cache.generation;
+        self.cache
+            .fragments
+            .retain(|_, fragment| fragment.generation == generation);
+    }
+}
+
+impl extract::FragmentSource for CachedFragments<'_> {
     fn fragment(&mut self, request: extract::FragmentRequest<'_>) -> extract::ElementFragment {
-        let recipe = fragment_recipe(request.parts);
+        let key = FragmentKey::of(&request.parts);
         let lottie_scene = request.lottie.map(|lottie| lottie.scene());
         let gpu = request.gpu;
-        let mut fragment = self
-            .previous
-            .remove(&request.entity)
-            .filter(|cached| {
-                cached.lottie.as_ref().map(Arc::as_ptr) == lottie_scene.map(Arc::as_ptr)
-                    && cached.gpu == gpu
-                    && *cached.recipe == recipe
-            })
-            .unwrap_or_else(|| {
-                let built = crate::fragment::build_fragment_with(
-                    &recipe,
-                    lottie_scene.map(Arc::as_ref),
-                    gpu,
-                );
-                ExtractedFragment {
-                    recipe: Arc::new(recipe),
-                    lottie: lottie_scene.cloned(),
-                    scene: Arc::new(built.scene),
-                    overlay: built.overlay.map(Arc::new),
-                    gpu,
-                    soft: built.soft.into(),
-                    effect_shadow: None,
+        let reusable = |cached: &ExtractedFragment| {
+            cached.key == key
+                && cached.gpu == gpu
+                && cached.lottie.as_ref().map(Arc::as_ptr) == lottie_scene.map(Arc::as_ptr)
+        };
+        let generation = self.cache.generation;
+        let trusted = self.trust_ticks && !request.changed;
+        let build = |recipe: FragmentRecipe| {
+            let built =
+                crate::fragment::build_fragment_with(&recipe, lottie_scene.map(Arc::as_ref), gpu);
+            ExtractedFragment {
+                recipe: Arc::new(recipe),
+                key,
+                generation,
+                lottie: lottie_scene.cloned(),
+                scene: Arc::new(built.scene),
+                overlay: built.overlay.map(Arc::new),
+                gpu,
+                soft: built.soft.into(),
+                effect_shadow: None,
+            }
+        };
+        let fragment = match self.cache.fragments.entry(request.id) {
+            std::collections::hash_map::Entry::Occupied(entry)
+                if trusted && reusable(entry.get()) =>
+            {
+                entry.into_mut()
+            }
+            std::collections::hash_map::Entry::Occupied(mut entry) => {
+                let recipe = fragment_recipe(request.parts);
+                if !(reusable(entry.get()) && *entry.get().recipe == recipe) {
+                    entry.insert(build(recipe));
                 }
-            });
+                entry.into_mut()
+            }
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                entry.insert(build(fragment_recipe(request.parts)))
+            }
+        };
+        fragment.generation = generation;
         if request.effect_casts_shadow && fragment.effect_shadow.is_none() {
             fragment.effect_shadow = crate::fragment::build_effect_shadow(
                 &fragment.recipe,
@@ -3768,9 +3807,8 @@ impl extract::FragmentSource for CapturedFragments<'_> {
                 .effect_shadow
                 .clone()
                 .filter(|_| request.effect_casts_shadow),
-            recipe: Some(Arc::clone(&fragment.recipe)),
+            recipe: self.capture.then(|| Arc::clone(&fragment.recipe)),
         };
-        self.kept.insert(request.entity, fragment);
         built
     }
 }
@@ -3788,12 +3826,11 @@ fn extract_world(
 ) -> WorldExtraction {
     // Fragments of drawables not extracted this frame are dropped with it.
     let ExtractedFragments {
-        fragments: mut previous_fragments,
+        mut fragments,
         three_d: mut held_three_d,
     } = world
         .remove_resource::<ExtractedFragments>()
         .unwrap_or_default();
-    let mut fragments = HashMap::with_capacity(previous_fragments.len());
     let background_time = world
         .get_resource::<gaanim_animation::PlaybackState>()
         .map_or(0.0, |state| state.current_time);
@@ -3869,10 +3906,7 @@ fn extract_world(
                 None => extract::Pins::Off,
             },
         };
-        let mut source = CapturedFragments {
-            previous: &mut previous_fragments,
-            kept: &mut fragments,
-        };
+        let mut source = fragments.frame(true, false);
         extract::extract_elements(&queries, &mut frame, &mut source, &mut extracted);
         (camera_views, frozen_shown)
     };
@@ -6670,203 +6704,6 @@ type CameraSourceQuery<'w, 's> = Query<
     ),
 >;
 
-/// The preview's fragment cache, by object: a fragment is kept until one of
-/// its inputs changes, which change ticks reveal and a comparison of the
-/// timeline-driven values confirms.
-#[cfg(not(target_os = "emscripten"))]
-struct PreviewFragments<'a> {
-    cache: &'a mut GaanimRenderCache,
-    /// The timeline-driven inputs of the drawable just inspected, when they
-    /// were captured to look for a change.
-    current_inputs: Option<FragmentInputs>,
-}
-
-#[cfg(not(target_os = "emscripten"))]
-impl extract::FragmentSource for PreviewFragments<'_> {
-    fn inspect(
-        &mut self,
-        mobject: &extract::MobjectItem<'_, '_>,
-        effects: &extract::EffectsItem<'_, '_>,
-        stroke_view: Option<kurbo::Affine>,
-        screen: bool,
-    ) {
-        let cache = &mut *self.cache;
-        let (
-            _,
-            mobj_id,
-            _,
-            _,
-            _,
-            _,
-            path_ref,
-            path_source_ref,
-            fill_level_ref,
-            fill_ref,
-            stroke_ref,
-            raster_image_ref,
-            reactive_readout_ref,
-            lottie_ref,
-        ) = mobject;
-        let (
-            shadow_ref,
-            glow_ref,
-            blur_ref,
-            _,
-            fill_progress_ref,
-            _,
-            _,
-            tip_glow_ref,
-            visible_ref,
-            stroke_align_ref,
-            stroke_profile_ref,
-            _,
-            chalk_ref,
-        ) = effects;
-        // Invalidate before skipping hidden or culled objects. Their new
-        // geometry may stop changing before they become visible again (e.g.
-        // a rewound Lottie).
-        let previous_view = match stroke_view {
-            Some(view) => cache.stroke_views.insert(mobj_id.0, view),
-            None => cache.stroke_views.remove(&mobj_id.0),
-        };
-        // Fill-level geometry is derived later in the frame. Track the source
-        // value too, so a retained fragment can never outlive a rewind or a
-        // segment replay that changes only this component.
-        // Only `Visible` entities are visited, so the change ticks of
-        // components rewritten while an entity was hidden (e.g. rewound
-        // before its write/create clip) are already stale when it reappears.
-        // Compare its inputs again whenever it becomes visible.
-        let revealed = visible_ref.as_ref().is_some_and(|r| r.is_added());
-        let timeline_inputs_touched = revealed
-            || path_ref.as_ref().is_some_and(|r| r.is_changed())
-            || path_source_ref.as_ref().is_some_and(|r| r.is_changed())
-            || fill_level_ref.as_ref().is_some_and(|r| r.is_changed())
-            || fill_ref.as_ref().is_some_and(|r| r.is_changed())
-            || stroke_ref.as_ref().is_some_and(|r| r.is_changed())
-            || fill_progress_ref.as_ref().is_some_and(|r| r.is_changed())
-            || tip_glow_ref.as_ref().is_some_and(|r| r.is_changed());
-        self.current_inputs = timeline_inputs_touched.then(|| {
-            FragmentInputs::capture(
-                path_ref.as_deref(),
-                path_source_ref.as_deref(),
-                fill_level_ref.as_deref(),
-                fill_ref.as_deref(),
-                stroke_ref.as_deref(),
-                fill_progress_ref.as_deref(),
-                tip_glow_ref.as_deref(),
-            )
-        });
-        let changed = self
-            .current_inputs
-            .as_ref()
-            .is_some_and(|inputs| cache.fragment_inputs.get(&mobj_id.0) != Some(inputs))
-            || stroke_view != previous_view
-            || raster_image_ref.as_ref().is_some_and(|r| r.is_changed())
-            || reactive_readout_ref
-                .as_ref()
-                .is_some_and(|r| r.is_changed())
-            // A Lottie is sampled while hidden too, and marked changed only
-            // when its scene changes; that tick is stale once it reappears.
-            || lottie_ref
-                .as_ref()
-                .is_some_and(|r| r.is_changed() || revealed)
-            || shadow_ref.as_ref().is_some_and(|r| r.is_changed())
-            || glow_ref.as_ref().is_some_and(|r| r.is_changed())
-            || blur_ref.as_ref().is_some_and(|r| r.is_changed())
-            // `ClipMask` is not part of the fragment: it is applied when the
-            // frame is composed, and its presence reaches the fragment only
-            // through the shared group shadow, which is tracked below.
-            || stroke_align_ref.as_ref().is_some_and(|r| r.is_changed())
-            || stroke_profile_ref.as_ref().is_some_and(|r| r.is_changed())
-            || chalk_ref.as_ref().is_some_and(|r| r.is_changed())
-            // Becoming or ceasing to be a screen moves the stroke.
-            || cache.screen_overlays.contains_key(&mobj_id.0) != screen;
-        if changed {
-            cache.fragment_cache.remove(&mobj_id.0);
-        }
-    }
-
-    fn fragment(&mut self, request: extract::FragmentRequest<'_>) -> extract::ElementFragment {
-        let cache = &mut *self.cache;
-        let id = request.id;
-        let parts = request.parts;
-        // A fragment keeps its shadow only while its group does not draw it.
-        let shared = request.shared_shadow;
-        if cache.shared_shadows.contains(&id) != shared {
-            cache.fragment_cache.remove(&id);
-            if shared {
-                cache.shared_shadows.insert(id);
-            } else {
-                cache.shared_shadows.remove(&id);
-            }
-        }
-        if !cache.fragment_cache.contains_key(&id) {
-            let inputs = self.current_inputs.take().unwrap_or_else(|| {
-                FragmentInputs::capture(
-                    parts.path,
-                    parts.source,
-                    request.fill_level,
-                    parts.fill,
-                    parts.stroke,
-                    parts.fill_progress,
-                    parts.tip_glow,
-                )
-            });
-            cache.fragment_inputs.insert(id, inputs);
-        }
-        let lottie = request.lottie.map(|lottie| lottie.scene().as_ref());
-        let mut rebuilt_overlay = None;
-        let mut rebuilt_soft = None;
-        let scene = cache.fragment_cache.entry(id).or_insert_with(|| {
-            let built =
-                crate::fragment::build_fragment_with(&fragment_recipe(parts), lottie, request.gpu);
-            rebuilt_overlay = Some(built.overlay);
-            rebuilt_soft = Some(built.soft);
-            Arc::new(built.scene)
-        });
-        let scene = Arc::clone(scene);
-        if rebuilt_soft.is_some() || !request.effect_casts_shadow {
-            cache.effect_shadows.remove(&id);
-        }
-        let effect_shadow = if request.effect_casts_shadow {
-            match cache.effect_shadows.get(&id) {
-                Some(effect_shadow) => Some(Arc::clone(effect_shadow)),
-                None => crate::fragment::build_effect_shadow(&fragment_recipe(parts), lottie)
-                    .inspect(|effect_shadow| {
-                        cache.effect_shadows.insert(id, Arc::clone(effect_shadow));
-                    }),
-            }
-        } else {
-            None
-        };
-        match rebuilt_soft {
-            Some(soft) if soft.is_empty() => {
-                cache.soft_layers.remove(&id);
-            }
-            Some(soft) => {
-                cache.soft_layers.insert(id, soft.into());
-            }
-            None => {}
-        }
-        match rebuilt_overlay {
-            Some(Some(overlay)) => {
-                cache.screen_overlays.insert(id, Arc::new(overlay));
-            }
-            Some(None) => {
-                cache.screen_overlays.remove(&id);
-            }
-            None => {}
-        }
-        extract::ElementFragment {
-            scene,
-            soft: cache.soft_layers.get(&id).cloned().unwrap_or_default(),
-            overlay: cache.screen_overlays.get(&id).cloned(),
-            effect_shadow,
-            recipe: None,
-        }
-    }
-}
-
 /// System: Extracts, composites, and renders all visible gaanim 2D Mobjects.
 ///
 /// 1. Queries all active Mobjects marked for Vello2D rendering that are visible.
@@ -6993,10 +6830,7 @@ pub fn gaanim_render_system(
         })
         .unwrap_or_else(|| kurbo::Rect::new(-4096.0, -4096.0, 4096.0, 4096.0));
 
-    let mut source = PreviewFragments {
-        cache: &mut cache,
-        current_inputs: None,
-    };
+    let mut source = cache.fragments.frame(false, true);
     let mut frame = extract::ElementFrame {
         camera_views: &camera_views,
         cull: cam_bounds,

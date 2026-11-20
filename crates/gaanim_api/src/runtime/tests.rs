@@ -201,7 +201,6 @@ fn clear_scene(world: &mut World) {
     }
     world
         .resource_mut::<gaanim_renderer::pipeline::GaanimRenderCache>()
-        .fragment_cache
         .clear();
     *world.resource_mut::<Timeline>() = Timeline::default();
 }
