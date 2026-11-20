@@ -22,7 +22,6 @@ pub use crate::lottie::{
 };
 pub use crate::pipeline::{
     CanvasBackground, GaanimRenderCache, MainVelloScene, SegmentBackgroundPaint,
-    gaanim_render_cache_sweep_system,
 };
 #[cfg(not(target_os = "emscripten"))]
 pub use crate::pipeline::{

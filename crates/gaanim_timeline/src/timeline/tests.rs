@@ -2077,8 +2077,10 @@ fn playback_seeks_only_rebuild_fragments_of_animating_objects() {
             .insert_resource(gaanim_animation::PlaybackState::default());
 
         let fragments = |app: &App| {
-            let cache = &app.world().resource::<GaanimRenderCache>().fragment_cache;
-            ids.iter().map(|id| cache[id].clone()).collect::<Vec<_>>()
+            let cache = app.world().resource::<GaanimRenderCache>();
+            ids.iter()
+                .map(|id| cache.fragment(*id).expect("drawn fragment").clone())
+                .collect::<Vec<_>>()
         };
         timeline.seek(app.world_mut(), 2.25);
         app.update();

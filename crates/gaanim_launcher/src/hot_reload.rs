@@ -83,15 +83,6 @@ pub fn clear_scene_entities(world: &mut World) {
             world.despawn(e);
         }
     }
-    // Canvas compilation allocates ObjectIds deterministically from zero on
-    // every replay. Retained Vello fragments are keyed by those IDs, so keeping
-    // the previous revision's cache can attach an old glyph or arrowhead to a
-    // newly compiled (and initially hidden) object with the same ID.
-    if let Some(mut cache) =
-        world.get_resource_mut::<gaanim_renderer::pipeline::GaanimRenderCache>()
-    {
-        cache.fragment_cache.clear();
-    }
     if let Some(mut tl) = world.get_resource_mut::<Timeline>() {
         let playback_rate = tl.playback_rate;
         let loop_range = tl.loop_range;
@@ -675,29 +666,6 @@ mod tests {
                 0
             );
         }
-    }
-
-    #[test]
-    fn hot_reload_discards_retained_fragments_before_object_ids_are_reused() {
-        let mut world = World::new();
-        world.insert_resource(Timeline::default());
-        world.insert_resource(gaanim_renderer::pipeline::GaanimRenderCache::default());
-        let reused_id = ObjectId::from_parts(12, 1);
-        world.spawn((MobjectId(reused_id), ObjectTag("old force unit".to_owned())));
-        world
-            .resource_mut::<gaanim_renderer::pipeline::GaanimRenderCache>()
-            .fragment_cache
-            .insert(reused_id, Default::default());
-
-        clear_scene_entities(&mut world);
-
-        assert!(
-            world
-                .resource::<gaanim_renderer::pipeline::GaanimRenderCache>()
-                .fragment_cache
-                .is_empty(),
-            "a new canvas reuses ObjectIds, so no retained geometry from the previous revision may survive"
-        );
     }
 
     #[test]

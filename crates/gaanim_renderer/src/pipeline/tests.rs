@@ -667,7 +667,12 @@ fn fragments_changed_while_hidden_are_rebuilt_when_shown_again() {
         ))
         .id();
     app.update();
-    let drawn = app.world().resource::<GaanimRenderCache>().fragment_cache[&id].clone();
+    let drawn = app
+        .world()
+        .resource::<GaanimRenderCache>()
+        .fragment(id)
+        .unwrap()
+        .clone();
 
     // A rewind hides the object and resets it to its undrawn state while
     // the render system does not visit it, as before a write/create clip.
@@ -681,7 +686,11 @@ fn fragments_changed_while_hidden_are_rebuilt_when_shown_again() {
     app.world_mut().entity_mut(entity).insert(Visible);
     app.update();
 
-    let shown = &app.world().resource::<GaanimRenderCache>().fragment_cache[&id];
+    let shown = &app
+        .world()
+        .resource::<GaanimRenderCache>()
+        .fragment(id)
+        .unwrap();
     assert!(!Arc::ptr_eq(&drawn, shown), "the drawn fragment was reused");
     let fresh = compile_scene_from_world(app.world_mut(), None);
     let live = app
@@ -745,11 +754,11 @@ fn scaling_strokes_follow_the_scale_of_their_group() {
     let mut local = vello::Scene::new();
     local.stroke(&style, kurbo::Affine::IDENTITY, &brush, None, &path);
     assert_eq!(
-        cache.fragment_cache[&scaling].encoding().path_data,
+        cache.fragment(scaling).unwrap().encoding().path_data,
         local.encoding().path_data
     );
     assert_ne!(
-        cache.fragment_cache[&fixed].encoding().path_data,
+        cache.fragment(fixed).unwrap().encoding().path_data,
         local.encoding().path_data
     );
     let headless = compile_scene_from_world(app.world_mut(), None);
@@ -804,13 +813,23 @@ fn coordinate_view_rebuilds_strokes_on_zoom_and_rewind_but_reuses_them_on_pan() 
         ))
         .id();
     app.update();
-    let original = app.world().resource::<GaanimRenderCache>().fragment_cache[&id].clone();
+    let original = app
+        .world()
+        .resource::<GaanimRenderCache>()
+        .fragment(id)
+        .unwrap()
+        .clone();
     for (sx, sy) in [(3.0, 1.0), (1.0, 2.0), (2.0, 2.0), (1.0, 1.0), (3.0, 1.0)] {
         app.world_mut()
             .entity_mut(view)
             .insert(SpatialTransform::default().with_scale_2d(sx, sy));
         app.update();
-        let fragment = app.world().resource::<GaanimRenderCache>().fragment_cache[&id].clone();
+        let fragment = app
+            .world()
+            .resource::<GaanimRenderCache>()
+            .fragment(id)
+            .unwrap()
+            .clone();
         assert!(!Arc::ptr_eq(&original, &fragment));
         let expected_path = kurbo::Affine::scale_non_uniform(sx, sy) * &path;
         let mut expected = vello::Scene::new();
@@ -841,7 +860,10 @@ fn coordinate_view_rebuilds_strokes_on_zoom_and_rewind_but_reuses_them_on_pan() 
         app.update();
         assert!(Arc::ptr_eq(
             &fragment,
-            &app.world().resource::<GaanimRenderCache>().fragment_cache[&id]
+            &app.world()
+                .resource::<GaanimRenderCache>()
+                .fragment(id)
+                .unwrap()
         ));
         app.world_mut()
             .get_mut::<SpatialTransform>(view)
@@ -851,7 +873,10 @@ fn coordinate_view_rebuilds_strokes_on_zoom_and_rewind_but_reuses_them_on_pan() 
         app.update();
         assert!(Arc::ptr_eq(
             &fragment,
-            &app.world().resource::<GaanimRenderCache>().fragment_cache[&id]
+            &app.world()
+                .resource::<GaanimRenderCache>()
+                .fragment(id)
+                .unwrap()
         ));
     }
     app.world_mut().get_mut::<GlobalOpacity>(entity).unwrap().0 = 0.0;
@@ -862,12 +887,16 @@ fn coordinate_view_rebuilds_strokes_on_zoom_and_rewind_but_reuses_them_on_pan() 
     assert!(
         !app.world()
             .resource::<GaanimRenderCache>()
-            .fragment_cache
-            .contains_key(&id)
+            .fragment(id)
+            .is_some()
     );
     app.world_mut().get_mut::<GlobalOpacity>(entity).unwrap().0 = 1.0;
     app.update();
-    let restored = &app.world().resource::<GaanimRenderCache>().fragment_cache[&id];
+    let restored = &app
+        .world()
+        .resource::<GaanimRenderCache>()
+        .fragment(id)
+        .unwrap();
     assert_eq!(original.encoding().path_data, restored.encoding().path_data);
     assert_eq!(
         original.encoding().transforms,
@@ -889,9 +918,18 @@ fn draw_animation_lighting_preserves_logical_stroke_width() {
 #[test]
 fn changing_fill_level_rebuilds_its_retained_fragment() {
     let mut app = App::new();
-    app.init_resource::<GaanimRenderCache>()
-        .add_systems(Update, gaanim_render_system);
+    app.init_resource::<GaanimRenderCache>().add_systems(
+        Update,
+        (resolve_fill_level_system, gaanim_render_system).chain(),
+    );
     let id = ObjectId::from_raw(47);
+    let mask = app
+        .world_mut()
+        .spawn((
+            Path2D(rect_path(0.0, 0.0, 20.0, 20.0)),
+            GlobalSpatialTransform::default(),
+        ))
+        .id();
     let entity = app
         .world_mut()
         .spawn((
@@ -900,11 +938,16 @@ fn changing_fill_level_rebuilds_its_retained_fragment() {
             GlobalOpacity(1.0),
             RenderOrder::default(),
             RenderLayer::Vello2D,
-            Path2D(rect_path(0.0, 0.0, 20.0, 20.0)),
-            PathSource(rect_path(0.0, 0.0, 20.0, 20.0)),
+            Path2D::default(),
+            PathSource::default(),
+            LocalBounds::default(),
             FillBrush::color(peniko::Color::from_rgb8(251, 146, 60)),
             StrokeBrush::transparent(),
-            FillLevel(0.0),
+            FillLevelBinding {
+                sources: vec![mask],
+                direction: FillDirection::Up,
+            },
+            FillLevel(0.25),
             Visible,
         ))
         .id();
@@ -913,18 +956,17 @@ fn changing_fill_level_rebuilds_its_retained_fragment() {
     let first = app
         .world()
         .resource::<GaanimRenderCache>()
-        .fragment_cache
-        .get(&id)
+        .fragment(id)
         .expect("initial fragment")
         .clone();
 
+    // The level reaches the fragment through the geometry it derives.
     app.world_mut().get_mut::<FillLevel>(entity).unwrap().0 = 0.55;
     app.update();
     let second = app
         .world()
         .resource::<GaanimRenderCache>()
-        .fragment_cache
-        .get(&id)
+        .fragment(id)
         .expect("rebuilt fragment")
         .clone();
 
@@ -956,8 +998,13 @@ fn seek_replay_of_identical_values_keeps_the_retained_fragment() {
         ))
         .id();
     app.update();
-    let fragment =
-        |app: &App| app.world().resource::<GaanimRenderCache>().fragment_cache[&id].clone();
+    let fragment = |app: &App| {
+        app.world()
+            .resource::<GaanimRenderCache>()
+            .fragment(id)
+            .unwrap()
+            .clone()
+    };
     let retained = fragment(&app);
 
     // An exact seek restores the keyframe and replays completed clips,
@@ -996,20 +1043,29 @@ fn hidden_geometry_changes_invalidate_fragment_before_fade_in() {
         ))
         .id();
     app.update();
-    let last_frame = app.world().resource::<GaanimRenderCache>().fragment_cache[&id].clone();
+    let last_frame = app
+        .world()
+        .resource::<GaanimRenderCache>()
+        .fragment(id)
+        .unwrap()
+        .clone();
     app.world_mut().get_mut::<GlobalOpacity>(entity).unwrap().0 = 0.0;
     app.world_mut().get_mut::<Path2D>(entity).unwrap().0 = rect_path(30.0, 0.0, 40.0, 10.0);
     app.update();
     assert!(
         !app.world()
             .resource::<GaanimRenderCache>()
-            .fragment_cache
-            .contains_key(&id)
+            .fragment(id)
+            .is_some()
     );
     // The geometry stays unchanged during the fade; only opacity changes.
     app.world_mut().get_mut::<GlobalOpacity>(entity).unwrap().0 = 0.5;
     app.update();
-    let first_frame = &app.world().resource::<GaanimRenderCache>().fragment_cache[&id];
+    let first_frame = &app
+        .world()
+        .resource::<GaanimRenderCache>()
+        .fragment(id)
+        .unwrap();
     assert_ne!(
         first_frame.encoding().path_data,
         last_frame.encoding().path_data
@@ -2435,6 +2491,116 @@ fn perspective_viewport_offset_is_measured_in_window_pixels() {
 
     assert_eq!(viewport.physical_size, UVec2::new(640, 360));
     assert_eq!(viewport.physical_position, UVec2::new(320, 80));
+}
+
+/// A HUD inside a parallax layer that the depth of field blurs stays
+/// sharp: the preview and the headless path leave it out of the layer's
+/// effect alike.
+#[test]
+fn a_hud_under_a_depth_blur_is_drawn_alike_in_preview_and_export() {
+    use gaanim_math::SpatialTransform;
+    let mut app = App::new();
+    app.init_resource::<GaanimRenderCache>()
+        .init_resource::<EffectLayers>()
+        .add_systems(
+            Update,
+            (
+                gaanim_scene::transform_propagation_system,
+                gaanim_render_system,
+            )
+                .chain(),
+        );
+    let layer = app
+        .world_mut()
+        .spawn((
+            SpatialTransform::default(),
+            GlobalSpatialTransform::default(),
+            crate::object_effects::depth_of_field_effect(0.2).expect("blur effect"),
+            crate::object_effects::DepthOfFieldBlur(0.2),
+        ))
+        .id();
+    let mut spawn = |raw: u64, x: f64, hud: bool| {
+        let mut entity = app.world_mut().spawn((
+            MobjectId(ObjectId::from_raw(raw)),
+            SpatialTransform::default(),
+            GlobalSpatialTransform::default(),
+            GlobalOpacity(1.0),
+            RenderOrder::default(),
+            RenderLayer::Vello2D,
+            Path2D(rect_path(x, 0.0, x + 1.0, 1.0)),
+            FillBrush(Some(peniko::Brush::Solid(peniko::Color::BLACK))),
+            Visible,
+            ChildOf(layer),
+        ));
+        if hud {
+            entity.insert(gaanim_scene::HudOverlay);
+        }
+    };
+    spawn(95, 0.0, false);
+    spawn(96, 3.0, true);
+    app.update();
+
+    let live = app.world().resource::<EffectLayers>();
+    let live_layers: Vec<_> = live
+        .0
+        .iter()
+        .map(|layer| layer.scene.encoding().path_data.clone())
+        .collect();
+    let headless = compile_frame_from_world(app.world_mut(), None);
+    let headless_layers: Vec<_> = headless
+        .effects
+        .iter()
+        .map(|layer| layer.scene.encoding().path_data.clone())
+        .collect();
+    assert_eq!(live_layers.len(), 1, "the blurred layer has an effect");
+    assert_eq!(
+        live_layers, headless_layers,
+        "the preview and the export put different drawables in the blurred layer"
+    );
+}
+
+/// Culling keeps a drawable outside the camera's margin whose glow
+/// reaches into the frame, and still leaves out one that draws nothing
+/// there.
+#[test]
+fn culling_keeps_what_reaches_into_the_frame() {
+    let camera = gaanim_math::Camera::ortho_2d_frame(16.0, 9.0, 1920, 1080);
+    // The frame ends at x = 8 and the culling margin at about 9.3.
+    let drawn = |x: f64, glow: Option<f64>| {
+        let mut world = World::new();
+        let square = kurbo::Rect::new(x, -0.5, x + 1.0, 0.5);
+        let mut entity = world.spawn((
+            MobjectId(ObjectId::from_raw(97)),
+            GlobalSpatialTransform::default(),
+            GlobalOpacity(1.0),
+            RenderOrder::default(),
+            RenderLayer::Vello2D,
+            Path2D(Arc::new(square.to_path(0.01))),
+            FillBrush(Some(peniko::Brush::Solid(peniko::Color::WHITE))),
+            WorldBounds(gaanim_math::Bounds3D::new_2d(x, -0.5, x + 1.0, 0.5)),
+            Visible,
+        ));
+        if let Some(radius) = glow {
+            entity.insert(Glow {
+                radius,
+                intensity: 1.0,
+                color: peniko::Color::WHITE,
+            });
+        }
+        !compile_scene_from_world(&mut world, Some(&camera))
+            .encoding()
+            .path_data
+            .is_empty()
+    };
+    assert!(
+        drawn(9.5, Some(2.0)),
+        "a glow reaching into the frame was culled"
+    );
+    assert!(!drawn(9.5, None), "a drawable outside the margin was drawn");
+    assert!(
+        !drawn(30.0, Some(2.0)),
+        "a glow far from the frame was drawn"
+    );
 }
 
 #[test]
