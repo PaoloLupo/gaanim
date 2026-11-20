@@ -127,20 +127,23 @@ fn play_steps(
         return Err(PyValueError::new_err("dim must be between 0 and 1"));
     }
     let scene = scene.bind(py);
-    let animate = |handle: &DrawableHandle, effect: &str, args: Bound<'_, PyTuple>| {
-        animation(py, handle, effect, args, duration)
-    };
     let no_args = PyTuple::empty(py);
     for (index, step) in steps.iter().enumerate() {
         let mut animations = Vec::with_capacity(step.len() * 2);
         for handle in step {
-            animations.push(animate(handle, "fade_in", no_args.clone())?);
+            animations.push(animation(py, handle, "fade_in", no_args.clone(), duration)?);
         }
         if let (Some(dim), Some(previous)) = (dim, index.checked_sub(1).map(|i| &steps[i]))
             && dim < 1.0
         {
             for handle in previous {
-                animations.push(animate(handle, "opacity", PyTuple::new(py, [dim])?)?);
+                animations.push(animation(
+                    py,
+                    handle,
+                    "opacity",
+                    PyTuple::new(py, [dim])?,
+                    duration,
+                )?);
             }
         }
         scene.call_method1("play", (PyList::new(py, animations)?,))?;
