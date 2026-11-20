@@ -91,6 +91,20 @@ fn step_names(names: Option<Vec<String>>, texts: Vec<String>) -> PyResult<Vec<St
     }
 }
 
+/// `handle.animate.<effect>(*args).duration(duration)`.
+fn animation<'py>(
+    py: Python<'py>,
+    handle: &DrawableHandle,
+    effect: &str,
+    args: Bound<'py, PyTuple>,
+    duration: f64,
+) -> PyResult<Bound<'py, PyAny>> {
+    Bound::new(py, drawable(handle))?
+        .getattr("animate")?
+        .call_method1(effect, args)?
+        .call_method1("duration", (duration,))
+}
+
 /// Reveal each step in turn on `scene`: fade its drawables in, fade the
 /// previous step to `dim`, then stop under its name.
 fn play_steps(
@@ -113,24 +127,20 @@ fn play_steps(
         return Err(PyValueError::new_err("dim must be between 0 and 1"));
     }
     let scene = scene.bind(py);
-    let animate = |handle: &DrawableHandle, effect: &str, args: &Bound<'_, PyTuple>| {
-        Py::new(py, drawable(handle))?
-            .bind(py)
-            .getattr("animate")?
-            .call_method1(effect, args)?
-            .call_method1("duration", (duration,))
+    let animate = |handle: &DrawableHandle, effect: &str, args: Bound<'_, PyTuple>| {
+        animation(py, handle, effect, args, duration)
     };
     let no_args = PyTuple::empty(py);
     for (index, step) in steps.iter().enumerate() {
         let mut animations = Vec::with_capacity(step.len() * 2);
         for handle in step {
-            animations.push(animate(handle, "fade_in", &no_args)?);
+            animations.push(animate(handle, "fade_in", no_args.clone())?);
         }
         if let (Some(dim), Some(previous)) = (dim, index.checked_sub(1).map(|i| &steps[i]))
             && dim < 1.0
         {
             for handle in previous {
-                animations.push(animate(handle, "opacity", &PyTuple::new(py, [dim])?)?);
+                animations.push(animate(handle, "opacity", PyTuple::new(py, [dim])?)?);
             }
         }
         scene.call_method1("play", (PyList::new(py, animations)?,))?;
