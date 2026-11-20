@@ -637,3 +637,48 @@ fn osculating_circles_reach_the_ends_and_the_seam() {
     straight.line_to(Point::new(4.0, 0.0));
     assert!(osculating_circle(&straight, 0.0, 0.2).is_none());
 }
+
+/// A regeneration that rebuilds the same path leaves its components
+/// unchanged, so the renderer keeps the fragment and seeks do not
+/// restore it every frame, paused or not.
+#[test]
+fn regenerating_the_same_path_marks_no_change() {
+    use bevy::prelude::DetectChanges;
+    let mut world = World::new();
+    let entity = world
+        .spawn((
+            gaanim_scene::Path2D(Arc::new(BezPath::new())),
+            gaanim_scene::PathSource(Arc::new(BezPath::new())),
+            gaanim_scene::LocalBounds(Bounds3D::default()),
+            AlwaysRedrawRegen::new(|_| {
+                let mut path = BezPath::new();
+                path.move_to((0.0, 0.0));
+                path.line_to((4.0, 2.0));
+                path
+            }),
+        ))
+        .id();
+    let ticks = |world: &World| {
+        let entity = world.entity(entity);
+        [
+            entity
+                .get_ref::<gaanim_scene::Path2D>()
+                .unwrap()
+                .last_changed(),
+            entity
+                .get_ref::<gaanim_scene::PathSource>()
+                .unwrap()
+                .last_changed(),
+            entity
+                .get_ref::<gaanim_scene::LocalBounds>()
+                .unwrap()
+                .last_changed(),
+        ]
+    };
+
+    always_redraw_regen_system(&mut world);
+    let drawn = ticks(&world);
+    world.increment_change_tick();
+    always_redraw_regen_system(&mut world);
+    assert_eq!(ticks(&world), drawn, "the same path was written again");
+}

@@ -1478,14 +1478,16 @@ pub fn always_redraw_regen_system(world: &mut World) {
         }
         let path = Arc::new(path);
         let visible = crate::writing::visible_path(&path, reveal, trim.as_ref());
+        // A path rebuilt the same as before keeps its change tick, so the
+        // renderer keeps its fragment and seeks do not restore it.
         if let Some(mut path_comp) = world.get_mut::<gaanim_scene::Path2D>(entity) {
-            path_comp.0 = visible;
+            path_comp.set_if_neq(gaanim_scene::Path2D(visible));
         }
         if let Some(mut path_source) = world.get_mut::<gaanim_scene::PathSource>(entity) {
-            path_source.0 = path;
+            path_source.set_if_neq(gaanim_scene::PathSource(path));
         }
         if let Some(mut local_bounds) = world.get_mut::<gaanim_scene::LocalBounds>(entity) {
-            local_bounds.0 = bounds;
+            local_bounds.set_if_neq(gaanim_scene::LocalBounds(bounds));
         }
         // Keep the PathReveal component alive so snapshot restore
         // can see the correct reveal factor.

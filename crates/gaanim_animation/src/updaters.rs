@@ -2125,7 +2125,7 @@ impl SurroundingRect {
 
 fn object_set_bounds(
     ids: &[gaanim_core::ObjectId],
-    entities: &std::collections::HashMap<gaanim_core::ObjectId, Entity>,
+    entities: &bevy::platform::collections::HashMap<gaanim_core::ObjectId, Entity>,
     world: &World,
 ) -> Option<gaanim_math::Bounds3D> {
     ids.iter()
@@ -2153,7 +2153,7 @@ fn frame_path(rect: gaanim_core::kurbo::Rect, corner_radius: f64) -> BezPath {
 /// back with it.
 fn line_frames(
     ids: &[gaanim_core::ObjectId],
-    entities: &std::collections::HashMap<gaanim_core::ObjectId, Entity>,
+    entities: &bevy::platform::collections::HashMap<gaanim_core::ObjectId, Entity>,
     world: &World,
     padding: [f64; 4],
     corner_radius: f64,
@@ -2230,13 +2230,6 @@ fn lerp_bounds(
 /// Rebuild all live surrounding rectangles after layout and transform
 /// propagation, immediately before normal bounds extraction.
 pub fn surrounding_rect_system(world: &mut World) {
-    let entities = {
-        let mut query = world.query::<(Entity, &gaanim_scene::MobjectId)>();
-        query
-            .iter(world)
-            .map(|(entity, id)| (id.0, entity))
-            .collect::<std::collections::HashMap<_, _>>()
-    };
     let frames = {
         let mut query = world.query::<(Entity, &SurroundingRect)>();
         query
@@ -2244,6 +2237,11 @@ pub fn surrounding_rect_system(world: &mut World) {
             .map(|(entity, frame)| (entity, frame.clone()))
             .collect::<Vec<_>>()
     };
+    // Most scenes have no frame: skip indexing every object.
+    if frames.is_empty() {
+        return;
+    }
+    let entities = gaanim_scene::ObjectEntities::of(world);
 
     for (entity, frame) in frames {
         if frame.shape == SurroundingShape::Lines {
@@ -2261,9 +2259,11 @@ pub fn surrounding_rect_system(world: &mut World) {
             write_path(world, entity, path);
             if let Some(bounds) = bounds {
                 if let Some(mut local) = world.get_mut::<LocalBounds>(entity) {
-                    local.0 = bounds;
+                    local.set_if_neq(LocalBounds(bounds));
                 }
-                if let Some(mut live) = world.get_mut::<SurroundingRect>(entity) {
+                if let Some(mut live) = world.get_mut::<SurroundingRect>(entity)
+                    && live.last_bounds != Some(bounds)
+                {
                     live.last_bounds = Some(bounds);
                 }
             }
@@ -2285,7 +2285,9 @@ pub fn surrounding_rect_system(world: &mut World) {
 
         if let Some(rays) = frame.rays {
             write_path(world, entity, rays.path(bounds));
-            if let Some(mut live) = world.get_mut::<SurroundingRect>(entity) {
+            if let Some(mut live) = world.get_mut::<SurroundingRect>(entity)
+                && live.last_bounds != Some(bounds)
+            {
                 live.last_bounds = Some(bounds);
             }
             continue;
@@ -2298,7 +2300,9 @@ pub fn surrounding_rect_system(world: &mut World) {
                 bounds.max.y,
             ));
             write_path(world, entity, path);
-            if let Some(mut live) = world.get_mut::<SurroundingRect>(entity) {
+            if let Some(mut live) = world.get_mut::<SurroundingRect>(entity)
+                && live.last_bounds != Some(bounds)
+            {
                 live.last_bounds = Some(bounds);
             }
             continue;
@@ -2315,9 +2319,11 @@ pub fn surrounding_rect_system(world: &mut World) {
                 bounds.min.y,
             );
             if let Some(mut local) = world.get_mut::<LocalBounds>(entity) {
-                local.0 = bounds;
+                local.set_if_neq(LocalBounds(bounds));
             }
-            if let Some(mut live) = world.get_mut::<SurroundingRect>(entity) {
+            if let Some(mut live) = world.get_mut::<SurroundingRect>(entity)
+                && live.last_bounds != Some(bounds)
+            {
                 live.last_bounds = Some(bounds);
             }
             continue;
@@ -2342,9 +2348,11 @@ pub fn surrounding_rect_system(world: &mut World) {
         };
         write_path(world, entity, path);
         if let Some(mut local) = world.get_mut::<LocalBounds>(entity) {
-            local.0 = bounds;
+            local.set_if_neq(LocalBounds(bounds));
         }
-        if let Some(mut live) = world.get_mut::<SurroundingRect>(entity) {
+        if let Some(mut live) = world.get_mut::<SurroundingRect>(entity)
+            && live.last_bounds != Some(bounds)
+        {
             live.last_bounds = Some(bounds);
         }
     }

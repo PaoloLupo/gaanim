@@ -116,15 +116,34 @@ impl Default for GlobalOpacity {
 }
 
 /// A 2D vector geometry represented as a shared Bézier path (`Arc<kurbo::BezPath>`).
-#[derive(Component, Debug, Clone, Default, PartialEq)]
+#[derive(Component, Debug, Clone, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Path2D(pub Arc<BezPath>);
 
 /// A mirror component that caches the original, unmodified Bézier path
 /// of a Mobject for time-based trimming / interpolation during writing/drawing.
-#[derive(Component, Debug, Clone, Default, PartialEq)]
+#[derive(Component, Debug, Clone, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct PathSource(pub Arc<BezPath>);
+
+/// Whether two shared paths are equal, without comparing their elements
+/// when they are the same allocation: `BezPath` is not `Eq`, so `Arc`'s own
+/// comparison never takes that shortcut.
+pub fn same_shared_path(left: &Arc<BezPath>, right: &Arc<BezPath>) -> bool {
+    Arc::ptr_eq(left, right) || left == right
+}
+
+impl PartialEq for Path2D {
+    fn eq(&self, other: &Self) -> bool {
+        same_shared_path(&self.0, &other.0)
+    }
+}
+
+impl PartialEq for PathSource {
+    fn eq(&self, other: &Self) -> bool {
+        same_shared_path(&self.0, &other.0)
+    }
+}
 
 /// How draw animations (`PathCompletion`) reveal a path with several sub-paths.
 #[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -315,9 +334,85 @@ pub enum RenderLayer {
 ///
 /// This resolves Bevy integration and Orphan Rule constraints while preserving
 /// the isolation of `gaanim_core`.
+///
+/// Immutable, so that [`ObjectEntities`], kept by its insert and discard
+/// hooks, always names the entity that carries an id.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[component(immutable, on_insert = index_object, on_discard = unindex_object)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct MobjectId(pub gaanim_core::ObjectId);
+
+/// The entity of every [`MobjectId`], kept up to date as ids are inserted,
+/// replaced and despawned, so seeks and updaters look objects up instead of
+/// indexing the whole world each time. Built from the world's ids when it is
+/// first initialized.
+#[derive(Resource, Debug)]
+pub struct ObjectEntities(
+    bevy::platform::collections::HashMap<gaanim_core::ObjectId, bevy::prelude::Entity>,
+);
+
+impl bevy::prelude::FromWorld for ObjectEntities {
+    fn from_world(world: &mut bevy::prelude::World) -> Self {
+        let mut query = world.query::<(bevy::prelude::Entity, &MobjectId)>();
+        Self(
+            query
+                .iter(world)
+                .map(|(entity, id)| (id.0, entity))
+                .collect(),
+        )
+    }
+}
+
+impl ObjectEntities {
+    /// The entity carrying `id`.
+    pub fn get(&self, id: gaanim_core::ObjectId) -> Option<bevy::prelude::Entity> {
+        self.0.get(&id).copied()
+    }
+
+    /// Every id and its entity.
+    pub fn map(
+        &self,
+    ) -> &bevy::platform::collections::HashMap<gaanim_core::ObjectId, bevy::prelude::Entity> {
+        &self.0
+    }
+
+    /// A copy of the index of `world`, built from its ids when the world
+    /// keeps no index (a bare world outside `GaanimScenePlugin`).
+    pub fn of(
+        world: &mut bevy::prelude::World,
+    ) -> bevy::platform::collections::HashMap<gaanim_core::ObjectId, bevy::prelude::Entity> {
+        match world.get_resource::<Self>() {
+            Some(index) => index.0.clone(),
+            None => <Self as bevy::prelude::FromWorld>::from_world(world).0,
+        }
+    }
+}
+
+fn index_object(
+    mut world: bevy::ecs::world::DeferredWorld,
+    context: bevy::ecs::lifecycle::HookContext,
+) {
+    let Some(&MobjectId(id)) = world.get::<MobjectId>(context.entity) else {
+        return;
+    };
+    if let Some(mut index) = world.get_resource_mut::<ObjectEntities>() {
+        index.0.insert(id, context.entity);
+    }
+}
+
+fn unindex_object(
+    mut world: bevy::ecs::world::DeferredWorld,
+    context: bevy::ecs::lifecycle::HookContext,
+) {
+    let Some(&MobjectId(id)) = world.get::<MobjectId>(context.entity) else {
+        return;
+    };
+    if let Some(mut index) = world.get_resource_mut::<ObjectEntities>()
+        && index.0.get(&id) == Some(&context.entity)
+    {
+        index.0.remove(&id);
+    }
+}
 
 /// What a scene script authored a drawable as, for the editor's inspector.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1460,5 +1555,60 @@ mod material_3d_tests {
         .unwrap();
         assert_eq!(from.lerp(to, 0.0), from);
         assert_eq!(from.lerp(to, 1.0), to);
+    }
+}
+
+#[cfg(test)]
+mod path_tests {
+    use super::*;
+
+    #[test]
+    fn shared_paths_compare_by_allocation_then_by_elements() {
+        let line = |x: f64| {
+            let mut path = BezPath::new();
+            path.move_to((0.0, 0.0));
+            path.line_to((x, 0.0));
+            Arc::new(path)
+        };
+        let shared = line(1.0);
+        assert_eq!(Path2D(shared.clone()), Path2D(shared.clone()));
+        assert_eq!(PathSource(shared.clone()), PathSource(line(1.0)));
+        assert_ne!(Path2D(shared), Path2D(line(2.0)));
+    }
+}
+
+#[cfg(test)]
+mod object_entities_tests {
+    use super::*;
+    use bevy::prelude::World;
+    use gaanim_core::ObjectId;
+
+    #[test]
+    fn the_object_index_follows_ids_as_they_come_and_go() {
+        let id = |raw| ObjectId::from_parts(raw, 1);
+        let mut world = World::new();
+        // Ids spawned before the index exists are indexed when it is made.
+        let early = world.spawn(MobjectId(id(1))).id();
+        world.init_resource::<ObjectEntities>();
+        let index = |world: &World| world.resource::<ObjectEntities>().map().clone();
+        assert_eq!(index(&world).get(&id(1)), Some(&early));
+
+        let late = world.spawn(MobjectId(id(2))).id();
+        assert_eq!(index(&world).get(&id(2)), Some(&late));
+
+        // A replaced id leaves the index under its old value.
+        world.entity_mut(late).insert(MobjectId(id(3)));
+        assert_eq!(index(&world).get(&id(2)), None);
+        assert_eq!(index(&world).get(&id(3)), Some(&late));
+
+        world.entity_mut(late).remove::<MobjectId>();
+        assert_eq!(index(&world).get(&id(3)), None);
+        world.despawn(early);
+        assert!(index(&world).is_empty());
+
+        // A world without the index builds one from its ids.
+        let mut bare = World::new();
+        let entity = bare.spawn(MobjectId(id(4))).id();
+        assert_eq!(ObjectEntities::of(&mut bare).get(&id(4)), Some(&entity));
     }
 }
