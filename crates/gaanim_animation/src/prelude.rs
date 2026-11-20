@@ -8,9 +8,7 @@ pub use crate::signals::{
     PositionBinding, ReactiveLineRegen, ReactiveMeshRegen, Signal, SignalBinding, SpecValue,
     Vec3Signal,
 };
-pub use crate::tween::{
-    AnimatableLens, CameraStateSource, DeltaTime, PropertyLens, Tween, TweenState,
-};
+pub use crate::tween::{AnimatableLens, CameraStateSource, DeltaTime};
 pub use crate::updaters::{
     AngleArrowheads, AngleLabelPlacement, AngleSweep, EndpointAngle, EndpointFollow,
     FollowOffsetSpace, PlaybackState, RotationBinding, RotationTranslationBinding, TracedPath,

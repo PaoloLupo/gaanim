@@ -5,8 +5,6 @@
 
 use std::collections::HashSet;
 
-#[cfg(not(target_os = "emscripten"))]
-use gaanim_export::prelude::export_scene;
 use gaanim_export::prelude::{ExportError, export_scene_direct};
 
 use crate::canvas::SceneModel;
@@ -52,11 +50,6 @@ pub fn export_canvas(canvas: SceneModel, mut config: ExportConfig) -> Result<(),
         }
     }
     config.audio_tracks.extend(canvas.audio_tracks.clone());
-    // The playground's Pyodide extension has no windows: it exports headless.
-    #[cfg(not(target_os = "emscripten"))]
-    if !config.headless {
-        return export_scene(config, move |world| replay_canvas_into(world, canvas));
-    }
     export_scene_direct(config, move |world| replay_canvas_into(world, canvas))
 }
 
@@ -197,7 +190,7 @@ fn safe_segment_filename(name: &str) -> String {
     }
 }
 
-/// Convenience helper for the common headless export path.
+/// Convenience helper: export to `output_path`, a video, image or bundle.
 pub fn export_canvas_to_path(
     canvas: SceneModel,
     output_path: &str,
@@ -215,7 +208,6 @@ pub fn export_canvas_to_path(
         return record_canvas(canvas, config);
     }
     let mut config = ExportConfig::new(output_path);
-    config.headless = true;
     if let Some(fps) = fps {
         config.fps = FrameRate::whole(fps);
     }
