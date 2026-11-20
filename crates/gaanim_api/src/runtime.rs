@@ -855,32 +855,22 @@ fn try_incremental(
     // Remove everything the previous revision compiled from the checkpoint on.
     let this_run = world.change_tick();
     let mut stale = Vec::new();
-    let mut query =
-        world.query_filtered::<(Entity, Option<&gaanim_scene::MobjectId>), SceneOwned>();
-    for (entity, id) in query.iter(world) {
+    let mut query = world.query_filtered::<Entity, SceneOwned>();
+    for entity in query.iter(world) {
         if world
             .entity(entity)
             .spawn_tick()
             .is_newer_than(checkpoint.spawned_after, this_run)
         {
-            stale.push((entity, id.map(|id| id.0)));
+            stale.push(entity);
         }
     }
-    let stale_ids = stale.iter().filter_map(|(_, id)| *id).collect::<Vec<_>>();
-    for (entity, _) in stale {
+    for entity in stale {
         if world.get_entity(entity).is_ok() {
             world.despawn(entity);
         }
     }
     timings.phase("despawn");
-    if let Some(mut cache) =
-        world.get_resource_mut::<gaanim_renderer::pipeline::GaanimRenderCache>()
-    {
-        // Later segments reuse these IDs for new content.
-        for id in stale_ids {
-            cache.fragment_cache.remove(&id);
-        }
-    }
     world.remove_resource::<gaanim_animation::CustomAnimationDiagnostics>();
     world.remove_resource::<gaanim_animation::PropertyBindingDiagnostics>();
     world.remove_resource::<gaanim_animation::PropertySignalTimeline>();
@@ -1188,7 +1178,6 @@ mod tests {
         }
         world
             .resource_mut::<gaanim_renderer::pipeline::GaanimRenderCache>()
-            .fragment_cache
             .clear();
         *world.resource_mut::<Timeline>() = Timeline::default();
     }

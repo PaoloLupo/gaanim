@@ -306,9 +306,9 @@ fn compile_end(mut profile: ResMut<FrameProfile>, cache: Option<Res<GaanimRender
     let Some(cache) = cache else { return };
     let profile = &mut *profile;
     let mut rebuilt = 0;
-    for (id, fragment) in &cache.fragment_cache {
+    for (id, fragment) in cache.fragments() {
         let ptr = std::sync::Arc::as_ptr(fragment) as usize;
-        if profile.fragment_ptrs.insert(*id, ptr) != Some(ptr) {
+        if profile.fragment_ptrs.insert(id, ptr) != Some(ptr) {
             rebuilt += 1;
         }
     }
@@ -316,7 +316,7 @@ fn compile_end(mut profile: ResMut<FrameProfile>, cache: Option<Res<GaanimRender
         profile.playback.compile += elapsed;
         window.compile.add(elapsed);
         window.rebuilt += rebuilt;
-        window.fragments = cache.fragment_cache.len();
+        window.fragments = cache.len();
     }
 }
 
