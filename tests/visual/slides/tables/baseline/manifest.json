@@ -82,6 +82,31 @@
       "id": "seek_0015_t_17_790000",
       "time_seconds": 17.79,
       "file": "seek_0015_t_17_790000.png"
+    },
+    {
+      "id": "seek_0016_t_18_290000",
+      "time_seconds": 18.29,
+      "file": "seek_0016_t_18_290000.png"
+    },
+    {
+      "id": "seek_0017_t_19_490000",
+      "time_seconds": 19.49,
+      "file": "seek_0017_t_19_490000.png"
+    },
+    {
+      "id": "seek_0018_t_20_590000",
+      "time_seconds": 20.59,
+      "file": "seek_0018_t_20_590000.png"
+    },
+    {
+      "id": "seek_0019_t_21_390000",
+      "time_seconds": 21.39,
+      "file": "seek_0019_t_21_390000.png"
+    },
+    {
+      "id": "seek_0020_t_22_890000",
+      "time_seconds": 22.89,
+      "file": "seek_0020_t_22_890000.png"
     }
   ]
 }
