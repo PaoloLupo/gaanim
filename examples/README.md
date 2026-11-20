@@ -334,8 +334,8 @@ Presentations: slides, editorial components, sections and tables.
 | [Slides](slides/slides.py) | A short deck of segments with slide templates, steps that stop, speaker notes, transitions and a looping stop. |
 | [Sections](slides/sections.py) | Agendas in every layout and marker, progress rails in rows and columns with captions, and sections of slides that move them. |
 | [Editorial titles](slides/editorial_titles.py) | Title cards, section headers, banners and lower thirds with their alignments, widths, variants and appearances. |
-| [Editorial components](slides/editorial_components.py) | Badges and chips in every appearance and variant, cards, bullet lists and callouts that point at objects. |
-| [Tables](slides/tables.py) | Slide tables with their widths, row heights and alignment, and data tables built from layout rows whose cells, rows and columns animate. |
+| [Editorial components](slides/editorial_components.py) | Badges and chips in every appearance and variant, cards, bullet lists revealed point by point and callouts that point at objects. |
+| [Tables](slides/tables.py) | Slide tables with their widths, row heights and alignment, built row by row or column by column, and data tables built from layout rows whose cells, rows and columns animate. |
 | [Branding](slides/branding.py) | A deck theme derived from presentation, with a logo, footer and slide number placed on every slide but the cover. |
 
 ## Live audience

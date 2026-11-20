@@ -198,6 +198,23 @@ scene.wait(0.6)
 # Before the move, mid-move and settled.
 seeks.extend([start + 0.6, scene.cursor - 1.2, scene.cursor - 0.1])
 
+# build() reveals a bullet list one point per presentation step, with a stop
+# after each named after the point; dim= fades the previous point as the next
+# one appears.
+scene.segment("bullet_build")
+plain = S.bullets(ITEMS, width=4)
+dimmed = S.bullets(ITEMS, width=4)
+table([
+    ("steps.build()", plain),
+    ("steps.build(dim=0.35)", dimmed),
+], split=("13fr", "7fr"))
+start = scene.cursor
+plain.build()
+dimmed.build(dim=0.35)
+scene.wait(0.6)
+# Second point appearing, the dimmed list halfway, and both built.
+seeks.extend([start + 0.6, start + 2.2, scene.cursor - 0.1])
+
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
     scene.snapshots(snapshots, seeks)
 else:

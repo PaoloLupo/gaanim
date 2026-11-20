@@ -11,6 +11,22 @@ indica también qué tienes que ajustar en tus escenas al actualizar. Para
 instalar una versión nueva, sigue
 #link("/empezar/instalacion/")[Instalación].
 
+= Próxima versión
+
+Sin publicar todavía.
+
+== Listas y tablas por pasos
+
+- `scene.slides.bullets` devuelve un `BulletList` y `scene.slides.table` un
+  `SlideTable`. Siguen siendo un solo `Drawable`, así que el código que ya los
+  colocaba, movía o hacía aparecer funciona igual, pero sus partes quedan a
+  mano: `items` en la lista; `row`, `column`, `cell`, `header` y `shape` en la
+  tabla, donde una columna es su índice o el texto de su cabecera.
+- `build()` revela los puntos, o las filas (`by="column"`, las columnas), uno
+  por paso de la presentación, con un `scene.stop` por paso que toma el nombre
+  de su texto; `dim=0.35` atenúa el paso anterior al aparecer el siguiente.
+  Ver #link("/referencia/diapositivas/#listas-por-pasos")[Diapositivas].
+
 = 0.17.1
 
 Publicada el 23 de octubre de 2026. `scene.viz.map` dibuja mapas: pone

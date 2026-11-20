@@ -60,6 +60,7 @@ mod pytext_animator;
 mod pyzones;
 mod rolling_number;
 mod sankey;
+mod slide_builds;
 mod text_motion;
 mod theme_colors;
 mod transition;
@@ -345,6 +346,8 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<treemap::PyTreemapAnimation>()?;
     m.add_class::<sankey::PySankey>()?;
     m.add_class::<sankey::PySankeyAnimation>()?;
+    m.add_class::<slide_builds::PyBulletList>()?;
+    m.add_class::<slide_builds::PySlideTable>()?;
     m.add_class::<visualization::PyCoordinateRef>()?;
     m.add_class::<visualization::PyCoordinateSpace>()?;
     m.add_class::<visualization::PyCoordinateSpaceAnimation>()?;

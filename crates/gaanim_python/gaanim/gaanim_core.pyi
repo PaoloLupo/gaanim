@@ -12467,6 +12467,113 @@ class Visualization:
         """
         ...
 
+class BulletList(Drawable):
+    """A bullet list from ``scene.slides.bullets``: one ``Drawable`` whose points stay addressable.
+
+    Each point is a group of its bullet and its text, so it can be styled,
+    animated or revealed on its own while the list moves, fades and is
+    placed as a whole.
+    """
+    @property
+    def items(self) -> tuple[Drawable, ...]:
+        """One ``Drawable`` per point, each its bullet and its text, in order.
+
+        Example:
+            steps.items[1].fill(scene.colors.accent)
+        """
+        ...
+    def build(
+        self,
+        *,
+        dim: Optional[float] = None,
+        duration: float = 0.4,
+        names: Optional[Sequence[str]] = None,
+        stop: bool = True,
+    ) -> None:
+        """Reveal the points one per presentation step, from the current cursor.
+
+        Each point fades in over ``duration`` seconds, then ``scene.stop``
+        pauses under its name: by default its text, cut to 40 characters, or
+        the matching entry of ``names``. Points stay hidden until their step,
+        even when the list is already on screen. With ``dim``, the previous
+        point fades to that opacity as the next one appears, so the current
+        one stands out; ``None`` leaves them as they are. ``stop=False``
+        plays the steps one after another without pausing. A ``dim`` outside
+        0..1, a non-positive ``duration``, or ``names`` of another length or
+        with an empty name raise ``ValueError``.
+
+        Example:
+            steps = scene.slides.bullets(["Measure", "Model", "Verify"], width=6)
+            steps.build(dim=0.35)
+        """
+        ...
+
+class SlideTable(Drawable):
+    """A table from ``scene.slides.table``: one ``Drawable`` whose header, rows and cells stay addressable.
+
+    Rows and columns count from 0 over the data, without the header row;
+    negative indices count from the end. A column is its index or its
+    header text.
+    """
+    @property
+    def shape(self) -> tuple[int, int]:
+        """``(rows, columns)`` of the data, without the header row."""
+        ...
+    @property
+    def header(self) -> Drawable:
+        """The header row: a ``Drawable`` holding the header texts."""
+        ...
+    def header_cell(self, column: int | str) -> Drawable:
+        """The header text of ``column``."""
+        ...
+    def row(self, index: int) -> Drawable:
+        """Data row ``index``: a ``Drawable`` holding its cell texts.
+
+        An index out of range raises ``IndexError``.
+
+        Example:
+            scene.play([table.row(0).animate.fill(scene.colors.accent)])
+        """
+        ...
+    def cell(self, row: int, column: int | str) -> Drawable:
+        """The text of data row ``row`` in ``column``.
+
+        An index out of range raises ``IndexError`` and an unknown header
+        ``KeyError``.
+
+        Example:
+            table.cell(1, "Load").fill(scene.colors.success)
+        """
+        ...
+    def column(self, column: int | str) -> tuple[Drawable, ...]:
+        """The cell texts of ``column``, top to bottom, header excluded."""
+        ...
+    def build(
+        self,
+        *,
+        by: Literal["row", "column"] = "row",
+        dim: Optional[float] = None,
+        duration: float = 0.4,
+        names: Optional[Sequence[str]] = None,
+        stop: bool = True,
+    ) -> None:
+        """Reveal the data rows (or columns) one per presentation step, from the current cursor.
+
+        The header, the background and the rules stay as they are; each row
+        (or each column's cells) fades in over ``duration`` seconds, then
+        ``scene.stop`` pauses under its name: by default the row's first
+        cell (or the column's header), cut to 40 characters, or the matching
+        entry of ``names``. Cells stay hidden until their step. ``dim``,
+        ``stop`` and the errors are those of ``BulletList.build``; ``by``
+        other than ``"row"`` or ``"column"`` raises ``ValueError``.
+
+        Example:
+            table = scene.slides.table(["Case", "Load"], [["A", "12 kN"], ["B", "18 kN"]])
+            scene.play([table.animate.fade_in()])
+            table.build(by="row", dim=0.5)
+        """
+        ...
+
 class SlideKit:
     """Scene-owned editorial component and presentation-branding toolkit."""
     def brand(
@@ -12783,17 +12890,19 @@ class SlideKit:
         bullet_radius: float = 0.08,
         bullet_color: Optional[ColorLike] = None,
         color: Optional[ColorLike] = None,
-    ) -> Drawable:
+    ) -> BulletList:
         """Create a bullet list ``width`` wide, centered at the origin, one item every ``gap``.
 
         Bullets of ``bullet_radius`` take the theme accent and the text its
         foreground unless ``bullet_color`` and ``color`` say otherwise. Each
         item is left-aligned, starting just after its bullet, and wraps to
         the rest of ``width``. An empty list or non-positive sizes raise
-        ``ValueError``.
+        ``ValueError``. The list is one ``Drawable``; ``items`` gives each
+        point and ``build`` reveals them one per presentation step.
 
         Example:
             steps = scene.slides.bullets(["Measure", "Model", "Verify"], width=6)
+            steps.build(dim=0.35)
         """
         ...
     def table(
@@ -12806,15 +12915,18 @@ class SlideKit:
         header_background: Optional[ColorLike] = None,
         rule_color: Optional[ColorLike] = None,
         color: Optional[ColorLike] = None,
-    ) -> Drawable:
+    ) -> SlideTable:
         """Create a table centered at the origin: a header row over ``rows``, ``width`` wide.
 
         Columns share the width equally and rows are ``row_height`` tall.
         Every row needs one cell per header. Empty headers or cells, or
-        non-positive sizes, raise ``ValueError``.
+        non-positive sizes, raise ``ValueError``. The table is one
+        ``Drawable``; ``row``, ``column`` and ``cell`` give its parts and
+        ``build`` reveals the rows one per presentation step.
 
         Example:
             results = scene.slides.table(["Case", "Load"], [["A", "12 kN"], ["B", "18 kN"]])
+            results.build(by="row")
         """
         ...
 

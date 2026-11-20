@@ -2243,12 +2243,12 @@ macro_rules! contextual_scene_capability {
 scene_capability!(PyGeometry, "Geometry");
 scene_capability!(PyTypography, "Typography");
 scene_capability!(PyMediaLibrary, "MediaLibrary");
-scene_capability!(PySlideKit, "SlideKit");
 scene_capability!(PyMechanics, "Mechanics");
 scene_capability!(PyFx, "Fx");
 scene_capability!(PyAssetManager, "AssetManager");
 contextual_scene_capability!(PyLayoutBuilder, "LayoutBuilder");
 contextual_scene_capability!(PyVisualization, "Visualization");
+contextual_scene_capability!(PySlideKit, "SlideKit");
 
 /// Semantic camera controller exposed as ``scene.camera``.
 #[pyclass(name = "Camera", module = "gaanim_core")]
@@ -3645,7 +3645,10 @@ impl PyScene {
         crate::custom::ensure_authoring_allowed()?;
         Ok({
             let inner = slf.borrow().inner.clone();
-            PySlideKit { inner }
+            PySlideKit {
+                inner,
+                scene: slf.clone().unbind(),
+            }
         })
     }
 
@@ -7532,13 +7535,14 @@ impl PySlideKit {
     ))]
     fn bullets(
         &self,
+        py: Python<'_>,
         items: Vec<String>,
         width: f64,
         gap: f64,
         bullet_radius: f64,
         bullet_color: Option<PyColor>,
         color: Option<PyColor>,
-    ) -> PyResult<PyDrawable> {
+    ) -> PyResult<Py<crate::slide_builds::PyBulletList>> {
         crate::custom::ensure_authoring_allowed()?;
         if items.is_empty() || items.iter().any(|item| item.trim().is_empty()) {
             return Err(pyo3::exceptions::PyValueError::new_err(
@@ -7567,15 +7571,13 @@ impl PySlideKit {
         let bullet_x = -width * 0.5;
         let text_left = bullet_x + bullet_radius * 4.0;
         let text_width = (width - bullet_radius * 4.0).max(1.0e-6);
-        let mut members = Vec::with_capacity(items.len() * 2);
+        let mut points = Vec::with_capacity(items.len());
         for (index, item) in items.iter().enumerate() {
             let y = start_y - index as f64 * gap;
-            members.push(
-                scene
-                    .dot(bullet_radius)
-                    .fill(bullet_color)
-                    .move_to(bullet_x, y),
-            );
+            let mark = scene
+                .dot(bullet_radius)
+                .fill(bullet_color)
+                .move_to(bullet_x, y);
             let label_spec = gaanim_text::prelude::TextSpec::new(
                 vec![item.clone().into()],
                 Some(gaanim_text::prelude::TextRole::Body),
@@ -7587,14 +7589,26 @@ impl PySlideKit {
             )
             .expect("bullet text is validated by its public arguments");
             // Each item starts right after its bullet, however short it is.
-            members.push(scene.text_spec(label_spec).fill(color).at_anchor(
+            let label = scene.text_spec(label_spec).fill(color).at_anchor(
                 text_left,
                 y,
                 gaanim_api::canvas::Anchor::Left,
-            ));
+            );
+            points.push(scene.group(&[&mark, &label]));
         }
-        let refs: Vec<&gaanim_api::canvas::DrawableHandle> = members.iter().collect();
-        Ok(PyDrawable(scene.group(&refs)))
+        let refs: Vec<&gaanim_api::canvas::DrawableHandle> = points.iter().collect();
+        let root = scene.group(&refs);
+        drop(scene);
+        Py::new(
+            py,
+            pyo3::pyclass_init::PyClassInitializer::from(PyDrawable(root)).add_subclass(
+                crate::slide_builds::PyBulletList {
+                    items: points,
+                    labels: items,
+                    scene: self.scene.clone_ref(py),
+                },
+            ),
+        )
     }
 
     /// Create a labeled bar chart for finite non-negative values.
@@ -7612,6 +7626,7 @@ impl PySlideKit {
     #[allow(clippy::too_many_arguments)]
     fn table(
         &self,
+        py: Python<'_>,
         headers: Vec<String>,
         rows: Vec<Vec<String>>,
         width: f64,
@@ -7619,7 +7634,7 @@ impl PySlideKit {
         header_background: Option<PyColor>,
         rule_color: Option<PyColor>,
         color: Option<PyColor>,
-    ) -> PyResult<PyDrawable> {
+    ) -> PyResult<Py<crate::slide_builds::PySlideTable>> {
         crate::custom::ensure_authoring_allowed()?;
         if headers.is_empty() || headers.iter().any(|header| header.trim().is_empty()) {
             return Err(pyo3::exceptions::PyValueError::new_err(
@@ -7679,24 +7694,57 @@ impl PySlideKit {
                     .stroke(rule_color, if row == 0 { 0.02 } else { 0.01 }),
             );
         }
-        for (column, header) in headers.iter().enumerate() {
-            let x = -width * 0.5 + cell_width * (column as f64 + 0.5);
-            members.push(
+        // The header and each data row are groups of their texts, drawn
+        // after the background and the rules as before.
+        let header_cells: Vec<_> = headers
+            .iter()
+            .enumerate()
+            .map(|(column, header)| {
+                let x = -width * 0.5 + cell_width * (column as f64 + 0.5);
                 scene
                     .text(header)
                     .fill(color)
-                    .move_to(x, top_y - row_height * 0.5),
-            );
-        }
+                    .move_to(x, top_y - row_height * 0.5)
+            })
+            .collect();
+        let header_refs: Vec<_> = header_cells.iter().collect();
+        let header = scene.group(&header_refs);
+        members.push(header.clone());
+        let mut cells = Vec::with_capacity(rows.len());
+        let mut row_groups = Vec::with_capacity(rows.len());
         for (row_index, row) in rows.iter().enumerate() {
             let y = top_y - row_height * (row_index as f64 + 1.5);
-            for (column, cell) in row.iter().enumerate() {
-                let x = -width * 0.5 + cell_width * (column as f64 + 0.5);
-                members.push(scene.text(cell).fill(color).move_to(x, y));
-            }
+            let row_cells: Vec<_> = row
+                .iter()
+                .enumerate()
+                .map(|(column, cell)| {
+                    let x = -width * 0.5 + cell_width * (column as f64 + 0.5);
+                    scene.text(cell).fill(color).move_to(x, y)
+                })
+                .collect();
+            let row_refs: Vec<_> = row_cells.iter().collect();
+            let group = scene.group(&row_refs);
+            members.push(group.clone());
+            row_groups.push(group);
+            cells.push(row_cells);
         }
         let refs: Vec<&gaanim_api::canvas::DrawableHandle> = members.iter().collect();
-        Ok(PyDrawable(scene.group(&refs)))
+        let root = scene.group(&refs);
+        drop(scene);
+        Py::new(
+            py,
+            pyo3::pyclass_init::PyClassInitializer::from(PyDrawable(root)).add_subclass(
+                crate::slide_builds::PySlideTable {
+                    header,
+                    header_cells,
+                    headers,
+                    rows: row_groups,
+                    cells,
+                    texts: rows,
+                    scene: self.scene.clone_ref(py),
+                },
+            ),
+        )
     }
 }
 

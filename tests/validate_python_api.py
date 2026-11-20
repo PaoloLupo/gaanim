@@ -492,6 +492,59 @@ def validate_stub_attribute_writability(module: object, tree: ast.Module) -> lis
     return failures
 
 
+def validate_slide_builds_contract(module: object) -> list[str]:
+    """Bullet lists and slide tables keep their parts and build one step each."""
+    failures: list[str] = []
+    scene = module.Scene(frame=(16, 9))
+    steps = scene.slides.bullets(["Measure", "Model", "Verify"], width=6)
+    table = scene.slides.table(["Case", "Load"], [["A", "12 kN"], ["B", "18 kN"]])
+    if not (isinstance(steps, module.BulletList) and isinstance(steps, module.Drawable)):
+        failures.append("SlideKit.bullets must return a BulletList Drawable")
+    if not (isinstance(table, module.SlideTable) and isinstance(table, module.Drawable)):
+        failures.append("SlideKit.table must return a SlideTable Drawable")
+    if len(steps.items) != 3 or not all(isinstance(item, module.Drawable) for item in steps.items):
+        failures.append(f"BulletList.items must give one Drawable per point: {steps.items!r}")
+    if table.shape != (2, 2):
+        failures.append(f"SlideTable.shape must count data rows only: {table.shape!r}")
+    parts = (
+        table.header, table.header_cell("Load"), table.row(0), table.row(-1),
+        table.cell(1, 1), table.cell(1, "Load"), *table.column("Case"),
+    )
+    if not all(isinstance(part, module.Drawable) for part in parts) or len(table.column(0)) != 2:
+        failures.append("SlideTable parts must be Drawables, columns without the header")
+    for call, error in (
+        (lambda: table.row(2), IndexError),
+        (lambda: table.cell(0, "Weight"), KeyError),
+        (lambda: table.cell(0, 1.5), TypeError),
+        (lambda: steps.build(dim=1.5), ValueError),
+        (lambda: steps.build(duration=0), ValueError),
+        (lambda: steps.build(names=["a", "b"]), ValueError),
+        (lambda: steps.build(names=["a", " ", "c"]), ValueError),
+        (lambda: table.build(by="cell"), ValueError),
+    ):
+        try:
+            call()
+        except error:
+            pass
+        else:
+            failures.append(f"slide builds accepted invalid input; expected {error.__name__}")
+    if scene.stops:
+        failures.append("a rejected build must not author stops")
+    long = scene.slides.bullets(["A point whose text runs well past forty characters"])
+    steps.build(dim=0.35)
+    table.build(by="row", stop=False)
+    table.build(by="column", names=["first", "second"])
+    long.build()
+    names = [stop.name for stop in scene.stops]
+    expected = ["Measure", "Model", "Verify", "first", "second", "A point whose text runs well past forty…"]
+    if names != expected:
+        failures.append(f"slide builds authored stops {names!r}, expected {expected!r}")
+    times = [stop.time for stop in scene.stops]
+    if times != sorted(times) or not math.isclose(times[0], 0.4, abs_tol=1e-6):
+        failures.append(f"each build step must play before its stop: {times!r}")
+    return failures
+
+
 def validate_editorial_contract(module: object) -> list[str]:
     """Exercise the editorial kit without starting the renderer."""
     failures: list[str] = []
@@ -4518,6 +4571,7 @@ def main() -> int:
     missing.extend(validate_fluent_setters_keep_their_class(module))
     missing.extend(validate_readout_number_formats(module))
     missing.extend(validate_editorial_contract(module))
+    missing.extend(validate_slide_builds_contract(module))
     missing.extend(validate_theme_typography_contract(module))
     missing.extend(validate_default_theme_contract(module, tree))
     missing.extend(validate_theme_colors_contract(module, tree))

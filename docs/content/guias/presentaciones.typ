@@ -70,6 +70,19 @@ Una presentación de Gaanim es una escena normal organizada así:
   diapositiva siguiente), se ve al avanzar.
 - `segment.bind(...)` rellena los huecos de la plantilla con tus objetos.
 
+Una lista o una tabla que se descubre punto a punto no necesita una pausa
+escrita a mano por punto: `build()` deja un paso por cada uno y, con `dim`,
+atenúa los ya dichos.
+
+```python
+>>>from gaanim import Scene
+>>>scene = Scene(frame=(16, 9))
+steps = scene.slides.bullets(["Medir", "Modelar", "Verificar"], width=6)
+steps.build(dim=0.35)    # tres pasos: «Medir», «Modelar» y «Verificar»
+```
+
+Ver #link("/referencia/diapositivas/#listas-por-pasos")[Partes y pasos].
+
 == Una cámara por diapositiva <camara-por-diapositiva>
 
 En una diapositiva 3D la cámara es parte de la diapositiva: la siguiente,

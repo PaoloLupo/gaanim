@@ -798,11 +798,11 @@ allow = ["titles"]
 
 [[example]]
 path = "slides/editorial_components.py"
-description = "Badges and chips in every appearance and variant, cards, bullet lists and callouts that point at objects."
+description = "Badges and chips in every appearance and variant, cards, bullet lists revealed point by point and callouts that point at objects."
 
 [[example]]
 path = "slides/tables.py"
-description = "Slide tables with their widths, row heights and alignment, and data tables built from layout rows whose cells, rows and columns animate."
+description = "Slide tables with their widths, row heights and alignment, built row by row or column by column, and data tables built from layout rows whose cells, rows and columns animate."
 
 [[example]]
 path = "slides/branding.py"
