@@ -1143,7 +1143,6 @@ pub fn export_dialog_system(
                         config.fit = output_fit;
                         config.aspect_ratio = AspectRatioPreset::Custom;
                         config.video_encoder = video_encoder;
-                        config.headless = true;
                         config.telemetry = Some(telemetry.clone());
                         match (bundle_source, canvas) {
                             (Some(bundle), _) => {

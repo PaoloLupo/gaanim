@@ -3,7 +3,7 @@ pub use crate::clip::{
     AnimationSpec, Clip, ClipId, ClipPayload, PropertyLensSpec, SceneId, Track, TrackId,
 };
 pub use crate::scene::{CameraState, SceneMember, SceneMetadata};
-pub use crate::snapshot::{SnapshotDiff, WorldSnapshot};
+pub use crate::snapshot::WorldSnapshot;
 pub use crate::timeline::{
     PlaybackStopPolicy, SegmentMetadata, SegmentPosition, SegmentStop, Timeline,
 };
