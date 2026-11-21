@@ -905,6 +905,13 @@ fn compile_tracking_endpoint(
         CanvasEndpoint::Screen(point) => {
             TrackingEndpoint::Screen(Box::new(compile_tracking_endpoint(point, id_map, states)))
         }
+        CanvasEndpoint::Construction { kind, inputs } => TrackingEndpoint::Construction {
+            kind: *kind,
+            inputs: inputs
+                .iter()
+                .map(|input| compile_tracking_endpoint(input, id_map, states))
+                .collect(),
+        },
     }
 }
 
@@ -3028,6 +3035,7 @@ impl SceneModel {
             *metadata = compiled;
         }
         timeline.set_segments(segment_metadata.clone());
+        timeline.backup_segments = self.backup_segment_ids();
         timeline.talk_target = self.talk_target;
         timeline.beat_grid = self.tempo;
         timeline.set_markers(
@@ -3792,6 +3800,25 @@ impl SceneModel {
             ..self.lighting_3d
         });
         builder.commands.insert_resource(self.transparency_3d);
+        // Linked drawables carry their link, once every drawable is spawned.
+        // A drawable compiles under its actual id, which `id_map` names.
+        let links: Vec<_> = self
+            .resolved_links()
+            .into_iter()
+            .map(|(id, target)| (id_map.get(&id).copied().unwrap_or(id), target))
+            .collect();
+        if !links.is_empty() {
+            builder.commands.queue(move |world: &mut World| {
+                let entities = gaanim_scene::ObjectEntities::of(world);
+                for (id, target) in links {
+                    if let Some(&entity) = entities.get(&id) {
+                        world
+                            .entity_mut(entity)
+                            .insert(gaanim_scene::links::Hyperlink(target));
+                    }
+                }
+            });
+        }
         Compiled {
             checkpoint,
             ids: id_map,
@@ -7577,6 +7604,43 @@ impl SceneModel {
                     }
                 }
 
+                Op::AttachTrackingCircle {
+                    target,
+                    center,
+                    radius,
+                } => {
+                    if let Some(target_id) = id_map.get(target).copied()
+                        && let Some(st) = builder.states.get(target_id)
+                    {
+                        let radius = match radius {
+                            super::ops::CanvasRadius::Fixed(radius) => {
+                                gaanim_animation::updaters::TrackingRadius::Fixed(*radius)
+                            }
+                            super::ops::CanvasRadius::Through(point) => {
+                                gaanim_animation::updaters::TrackingRadius::Through(
+                                    compile_tracking_endpoint(point, id_map, &builder.states),
+                                )
+                            }
+                        };
+                        let circle = gaanim_animation::updaters::TrackingCircle {
+                            center: compile_tracking_endpoint(center, id_map, &builder.states),
+                            radius,
+                        };
+                        builder.commands.entity(st.entity).insert(circle);
+                    }
+                }
+
+                Op::HideUnresolved { target } => {
+                    if let Some(target_id) = id_map.get(target).copied()
+                        && let Some(st) = builder.states.get(target_id)
+                    {
+                        builder
+                            .commands
+                            .entity(st.entity)
+                            .insert(gaanim_animation::updaters::HideUnresolved);
+                    }
+                }
+
                 Op::AttachTrackingLine3D { target, from, to } => {
                     if let Some(target_id) = id_map.get(target).copied()
                         && let Some(st) = builder.states.get(target_id)
@@ -9654,6 +9718,7 @@ impl SceneModel {
             }
             CanvasEndpoint::Between { from, to, .. } => built_on(from) || built_on(to),
             CanvasEndpoint::Rim { object, toward, .. } => moved(object) || built_on(toward),
+            CanvasEndpoint::Construction { inputs, .. } => inputs.iter().any(built_on),
             _ => false,
         }
     }
@@ -9774,6 +9839,14 @@ impl SceneModel {
                 let runtime = *id_map.get(object)?;
                 let matrix = builder.get_world_transform(runtime).to_mat4();
                 Some((authored_media_point(builder, runtime, *x, *y)?, matrix))
+            }
+            CanvasEndpoint::Construction { kind, inputs } => {
+                let points = inputs
+                    .iter()
+                    .map(|input| point(input).map(|(point, _)| point.truncate()))
+                    .collect::<Option<Vec<_>>>()?;
+                kind.solve(&points)
+                    .map(|point| (point.extend(0.0), DMat4::IDENTITY))
             }
             _ => None,
         }

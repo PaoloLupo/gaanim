@@ -133,6 +133,9 @@ pub fn timeline_playback_system(
         playback_state.scaled_dt = scaled_dt;
         playback_state.updaters_current = false;
     }
+    if timeline.visit.is_some() {
+        timeline.drop_stale_visit();
+    }
     if timeline.is_playing && timeline.seek_request.is_none() {
         let delta = scaled_dt;
         let next_time = timeline.current_time + delta;
@@ -155,6 +158,14 @@ pub fn timeline_playback_system(
             });
         } else if let Some(stop) = hit_stop {
             timeline.rest_at(stop);
+        } else if timeline.presenting
+            && (timeline.visit.is_some() || !timeline.backup_segments.is_empty())
+        {
+            // A presentation passes over backup segments and keeps a link's
+            // visit inside its segment, ahead of any preview loop.
+            let (target, keep_playing) = timeline.selected_playback_step(current, next_time);
+            timeline.seek_request = Some(target);
+            timeline.is_playing = keep_playing;
         } else if let Some((start, end)) = timeline.loop_range {
             if next_time >= end {
                 // Loop back around
@@ -164,7 +175,7 @@ pub fn timeline_playback_system(
             } else {
                 timeline.seek_request = Some(next_time);
             }
-        } else if !timeline.play_ranges.is_empty() {
+        } else if timeline.has_play_limits() {
             let (target, keep_playing) = timeline.selected_playback_step(current, next_time);
             timeline.seek_request = Some(target);
             timeline.is_playing = keep_playing;

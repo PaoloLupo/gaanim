@@ -70,6 +70,19 @@ Una presentación de Gaanim es una escena normal organizada así:
   diapositiva siguiente), se ve al avanzar.
 - `segment.bind(...)` rellena los huecos de la plantilla con tus objetos.
 
+Una lista o una tabla que se descubre punto a punto no necesita una pausa
+escrita a mano por punto: `build()` deja un paso por cada uno y, con `dim`,
+atenúa los ya dichos.
+
+```python
+>>>from gaanim import Scene
+>>>scene = Scene(frame=(16, 9))
+steps = scene.slides.bullets(["Medir", "Modelar", "Verificar"], width=6)
+steps.build(dim=0.35)    # tres pasos: «Medir», «Modelar» y «Verificar»
+```
+
+Ver #link("/referencia/diapositivas/#listas-por-pasos")[Partes y pasos].
+
 == Una cámara por diapositiva <camara-por-diapositiva>
 
 En una diapositiva 3D la cámara es parte de la diapositiva: la siguiente,
@@ -383,6 +396,45 @@ y solo lo envía en la cabecera de la conexión cifrada con Zoom. Si crees que
 se filtró, genera otra clave en Zoom Platform Studio: la anterior deja de
 valer.
 
+== Enlaces y diapositivas de respaldo <enlaces>
+
+Una charla no siempre va en línea recta: un clic en un objeto puede saltar a
+otra diapositiva o abrir una página web, y las diapositivas de respaldo
+(apéndices, preguntas que esperas) quedan fuera del recorrido hasta que un
+enlace las visita.
+
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9), theme="presentation")
+scene.segment("Resultados")
+detalle = scene.slides.card("Detalle del ensayo", "Clic para ver el protocolo.")
+articulo = scene.slides.card("Artículo", "Abre doi.org en el navegador.")
+scene.stop("tarjetas")
+respaldo = scene.segment("Protocolo", skip=True)    # fuera del avance lineal
+detalle.link_to(respaldo)                           # clic: salta y luego vuelve
+articulo.link_to("https://doi.org/10.1000/182")     # clic: abre el navegador
+scene.wait(0.5)
+```
+
+- `scene.segment(..., skip=True)` crea una diapositiva de respaldo. Al
+  presentar, `→`, `←` y la reproducción pasan de largo; la vista previa, los
+  vídeos y el PDF la mantienen en su sitio.
+- `drawable.link_to(segmento)` hace que un clic en el objeto, al presentar,
+  reproduzca ese segmento desde su inicio en lugar de avanzar. Al llegar a su
+  final, `→` vuelve al paso desde el que hiciste clic, y `←` al principio del
+  segmento también vuelve. Saltar a otra parte desde la vista general termina
+  la visita.
+- `drawable.link_to("https://...")` abre la dirección en el navegador (también
+  `mailto:`). Una cadena sin esquema es el nombre de un segmento, que se busca
+  al construir la escena; `gaanim check` avisa si no existe.
+- Sobre un objeto enlazado el cursor se convierte en una mano. Los enlaces
+  funcionan igual al presentar un paquete `.gaanim`, que guarda dónde está
+  cada uno en cada pausa, y el PDF de diapositivas los conserva: los internos
+  llevan a la primera página del segmento y los externos a la dirección. Los
+  vídeos los ignoran.
+
+El ejemplo `examples/slides/links.py` reúne las tres formas.
+
 = Comprobar y presentar
 
 ```bash
@@ -417,6 +469,32 @@ La reproducción y la navegación solo visitan lo elegido; al terminar un tramo
 se salta al siguiente. Con `gaanim --diff ... --capture-stops` las mismas
 opciones limitan las pausas capturadas (ver
 #link("/guias/capturas-y-comparacion/")[Capturas y comparación visual]).
+
+== Modo quiosco <modo-quiosco>
+
+Para dejar la charla corriendo sola en un stand, un pasillo o la pantalla de
+una sala, dile cuánto esperar en cada pausa y que vuelva a empezar al
+terminar:
+
+```bash
+gaanim --present --auto 8s --loop mi-charla
+gaanim --present --auto 8s --loop mi-charla.gaanim
+```
+
+- `--auto` espera ese tiempo en cada `scene.stop()` y sigue: `8s`, `8`
+  (segundos), `1m30s` o `0:45`. Una pausa con bucle (`loop=`) lo reproduce
+  mientras espera, y una pausa que espera votos sigue igual cuando acaba el
+  tiempo.
+- `--loop` vuelve al principio al llegar al final, tras la misma espera. Solo,
+  sin `--auto`, las pausas siguen esperando a que alguien avance.
+- Cualquier tecla o clic reinicia la espera: quien se acerca puede ir hacia
+  atrás con `←` o adelante con `→` y, cuando se va, la charla sigue sola tras
+  la espera.
+- En quiosco no se abre Presenter View, no aparece la barra de la audiencia y
+  el cursor se oculta. `Esc` sale de la presentación, como siempre.
+- Una charla con toma en vivo grabada (`scene.live_take()`) ya cambia sus
+  pausas por las esperas de la toma: con `--loop` basta para dejarla en
+  bucle.
 
 = La vista del presentador
 
@@ -564,9 +642,36 @@ reproducción y el vídeo exportado siguen tu ritmo (ver
   [`O`], [vista general: busca por nombre de diapositiva, paso o notas; `Enter` salta a la primera coincidencia],
   [`T`], [mostrar el tramo que toca decir como subtítulo en el prompter, o volver a las notas de la diapositiva; en el editor, `Shift+T` abre o cierra el subtítulo del prompter],
   [`B` / `W`], [poner la pantalla de la audiencia en negro o en blanco],
+  [`L`], [puntero láser: una pulsación lo deja encendido hasta la siguiente; mantenida, se ve mientras dura (ver #link(<senalar-y-dibujar>)[Señalar y dibujar])],
+  [`D` / `C`], [rotulador para dibujar sobre la diapositiva; borrar lo dibujado],
+  [`Z`], [ampliar la diapositiva alrededor del cursor; la rueda acerca o aleja],
   [`P`], [volver a abrir la vista del presentador si la cerraste],
-  [`Esc`], [cerrar la vista general o el negro/blanco; después, salir del modo presentación],
+  [`Esc`], [cerrar la vista general o el negro/blanco; después, apagar el láser, el rotulador y el zoom; después, salir del modo presentación],
 )
+
+== Señalar y dibujar <senalar-y-dibujar>
+
+Mientras presentas puedes señalar, dibujar y ampliar sobre la diapositiva sin
+tocar la escena. Funcionan desde la pantalla de la audiencia y desde la vista
+grande de *Now on screen* en Presenter View: lo que haces en una se ve en la
+otra.
+
+- `L` enciende el puntero láser, un punto rojo que sigue al ratón y ocupa el
+  lugar del cursor. Una pulsación corta lo deja encendido hasta volver a
+  pulsar; mantenida, se apaga al soltarla.
+- `D` activa el rotulador: arrastra para dibujar. Mientras está activo, un clic
+  en la diapositiva dibuja en lugar de avanzar. `C` borra los trazos, y pasar a
+  otro paso también los borra.
+- `Z` amplía la diapositiva al doble alrededor del cursor, que sigue al
+  moverlo, y la rueda acerca o aleja (de 1,25× a 6×). Desde un script, la
+  escena se vuelve a dibujar a ese tamaño, así que el texto sigue nítido; un
+  paquete `.gaanim` amplía los fotogramas que grabó. Mientras dibujas, el zoom
+  se queda quieto.
+- Los trazos se guardan en coordenadas de la diapositiva: se quedan sobre lo
+  que marcan si cambia el tamaño de la ventana o el zoom.
+- Nada de esto aparece en las exportaciones, las capturas ni las miniaturas.
+  Funciona igual al presentar un paquete `.gaanim` y entre las dos páginas del
+  reproductor web.
 
 Saltar a una diapositiva muestra su estado inicial aunque la anterior termine
 con una pausa en el mismo instante.
@@ -614,6 +719,15 @@ sus notas, donde cada `[stop]` se imprime como una flecha (`→ grafico`).
 
 ```bash
 gaanim export mi-charla --output mi-charla.pdf --notes
+```
+
+Para un resumen sin pasos repetidos, `--per-slide` deja una página por
+diapositiva. Para imprimir, `--handout 2x3` pone seis diapositivas por hoja A4
+y `--handout notes` una por hoja con sus notas debajo:
+
+```bash
+gaanim export mi-charla --output reparto.pdf --handout 2x3
+gaanim export mi-charla --output guion.pdf --handout notes
 ```
 
 También funciona con un paquete `.gaanim` y desde el diálogo *Export* del

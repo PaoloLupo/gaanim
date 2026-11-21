@@ -1526,3 +1526,41 @@ fn grid_paths_read_back_on_their_grid() {
         }
     }
 }
+
+#[test]
+fn links_and_backup_segments_round_trip() {
+    use gaanim_scene::links::{LinkTarget, LinkZone};
+    let record = |scene: SceneData| {
+        let mut writer = BundleWriter::new(std::io::Cursor::new(Vec::new()), "test");
+        writer.push_frame(&frame(0.0), [0; 32]).unwrap();
+        let bytes = writer.finish(&scene).unwrap().into_inner();
+        Bundle::from_bytes(bytes.into()).unwrap()
+    };
+    let zones = vec![
+        LinkZone {
+            target: LinkTarget::Segment(3),
+            rect: [0.1, 0.2, 0.3, 0.4],
+        },
+        LinkZone {
+            target: LinkTarget::Url("https://doi.org/10.1000/1".into()),
+            rect: [0.5, 0.5, 0.9, 0.6],
+        },
+    ];
+    let bundle = record(SceneData {
+        fps: 60,
+        duration: 1.0 / 60.0,
+        backup_segments: vec![3],
+        link_zones: vec![(0.0, zones.clone())],
+        ..Default::default()
+    });
+    assert!(bundle.manifest.entries.contains_key(LINKS));
+    assert_eq!(bundle.scene.backup_segments, [3]);
+    assert_eq!(bundle.scene.link_zones, [(0.0, zones)]);
+    // A scene without links writes no entry, as bundles did before.
+    let bundle = record(SceneData {
+        fps: 60,
+        duration: 1.0 / 60.0,
+        ..Default::default()
+    });
+    assert!(!bundle.manifest.entries.contains_key(LINKS));
+}

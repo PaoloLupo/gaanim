@@ -1045,6 +1045,12 @@ pub enum TrackingEndpoint {
     /// units a HUD drawable is placed in (see
     /// [`gaanim_math::Camera::hud_point`]).
     Screen(Box<TrackingEndpoint>),
+    /// A point constructed from other endpoints, as with ruler and compass
+    /// (see [`gaanim_math::Construction`]); unresolved where it has none.
+    Construction {
+        kind: gaanim_math::Construction,
+        inputs: Vec<TrackingEndpoint>,
+    },
 }
 
 impl TrackingEndpoint {
@@ -1055,6 +1061,7 @@ impl TrackingEndpoint {
             Self::Offset { origin, .. } | Self::Polar { origin, .. } => origin.reads_the_screen(),
             Self::Between { from, to, .. } => from.reads_the_screen() || to.reads_the_screen(),
             Self::Rim { toward, .. } => toward.reads_the_screen(),
+            Self::Construction { inputs, .. } => inputs.iter().any(Self::reads_the_screen),
             _ => false,
         }
     }
@@ -1748,6 +1755,27 @@ pub struct TrackingLine {
     pub dashes: Option<(f64, f64)>,
 }
 
+/// A circle around a reactive center: of a fixed radius, or through
+/// another reactive point.
+#[derive(Component)]
+pub struct TrackingCircle {
+    pub center: TrackingEndpoint,
+    pub radius: TrackingRadius,
+}
+
+/// The radius of a [`TrackingCircle`].
+pub enum TrackingRadius {
+    Fixed(f64),
+    /// The distance from the center to this point.
+    Through(TrackingEndpoint),
+}
+
+/// A reactive line or circle drawn empty while its endpoints have no
+/// position, as a construction with no answer (lines that never cross),
+/// instead of staying where it was last.
+#[derive(Component, Debug, Clone, Copy, Default)]
+pub struct HideUnresolved;
+
 /// Filled arrow following a polyline of reactive world-space endpoints.
 #[derive(Component)]
 pub struct TrackingConnector {
@@ -2413,10 +2441,14 @@ pub fn tracking_line_system(world: &mut World) {
     resolve_layout_boxes(world, time);
     let mut updates = Vec::new();
 
-    let mut query = world.query::<(Entity, &TrackingLine)>();
-    for (entity, line) in query.iter(world) {
+    let mut query = world.query::<(Entity, &TrackingLine, bevy::prelude::Has<HideUnresolved>)>();
+    for (entity, line, hide) in query.iter(world) {
         let from_pos = resolve_tracking_endpoint(&line.from, world);
         let to_pos = resolve_tracking_endpoint(&line.to, world);
+        if hide && (from_pos.is_none() || to_pos.is_none()) {
+            updates.push((entity, BezPath::new()));
+            continue;
+        }
 
         if let (Some(from), Some(to)) = (from_pos, to_pos) {
             let inverse = entity_world_matrix(entity, world)
@@ -2439,6 +2471,36 @@ pub fn tracking_line_system(world: &mut World) {
             };
             updates.push((entity, path));
         }
+    }
+
+    let mut circles = world.query::<(Entity, &TrackingCircle)>();
+    for (entity, circle) in circles.iter(world) {
+        let center = resolve_tracking_endpoint(&circle.center, world);
+        let radius = match &circle.radius {
+            TrackingRadius::Fixed(radius) => Some(*radius),
+            TrackingRadius::Through(point) => center
+                .zip(resolve_tracking_endpoint(point, world))
+                .map(|(center, point)| center.truncate().distance(point.truncate())),
+        };
+        let path = match (center, radius) {
+            (Some(center), Some(radius)) if radius.is_finite() && radius > 0.0 => {
+                let matrix = entity_world_matrix(entity, world).unwrap_or(DMat4::IDENTITY);
+                let inverse = matrix.inverse();
+                let local = inverse.transform_point3(center);
+                // The radius in the drawable's own units, for a scaled one.
+                let scale = inverse.transform_vector3(DVec3::X).truncate().length();
+                if local.is_finite() && scale.is_finite() {
+                    gaanim_core::kurbo::Shape::to_path(
+                        &gaanim_core::kurbo::Circle::new((local.x, local.y), radius * scale),
+                        1e-3,
+                    )
+                } else {
+                    BezPath::new()
+                }
+            }
+            _ => BezPath::new(),
+        };
+        updates.push((entity, path));
     }
 
     let mut connectors = world.query::<(Entity, &TrackingConnector)>();
@@ -2640,6 +2702,13 @@ pub fn resolve_tracking_endpoint(ep: &TrackingEndpoint, world: &World) -> Option
                 .map(|resolved| resolved.camera)
                 .or_else(|| world.get_resource::<gaanim_math::Camera>().copied())?;
             Some(camera.hud_point(point).extend(0.0))
+        }
+        TrackingEndpoint::Construction { kind, inputs } => {
+            let points = inputs
+                .iter()
+                .map(|input| resolve_tracking_endpoint(input, world).map(|point| point.truncate()))
+                .collect::<Option<Vec<_>>>()?;
+            kind.solve(&points).map(|point| point.extend(0.0))
         }
     }
 }

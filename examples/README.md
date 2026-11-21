@@ -52,6 +52,7 @@ Geometry primitives, curves, arrows, strokes, boolean operations and clipping.
 
 | Example | Description |
 | --- | --- |
+| [Constructions](shapes/constructions.py) | Ruler-and-compass constructions that follow their points: perpendicular bisectors and the circle through three points, angle bisectors and the incircle, and tangents from a point that hide inside the circle. |
 | [Primitives](shapes/primitives.py) | Every closed shape, line, arc, polyline and diagram mark that scene.geometry draws. |
 | [Curves](shapes/curves.py) | Quadratic and cubic Bézier curves with their handles, composed curve commands and parametric polylines, one redrawn every frame. |
 | [Arrows](shapes/arrows.py) | Straight, double and curved arrows with their sizes, grow_arrow against create, tips on any stroke and connectors that follow moving boxes. |
@@ -259,6 +260,7 @@ Axes, plots, charts, vector fields and live readouts.
 
 | Example | Description |
 | --- | --- |
+| [Data structures](visualization/data_structures.py) | An array sorted by bubble sort with indices and pointers, a stack and a queue that push, pop, enqueue and dequeue, and a linked list that inserts and removes nodes. |
 | [Axes](visualization/axes.py) | Linear, log, symlog, power, category and time axes, tick steps, number formats, styles, titles and crossings. |
 | [Coordinate spaces](visualization/coordinate_spaces.py) | Cartesian, polar and complex planes, number lines, grids and numbers, coordinates that place objects and animated views. |
 | [Maps](visualization/maps.py) | Mercator and equirectangular maps, labeled graticules, countries from a GeoJSON file, lines, places, and polygons with holes and islands that the frame clips. |
@@ -331,11 +333,12 @@ Presentations: slides, editorial components, sections and tables.
 
 | Example | Description |
 | --- | --- |
-| [Slides](slides/slides.py) | A short deck of segments with slide templates, steps that stop, speaker notes, transitions and a looping stop. |
+| [Slides](slides/slides.py) | A short deck of segments with slide templates, steps that stop, speaker notes, transitions and a looping stop; it also runs as a kiosk and prints as a handout. |
 | [Sections](slides/sections.py) | Agendas in every layout and marker, progress rails in rows and columns with captions, and sections of slides that move them. |
 | [Editorial titles](slides/editorial_titles.py) | Title cards, section headers, banners and lower thirds with their alignments, widths, variants and appearances. |
-| [Editorial components](slides/editorial_components.py) | Badges and chips in every appearance and variant, cards, bullet lists and callouts that point at objects. |
-| [Tables](slides/tables.py) | Slide tables with their widths, row heights and alignment, and data tables built from layout rows whose cells, rows and columns animate. |
+| [Editorial components](slides/editorial_components.py) | Badges and chips in every appearance and variant, cards, bullet lists revealed point by point and callouts that point at objects. |
+| [Tables](slides/tables.py) | Slide tables with their widths, row heights and alignment, built row by row or column by column, and data tables built from layout rows whose cells, rows and columns animate. |
+| [Links](slides/links.py) | Cards that jump to a backup slide the presentation otherwise skips, or open a web address, when clicked while presenting. |
 | [Branding](slides/branding.py) | A deck theme derived from presentation, with a logo, footer and slide number placed on every slide but the cover. |
 
 ## Live audience

@@ -2792,3 +2792,90 @@ fn a_poll_takes_votes_inside_its_window() {
     assert_eq!(timeline.game_stage(6.5), GameStage::Podium);
     assert_eq!(timeline.game_stage(9.0), GameStage::Podium);
 }
+
+fn deck_with_backup() -> Timeline {
+    let segment = |id, name: &str, start, end, stops: &[f64]| SegmentMetadata {
+        id,
+        name: name.into(),
+        notes: None,
+        target: None,
+        start_time: start,
+        end_time: end,
+        stops: stops
+            .iter()
+            .map(|time| SegmentStop {
+                name: None,
+                time: *time,
+                ambient: None,
+            })
+            .collect(),
+    };
+    let mut timeline = Timeline::default();
+    timeline.cached_duration = 9.0;
+    timeline.set_segments(vec![
+        segment(0, "Intro", 0.0, 3.0, &[1.0, 3.0]),
+        segment(1, "Backup", 3.0, 6.0, &[4.0, 6.0]),
+        segment(2, "Close", 6.0, 9.0, &[7.0]),
+    ]);
+    timeline.backup_segments = vec![1];
+    timeline
+}
+
+#[test]
+fn a_presentation_passes_over_backup_segments() {
+    let mut timeline = deck_with_backup();
+    // Outside a presentation, backups are ordinary segments.
+    assert_eq!(timeline.next_stop(3.0), Some(4.0));
+    timeline.presenting = true;
+    assert_eq!(timeline.playable_ranges(), [(0.0, 3.0), (6.0, 9.0)]);
+    assert_eq!(timeline.next_stop(3.0), Some(7.0));
+    assert_eq!(timeline.previous_stop(7.0), Some(3.0));
+    // Playback from the end of Intro jumps over the backup.
+    assert_eq!(timeline.selected_playback_step(3.0, 3.1), (6.0, true));
+    assert_eq!(timeline.playback_end(), 9.0);
+}
+
+#[test]
+fn a_link_visits_a_backup_and_returns_to_where_it_was_followed() {
+    let mut timeline = deck_with_backup();
+    timeline.presenting = true;
+    timeline.current_time = 1.0;
+    assert!(timeline.visit_segment(1));
+    assert_eq!(timeline.seek_request, Some(3.0));
+    assert!(timeline.is_playing);
+    timeline.seek_request = None;
+    timeline.current_time = 3.0;
+    // Inside the visit, its stops are the steps and playback stays in it.
+    assert_eq!(timeline.next_stop(3.0), Some(4.0));
+    assert_eq!(timeline.selected_playback_step(5.9, 6.2), (6.0, false));
+    // At its end, "next" returns to the step the link was followed from.
+    timeline.current_time = 6.0;
+    timeline.is_playing = false;
+    timeline.advance();
+    assert_eq!(timeline.visit, None);
+    assert_eq!(timeline.seek_request, Some(1.0));
+
+    // Back steps through its stops, and back from its first one returns.
+    timeline.seek_request = None;
+    timeline.current_time = 1.0;
+    timeline.visit_segment(1);
+    timeline.seek_request = None;
+    timeline.current_time = 6.0;
+    timeline.is_playing = false;
+    timeline.go_back();
+    assert_eq!(timeline.seek_request, Some(4.0));
+    assert!(timeline.visit.is_some());
+    timeline.seek_request = None;
+    timeline.current_time = 4.0;
+    timeline.go_back();
+    assert_eq!(timeline.visit, None);
+    assert_eq!(timeline.seek_request, Some(1.0));
+    // A jump elsewhere ends a visit.
+    timeline.seek_request = None;
+    timeline.visit_segment(1);
+    timeline.seek_request = None;
+    timeline.current_time = 8.0;
+    timeline.drop_stale_visit();
+    assert_eq!(timeline.visit, None);
+    assert!(!timeline.visit_segment(42));
+}

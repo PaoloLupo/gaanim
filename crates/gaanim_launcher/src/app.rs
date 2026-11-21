@@ -76,6 +76,7 @@ pub fn run() {
         monitor: launch.monitor,
         selection: launch.selection.clone(),
         duration: launch.duration,
+        kiosk: launch.kiosk,
         ..Default::default()
     });
     crate::startup::mark("app setup");
@@ -283,12 +284,13 @@ fn dispatch_export_mode() -> bool {
             || command.to.is_some()
             || !command.frames.is_empty()
             || command.transparent
-            || command.notes
+            || command.deck != Default::default()
+            || command.paper_given
             || command.encoder != VideoEncoder::Auto
         {
             console::error(
                 "export",
-                "a playback bundle records the whole scene; --from, --to, --frame, --transparent, --notes and --encoder do not apply",
+                "a playback bundle records the whole scene; --from, --to, --frame, --transparent, --notes, --per-slide, --handout, --paper and --encoder do not apply",
             );
             std::process::exit(2);
         }
@@ -380,7 +382,7 @@ fn dispatch_export_mode() -> bool {
         fps: command.fps,
         from: command.from,
         to: command.to,
-        notes: false,
+        deck: Default::default(),
     }) {
         console::error("export", error);
         std::process::exit(1);
@@ -600,14 +602,15 @@ struct ExportWorkerArgs {
     /// `None` means the scene start/end.
     from: Option<ExportBound>,
     to: Option<ExportBound>,
-    /// A PDF deck prints each slide's speaker notes.
-    notes: bool,
+    /// How a PDF deck is printed (`--notes`, `--per-slide`, `--handout`,
+    /// `--paper`).
+    deck: gaanim_export::deck::DeckLayout,
 }
 
 fn parse_export_worker_args(args: &[String]) -> Result<ExportWorkerArgs, String> {
     if args.len() < 4 {
         return Err(
-            "expected: --export-worker <script.py> <output> <draft|standard|production> <mp4|webm|mov|webp|gif|png|gaanim|pdf> [--encoder auto|libx264|nvenc|amf|qsv|vaapi] [--transparent] [--fps <rate>] [--notes]"
+            "expected: --export-worker <script.py> <output> <draft|standard|production> <mp4|webm|mov|webp|gif|png|gaanim|pdf> [--encoder auto|libx264|nvenc|amf|qsv|vaapi] [--transparent] [--fps <rate>] [--notes] [--per-slide] [--handout <CxR|notes>] [--paper a4|letter]"
                 .to_string(),
         );
     }
@@ -625,12 +628,27 @@ fn parse_export_worker_args(args: &[String]) -> Result<ExportWorkerArgs, String>
     let mut fps = None;
     let mut from = None;
     let mut to = None;
-    let mut notes = false;
+    let mut deck = gaanim_export::deck::DeckLayout::default();
     let mut index = 4;
     while index < args.len() {
         match args[index].as_str() {
             "--transparent" => transparent = true,
-            "--notes" => notes = true,
+            "--notes" => deck.notes = true,
+            "--per-slide" => deck.per_slide = true,
+            "--handout" => {
+                index += 1;
+                let value = args
+                    .get(index)
+                    .ok_or_else(|| "--handout requires a value".to_string())?;
+                deck.handout = Some(gaanim_export::deck::Handout::parse(value)?);
+            }
+            "--paper" => {
+                index += 1;
+                let value = args
+                    .get(index)
+                    .ok_or_else(|| "--paper requires a value".to_string())?;
+                deck.paper = gaanim_export::deck::Paper::parse(value)?;
+            }
             "--fps" => {
                 index += 1;
                 let value = args
@@ -702,7 +720,7 @@ fn parse_export_worker_args(args: &[String]) -> Result<ExportWorkerArgs, String>
         fps,
         from,
         to,
-        notes,
+        deck,
     })
 }
 
@@ -731,7 +749,7 @@ fn run_export_worker(worker: ExportWorkerArgs) -> Result<(), String> {
             width: worker.width,
             height: worker.height,
             fit: worker.fit,
-            notes: worker.notes,
+            deck: worker.deck,
             ..Default::default()
         };
         return gaanim_editor::cli::export_slides_pdf(
@@ -1437,6 +1455,7 @@ fn presentation_preflight(
             .map(|(_, message)| format!("layout: {message}")),
     );
     report.warnings.extend(canvas.script_warnings());
+    report.warnings.extend(canvas.link_problems());
 
     if manifest.segments.is_empty() {
         report
@@ -1503,6 +1522,7 @@ fn scene_preflight(canvas: &gaanim_api::canvas::SceneModel, source: &str) -> Pre
     report.warnings.extend(canvas.launched_past_end_warning());
     report.warnings.extend(canvas.measurement_warning());
     report.warnings.extend(canvas.rest_warnings());
+    report.warnings.extend(canvas.link_problems());
     report.warnings.extend(
         canvas
             .compiled_layout_diagnostics()
@@ -1625,6 +1645,8 @@ struct LaunchArgs {
     /// Planned length of the talk (`--duration`), which Presenter View
     /// counts down.
     duration: Option<std::time::Duration>,
+    /// Run the presentation by itself (`--auto`, `--loop`).
+    kiosk: gaanim_editor::Kiosk,
     /// Where editors control the preview (`--listen`).
     listen: Option<crate::control::ListenAddress>,
 }
@@ -1672,6 +1694,7 @@ fn parse_args() -> LaunchArgs {
             monitor: None,
             selection: Default::default(),
             duration: None,
+            kiosk: Default::default(),
             listen: None,
         };
     }
@@ -1744,6 +1767,7 @@ fn parse_launch_args(args: &[String]) -> Result<LaunchArgs, String> {
     let mut present = false;
     let mut monitor = None;
     let mut duration = None;
+    let mut kiosk = gaanim_editor::Kiosk::default();
     let mut listen = None;
     let mut selection = gaanim_timeline::selection::SegmentSelection::default();
     let mut index = 0;
@@ -1753,6 +1777,14 @@ fn parse_launch_args(args: &[String]) -> Result<LaunchArgs, String> {
         index += 1;
         match arg.as_str() {
             "--present" => present = true,
+            "--loop" => kiosk.looping = true,
+            "--auto" => {
+                let value = args
+                    .get(index)
+                    .ok_or_else(|| "--auto requires a wait at each stop, e.g. 8s".to_string())?;
+                index += 1;
+                kiosk.auto = Some(gaanim_editor::parse_auto_wait(value)?);
+            }
             "--sections" | "--from" => {
                 let value = args
                     .get(index)
@@ -1799,6 +1831,12 @@ fn parse_launch_args(args: &[String]) -> Result<LaunchArgs, String> {
     if monitor.is_some() && !present {
         return Err("--monitor requires --present".to_string());
     }
+    if kiosk.auto.is_some() && !present {
+        return Err("--auto requires --present".to_string());
+    }
+    if kiosk.looping && !present {
+        return Err("--loop requires --present".to_string());
+    }
     if present && script_path.is_none() {
         return Err("--present requires <SCRIPT_OR_PROJECT>".to_string());
     }
@@ -1819,6 +1857,7 @@ fn parse_launch_args(args: &[String]) -> Result<LaunchArgs, String> {
         monitor,
         selection,
         duration,
+        kiosk,
         listen,
     })
 }
@@ -1851,7 +1890,7 @@ mod tests {
                 fps: None,
                 from: None,
                 to: None,
-                notes: false,
+                deck: Default::default(),
             }
         );
         let range = [
@@ -1898,7 +1937,29 @@ mod tests {
         let deck = ["talk.py", "talk.pdf", "standard", "pdf", "--notes"].map(str::to_string);
         let deck = parse_export_worker_args(&deck).unwrap();
         assert_eq!(deck.format, "pdf");
-        assert!(deck.notes);
+        assert!(deck.deck.notes);
+        let handout = [
+            "talk.py",
+            "talk.pdf",
+            "standard",
+            "pdf",
+            "--per-slide",
+            "--handout",
+            "2x3",
+            "--paper",
+            "letter",
+        ]
+        .map(str::to_string);
+        let handout = parse_export_worker_args(&handout).unwrap().deck;
+        assert!(handout.per_slide);
+        assert_eq!(
+            handout.handout,
+            Some(gaanim_export::deck::Handout::Grid {
+                columns: 2,
+                rows: 3
+            })
+        );
+        assert_eq!(handout.paper, gaanim_export::deck::Paper::Letter);
         let prores = [
             "scene.py",
             "lower.mov",
@@ -1956,6 +2017,7 @@ mod tests {
                 monitor: Some(1),
                 selection: Default::default(),
                 duration: None,
+                kiosk: Default::default(),
                 listen: None,
             }
         );
@@ -2033,6 +2095,27 @@ mod tests {
     }
 
     #[test]
+    fn parses_kiosk_options() {
+        let args = ["talk", "--present", "--auto", "8s", "--loop"].map(str::to_string);
+        assert_eq!(
+            parse_launch_args(&args).unwrap().kiosk,
+            gaanim_editor::Kiosk {
+                auto: Some(std::time::Duration::from_secs(8)),
+                looping: true,
+            }
+        );
+        for args in [
+            &["talk", "--auto", "8s"][..],
+            &["talk", "--loop"],
+            &["talk", "--present", "--auto"],
+            &["talk", "--present", "--auto", "never"],
+        ] {
+            let args: Vec<String> = args.iter().map(|arg| arg.to_string()).collect();
+            assert!(parse_launch_args(&args).is_err(), "{args:?}");
+        }
+    }
+
+    #[test]
     fn rejects_monitor_without_presentation_mode() {
         let args = ["demo.py", "--monitor", "0"].map(str::to_string);
         assert!(parse_launch_args(&args).is_err());
@@ -2050,6 +2133,7 @@ mod tests {
                 monitor: None,
                 selection: Default::default(),
                 duration: None,
+                kiosk: Default::default(),
                 listen: None,
             }
         );

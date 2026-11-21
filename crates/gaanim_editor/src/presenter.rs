@@ -1,5 +1,8 @@
 //! Presenter view hosted in a second native window.
 
+pub(crate) mod ink;
+pub mod kiosk;
+pub(crate) mod links;
 mod mirror;
 pub(crate) mod pace;
 pub(crate) mod prompter;
@@ -564,12 +567,14 @@ fn apply_presenter_style(ctx: &egui::Context) {
 }
 
 /// Create the speaker-facing window only for `gaanim --present`.
+/// A kiosk (`--auto`, `--loop`) runs without one.
 pub(crate) fn spawn_presenter_window_system(
     presentation_mode: Res<PresentationMode>,
+    kiosk: Res<kiosk::Kiosk>,
     presenter_windows: Query<(), With<PresenterWindow>>,
     mut commands: Commands,
 ) {
-    if !presentation_mode.active || !presenter_windows.is_empty() {
+    if !presentation_mode.active || kiosk.active() || !presenter_windows.is_empty() {
         return;
     }
 
@@ -747,6 +752,12 @@ pub(crate) fn presentation_input_system(
     link: Option<ResMut<crate::presenter_link::PresenterLink>>,
     mut preferences: ResMut<PresenterPreferences>,
     mut commands: Commands,
+    (mut ink, time, current_links, frame): (
+        ResMut<ink::PresentationInk>,
+        Res<Time<bevy::time::Real>>,
+        Res<links::CurrentLinks>,
+        Res<crate::ViewportFrame>,
+    ),
 ) {
     if !presentation_mode.active {
         return;
@@ -802,6 +813,23 @@ pub(crate) fn presentation_input_system(
         if keys.just_pressed(KeyCode::KeyT) {
             preferences.prompter = !preferences.prompter;
         }
+        let now = time.elapsed_secs_f64();
+        if keys.just_pressed(KeyCode::KeyL) {
+            ink.press_laser(now);
+        }
+        if keys.just_released(KeyCode::KeyL) {
+            ink.release_laser(now);
+        }
+        if keys.just_pressed(KeyCode::KeyD) {
+            ink.toggle_pen();
+        }
+        if keys.just_pressed(KeyCode::KeyC) {
+            ink.clear();
+        }
+        if keys.just_pressed(KeyCode::KeyZ) {
+            let focus = ink.state.laser.unwrap_or([0.5, 0.5]);
+            ink.toggle_zoom(focus);
+        }
         if keys.just_pressed(KeyCode::KeyR) {
             match (polls, link) {
                 // The web player's Presenter View page: the audience page
@@ -820,8 +848,18 @@ pub(crate) fn presentation_input_system(
             }
         }
     }
-    if primary_focused && !pointer_captured && mouse.just_pressed(MouseButton::Left) {
-        actions.push(PresentationAction::Advance);
+    // With the pen, a click on the slide draws instead; on a link, it
+    // follows the link.
+    if primary_focused && !pointer_captured && !ink.pen && mouse.just_pressed(MouseButton::Left) {
+        let link = primary_window
+            .single()
+            .ok()
+            .and_then(|(window, _)| window.cursor_position())
+            .and_then(|cursor| links::link_under(&current_links, &frame, ink.state.zoom, cursor));
+        match link {
+            Some(link) => links::follow(link, &mut timeline),
+            None => actions.push(PresentationAction::Advance),
+        }
     }
 
     for action in actions {
@@ -1338,9 +1376,12 @@ const SHORTCUTS: &[(&str, &str)] = &[
     ("O", "Open or close the overview"),
     ("B  W", "Black or white audience screen"),
     ("Click", "Advance (on the audience screen)"),
+    ("L", "Laser pointer: tap to keep it on, hold to show it"),
+    ("D  C", "Draw on the slide; clear the drawing"),
+    ("Z", "Zoom around the cursor (scroll for more or less)"),
     ("P", "Reopen Presenter View"),
     ("R  R", "New game: erase every poll vote and player"),
-    ("Esc", "Close overview, clear blank, then exit"),
+    ("Esc", "Close overview, clear blank, tools, then exit"),
 ];
 
 fn show_shortcuts(ui: &mut egui::Ui) {
@@ -1391,6 +1432,7 @@ pub(crate) fn audience_playback_controls_system(
     mut audience_blank: ResMut<AudienceBlank>,
     mut overview: ResMut<PresenterOverviewState>,
     page: Option<Res<crate::host::WebPage>>,
+    kiosk: Res<kiosk::Kiosk>,
     (mut volume, audio_tracks, bundle): (
         ResMut<gaanim_media::PreviewVolume>,
         Option<Res<gaanim_media::PreviewAudioTracks>>,
@@ -1411,8 +1453,9 @@ pub(crate) fn audience_playback_controls_system(
             )
         })
         .unwrap_or((false, false));
+    // A kiosk's screen shows the slides alone.
     if !audience_controls_visible(
-        presentation_mode.active,
+        presentation_mode.active && !kiosk.active(),
         *audience_blank,
         audience_focused,
         audience_controls.pointer_over,
@@ -1568,6 +1611,13 @@ pub(crate) fn audience_playback_controls_system(
 /// Everything the cockpit shows for one frame, derived before any widgets run
 /// so panels never disagree about the current position.
 struct PresenterFrame {
+    /// The laser, strokes and zoom over the slide, and where the slide's
+    /// frame lies in the live preview (0 to 1 across it).
+    ink: ink::InkState,
+    ink_frame: egui::Rect,
+    /// A pointing or drawing tool is on.
+    ink_active: bool,
+    pen: bool,
     status: PlaybackStatus,
     slide: Option<SlideView>,
     next: Option<NextCue>,
@@ -1824,6 +1874,7 @@ fn show_now_panel(
     preview_height: Option<f32>,
     requested_seek: &mut Option<f64>,
     mirror_size: &mut Option<egui::Vec2>,
+    ink_pointer: &mut Option<ink::Pointer>,
 ) {
     section_label(ui, "NOW ON SCREEN");
     ui.add(
@@ -1853,7 +1904,7 @@ fn show_now_panel(
         .max(140.0);
     // The live mirror is drawn at the pixels the slide gets here.
     *mirror_size = Some(egui::vec2(ui.available_width(), height) * ui.ctx().pixels_per_point());
-    show_preview(
+    let response = show_preview(
         ui,
         &frame.current_preview,
         egui::vec2(ui.available_width(), height),
@@ -1863,8 +1914,39 @@ fn show_now_panel(
             playing: frame.status == PlaybackStatus::Playing,
             badge: None,
         },
-        egui::Sense::hover(),
+        if frame.ink_active {
+            egui::Sense::click_and_drag()
+        } else {
+            egui::Sense::hover()
+        },
     );
+    // The laser, the strokes and the zoom, over the slide as the audience
+    // sees it, and the pointer over it for the tools.
+    let aspect = frame.current_preview.aspect();
+    let width = response.rect.width().min(response.rect.height() * aspect);
+    let image =
+        egui::Rect::from_center_size(response.rect.center(), egui::vec2(width, width / aspect));
+    let slide_rect = egui::Rect::from_min_size(
+        image.min + frame.ink_frame.min.to_vec2() * image.size(),
+        frame.ink_frame.size() * image.size(),
+    );
+    if frame.blank == AudienceBlank::None {
+        ink::paint(ui.painter(), slide_rect, &frame.ink);
+    }
+    if frame.ink_active
+        && let Some(position) = response.hover_pos().or(response.interact_pointer_pos())
+        && slide_rect.contains(position)
+    {
+        if frame.pen {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
+        }
+        let shown = (position - slide_rect.min) / slide_rect.size();
+        *ink_pointer = Some(ink::Pointer {
+            shown: [shown.x, shown.y],
+            pressed: ui.input(|input| input.pointer.primary_pressed()),
+            down: ui.input(|input| input.pointer.primary_down()),
+        });
+    }
     ui.add_space(10.0);
     show_step_strip(ui, timeline, slide, requested_seek);
 }
@@ -2640,6 +2722,7 @@ pub(crate) fn presenter_view_system(
     mut talk: Option<ResMut<pace::TalkDuration>>,
     mut prompter_settings: ResMut<prompter::PrompterSettings>,
     prompter_pace: Option<Res<prompter::PrompterPace>>,
+    mut ink: ResMut<ink::PresentationInk>,
 ) {
     let Ok((camera_entity, mut context)) = contexts.single_mut() else {
         return;
@@ -2706,7 +2789,17 @@ pub(crate) fn presenter_view_system(
         .as_ref()
         .and_then(|slide| slide_time(slide, &presentation_timer));
 
+    let live_preview = mirror.as_deref().and_then(PresenterMirror::live).is_some();
     let frame = PresenterFrame {
+        ink: ink.state.clone(),
+        // A thumbnail shows the slide alone.
+        ink_frame: if live_preview {
+            ink.frame_in_view
+        } else {
+            egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0))
+        },
+        ink_active: ink.active(),
+        pen: ink.pen,
         status: PlaybackStatus::of(&timeline),
         current_preview: match mirror.as_deref().and_then(PresenterMirror::live) {
             Some(live) => CuePreview {
@@ -2745,6 +2838,7 @@ pub(crate) fn presenter_view_system(
     let mut actions = Vec::new();
     let mut requested_seek = None;
     let mut mirror_size = None;
+    let mut ink_pointer = None;
     let mut retry = false;
     let mut audience_requests = AudienceRequests::default();
     let unpaced = prompter::PrompterPace::default();
@@ -2839,6 +2933,7 @@ pub(crate) fn presenter_view_system(
                         Some(height),
                         &mut requested_seek,
                         &mut mirror_size,
+                        &mut ink_pointer,
                     );
                     ui.add_space(18.0);
                     show_speaker_column(
@@ -2862,6 +2957,7 @@ pub(crate) fn presenter_view_system(
                     None,
                     &mut requested_seek,
                     &mut mirror_size,
+                    &mut ink_pointer,
                 );
             }
             None => {
@@ -2945,6 +3041,10 @@ pub(crate) fn presenter_view_system(
     }
     for action in actions {
         apply_presentation_action(action, &mut timeline, &mut audience_blank, &mut overview);
+    }
+    // While the speaker works in this window, its preview drives the tools.
+    if ink.active() && ctx.input(|input| input.focused) {
+        ink.pointer(ink_pointer);
     }
     if let Some(mirror) = mirror.as_deref_mut()
         && mirror.wanted != mirror_size
@@ -3244,9 +3344,46 @@ mod tests {
             .init_resource::<AudienceControlsState>()
             .init_resource::<PresenterOverviewState>()
             .init_resource::<PresenterPreferences>()
+            .init_resource::<super::ink::PresentationInk>()
+            .init_resource::<super::links::CurrentLinks>()
+            .init_resource::<crate::ViewportFrame>()
+            .init_resource::<Time<bevy::time::Real>>()
             .insert_resource(PresentationMode { active: true })
             .add_systems(Update, presentation_input_system);
         app
+    }
+
+    #[test]
+    fn with_the_pen_a_click_on_the_audience_draws_instead_of_advancing() {
+        let mut app = input_app();
+        app.world_mut().spawn((
+            Window {
+                focused: true,
+                ..default()
+            },
+            PrimaryWindow,
+        ));
+        app.world_mut()
+            .resource_mut::<super::ink::PresentationInk>()
+            .toggle_pen();
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .press(MouseButton::Left);
+        app.update();
+        let timeline = app.world().resource::<Timeline>();
+        assert!(!timeline.is_playing && timeline.seek_request.is_none());
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .reset_all();
+        // `D` puts the pen away, and `L` brings out the laser.
+        for key in [KeyCode::KeyD, KeyCode::KeyL] {
+            let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            keys.reset_all();
+            keys.press(key);
+            app.update();
+        }
+        let ink = app.world().resource::<super::ink::PresentationInk>();
+        assert!(!ink.pen && ink.laser);
     }
 
     #[test]

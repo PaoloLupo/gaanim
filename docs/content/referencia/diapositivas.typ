@@ -191,7 +191,7 @@ Agendas con viñetas y tablas técnicas compactas.
 #api-entry(
   name: "SlideKit.bullets",
   kind: "factory",
-  desc: [Lista con viñetas como un solo objeto. Cada punto se alinea a la izquierda, justo después de su viñeta, y se ajusta al resto de `width`. Ajusta `width`, `gap`, `bullet_radius` y `bullet_color`.],
+  desc: [Lista con viñetas como un solo objeto, un `BulletList`. Cada punto se alinea a la izquierda, justo después de su viñeta, y se ajusta al resto de `width`. Ajusta `width`, `gap`, `bullet_radius` y `bullet_color`.],
 )[
 ```python
 # show-code: true
@@ -207,7 +207,7 @@ scene.render()
 #api-entry(
   name: "SlideKit.table",
   kind: "factory",
-  desc: [Tabla con cabecera y reglas. Cada fila debe tener tantas celdas como cabeceras. Para tablas con celdas combinadas usa `scene.text.typst(...)` (ver #link("/referencia/text/")[Texto]).],
+  desc: [Tabla con cabecera y reglas, un `SlideTable`. Cada fila debe tener tantas celdas como cabeceras. Para tablas con celdas combinadas usa `scene.text.typst(...)` (ver #link("/referencia/text/")[Texto]).],
 )[
 ```python
 # show-code: true
@@ -219,6 +219,50 @@ scene.play([tbl.animate.fade_in().duration(0.6)])
 scene.render()
 ```
 ]
+
+=== Partes y pasos <listas-por-pasos>
+
+La lista y la tabla siguen siendo un solo objeto que se mueve, se coloca y
+aparece entero, pero sus partes quedan a mano: cada punto de la lista y cada
+fila, columna y celda de la tabla son `Drawable` que se colorean, se animan o
+se revelan por separado.
+
+#api-entry(
+  name: "BulletList.items",
+  kind: "property",
+  desc: [Una tupla con un `Drawable` por punto, en orden; cada uno agrupa su viñeta y su texto.],
+)[]
+
+#api-entry(
+  name: "SlideTable.row / column / cell / header",
+  kind: "method",
+  desc: [`row(i)` es la fila de datos `i` (la 0 es la primera bajo la cabecera) como un `Drawable` con sus textos; `column(c)` devuelve los textos de una columna, de arriba abajo, sin la cabecera; `cell(i, c)` es el texto de una celda; `header` es la fila de cabecera y `header_cell(c)` uno de sus textos. Una columna es su índice o el texto de su cabecera (`cell(1, "Error")`), y los índices negativos cuentan desde el final. `shape` da `(filas, columnas)` de los datos. Un índice fuera de rango lanza `IndexError` y una cabecera desconocida, `KeyError`.],
+)[]
+
+#api-entry(
+  name: "BulletList.build / SlideTable.build",
+  kind: "method",
+  desc: [Revela los puntos de la lista, o las filas de la tabla (`by="column"` para las columnas), uno por paso de la presentación, desde el cursor. Cada uno aparece en `duration` segundos (0.4) y después `scene.stop` espera con su nombre: el texto del punto, la primera celda de la fila o la cabecera de la columna, cortado a 40 caracteres, o el de la misma posición en `names`. Lo que aún no tocó sigue oculto aunque la lista ya esté en pantalla; en la tabla, la cabecera, el fondo y las reglas se quedan como estén. Con `dim`, el paso anterior baja a esa opacidad cuando aparece el siguiente, para que destaque el actual. `stop=False` encadena los pasos sin pausas. Un `dim` fuera de 0 a 1, una `duration` no positiva o unos `names` de otra longitud o con un nombre vacío lanzan `ValueError`.],
+)[
+```python
+# show-code: true
+from gaanim import Scene
+scene = Scene(frame=(16, 9))
+steps = scene.slides.bullets(["Medir", "Modelar", "Verificar"], width=6).move_to(0, 1.6)
+steps.build(dim=0.35)
+
+results = scene.slides.table(["Caso", "Carga"], [["A", "12 kN"], ["B", "18 kN"]], width=6).move_to(0, -1.6)
+scene.play([results.animate.fade_in()])
+results.build(by="row")
+scene.play([results.cell(1, "Carga").animate.fill(scene.colors.success)])
+# output: preview.webp
+scene.render()
+```
+]
+
+Cada paso es una pausa de la presentación: una lista de tres puntos son tres
+pasos en Presenter View y tres páginas en el PDF de diapositivas (ver
+#link("/guias/presentaciones/")[Presentaciones]).
 
 == Identidad de la presentación
 

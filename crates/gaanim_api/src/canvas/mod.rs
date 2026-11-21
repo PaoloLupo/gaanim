@@ -20,7 +20,8 @@ pub use gaanim_renderer::transition_presets::{
     LUMA_MAP_MAX, LumaMap, TransitionPreset, luma_map, luma_map_from_file,
 };
 pub use ops::{
-    AnchorPoint, CanvasEndpoint, CanvasRay, FragmentRevealStyle, PointRef, UpdaterPreset,
+    AnchorPoint, CanvasEndpoint, CanvasRadius, CanvasRay, FragmentRevealStyle, PointRef,
+    UpdaterPreset,
 };
 mod types;
 pub use gaanim_layout::{Anchor, Direction};
@@ -138,6 +139,10 @@ mod code;
 pub use code::{CodeError, CodeHandle, CodeStyle};
 mod timeline_index;
 pub use timeline_index::{IndexedMarker, IndexedSegment, IndexedSpan, IndexedStop, TimelineIndex};
+mod construct;
+pub use construct::ConstructionError;
+mod links;
+pub use links::{LinkError, LinkSpec};
 mod live;
 pub use gaanim_animation::live::{
     LiveZone, Motion as LiveMotion, Program as LiveProgram, ProgramError as LiveProgramError,

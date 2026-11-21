@@ -7,6 +7,9 @@
 //! applies what the other page publishes. The page carries the messages
 //! (a `BroadcastChannel`); this module only reads and writes them.
 //!
+//! The laser pointer, the pen's strokes and the zoom (see
+//! [`crate::presenter::ink`]) go both ways too, whenever they change.
+//!
 //! In a presentation with audience polls, only the audience page talks to
 //! the relay: it tells Presenter View who is playing and passes on each of
 //! the relay's answers, so Presenter View's slides show the room's votes
@@ -20,6 +23,7 @@ use serde::{Deserialize, Serialize};
 use crate::AudienceBlank;
 use crate::polls::SharedSnapshot;
 use crate::presenter::AudienceView;
+use crate::presenter::ink::{InkState, PresentationInk};
 
 /// Largest jump, in seconds, that playback itself can explain between two
 /// frames; a bigger one is a seek.
@@ -108,6 +112,10 @@ enum LinkMessage {
         live: bool,
         snapshot: Option<Box<SharedSnapshot>>,
     },
+    /// The laser, strokes and zoom over the slide.
+    Ink {
+        ink: InkState,
+    },
     /// The sender's playhead. A heartbeat only corrects drift.
     State {
         #[serde(flatten)]
@@ -159,6 +167,8 @@ pub struct PresenterLink {
     /// The relay's answer the audience page last passed on and Presenter
     /// View has not applied yet.
     results: Option<(bool, Option<SharedSnapshot>)>,
+    /// The ink both pages last agreed on.
+    ink: InkState,
 }
 
 impl PresenterLink {
@@ -235,6 +245,7 @@ pub(crate) fn apply_link_messages_system(
     mut link: ResMut<PresenterLink>,
     timeline: Option<ResMut<Timeline>>,
     mut blank: ResMut<AudienceBlank>,
+    mut ink: Option<ResMut<PresentationInk>>,
 ) {
     // Messages wait for the bundle: a state needs a timeline to land on.
     let Some(mut timeline) = timeline else {
@@ -253,6 +264,12 @@ pub(crate) fn apply_link_messages_system(
             LinkMessage::Request { request } => link.requests.push(request),
             LinkMessage::Results { live, snapshot } => {
                 link.results = Some((live, snapshot.map(|snapshot| *snapshot)))
+            }
+            LinkMessage::Ink { ink: state } => {
+                if let Some(ink) = ink.as_deref_mut() {
+                    ink.apply_remote(state.clone());
+                }
+                link.ink = state;
             }
             LinkMessage::State { state, heartbeat } => {
                 if heartbeat
@@ -276,10 +293,20 @@ pub(crate) fn publish_link_changes_system(
     timeline: Option<Res<Timeline>>,
     blank: Res<AudienceBlank>,
     dt: Res<gaanim_animation::DeltaTime>,
+    ink: Option<Res<PresentationInk>>,
 ) {
     let Some(timeline) = timeline else {
         return;
     };
+    if let Some(ink) = ink
+        && (ink.state != link.ink || (link.publish && !ink.state.is_empty()))
+    {
+        link.ink = ink.state.clone();
+        let message = LinkMessage::Ink {
+            ink: ink.state.clone(),
+        };
+        link.send(&message);
+    }
     let local = LinkState::of(&timeline, *blank);
     let elapsed = dt.dt * timeline.playback_rate;
     if link.role == LinkRole::Presenter && !link.greeted {
@@ -356,6 +383,44 @@ mod tests {
     }
 
     /// Carry `from`'s messages to `to`.
+    #[test]
+    fn ink_drawn_on_one_page_shows_on_the_other_once() {
+        let mut audience = app(LinkRole::Audience);
+        let mut presenter = app(LinkRole::Presenter);
+        for app in [&mut audience, &mut presenter] {
+            app.init_resource::<PresentationInk>();
+        }
+        audience.update();
+        presenter.update();
+        carry(&mut presenter, &mut audience);
+        carry(&mut audience, &mut presenter);
+        audience.update();
+        presenter.update();
+        sent(&mut audience);
+        sent(&mut presenter);
+
+        {
+            let mut ink = presenter.world_mut().resource_mut::<PresentationInk>();
+            ink.toggle_pen();
+            ink.pointer(Some(crate::presenter::ink::Pointer {
+                shown: [0.25, 0.5],
+                pressed: true,
+                down: true,
+            }));
+        }
+        presenter.update();
+        carry(&mut presenter, &mut audience);
+        audience.update();
+        let strokes = &audience.world().resource::<PresentationInk>().state.strokes;
+        assert_eq!(strokes, &[vec![[0.25, 0.5]]]);
+        // Applied, it is not sent back.
+        assert!(
+            !sent(&mut audience)
+                .iter()
+                .any(|message| matches!(message, LinkMessage::Ink { .. }))
+        );
+    }
+
     fn carry(from: &mut App, to: &mut App) {
         for message in from
             .world_mut()

@@ -154,6 +154,10 @@ from .gaanim_core import (
     TreemapAnimation,
     Sankey,
     SankeyAnimation,
+    BulletList,
+    ConstructedCircle,
+    ConstructedLine,
+    SlideTable,
     Computed,
     Random,
     TimeInput,
@@ -216,6 +220,7 @@ from .animation_types import AnimationChannel, CustomAnimationValues, Playable, 
 from .questions import Question, QuestionError, load_questions
 from .pointer import Pointer, PointerAnimator
 from .timeline import Timeline, TimelineEvent
+from .data_structures import Array, ArrayPointer, LinkedList, Queue, Stack
 from .matrix import (
     Matrix,
     MatrixAlgebraError,
@@ -277,6 +282,11 @@ __all__ = [
     "label",
     "magic_move",
     "Matrix",
+    "Array",
+    "ArrayPointer",
+    "LinkedList",
+    "Queue",
+    "Stack",
     "Pointer",
     "PointerAnimator",
 
@@ -413,6 +423,10 @@ __all__ = [
     "TreemapAnimation",
     "Sankey",
     "SankeyAnimation",
+    "BulletList",
+    "ConstructedCircle",
+    "ConstructedLine",
+    "SlideTable",
     "Computed",
     "Random",
     "TimeInput",

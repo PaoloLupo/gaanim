@@ -27,6 +27,7 @@ gaanim export mi-video --output exports/video.mp4
 gaanim export mi-charla --output mi-charla.gaanim   # graba un paquete
 gaanim --present --monitor 1 mi-charla   # presenta a pantalla completa
 gaanim --present mi-charla.gaanim        # presenta un paquete, sin Python
+gaanim --present --auto 8s --loop mi-charla.gaanim  # la deja corriendo sola
 gaanim --diff --example mi-video         # compara capturas con un baseline
 gaanim update                            # instala la versión más reciente
 gaanim --version
@@ -54,8 +55,8 @@ necesita el entorno de Python que Gaanim detecta junto al proyecto (ver
 = Previsualizar
 
 ```bash
-gaanim [--present] [--monitor <ÍNDICE>] [--duration <TIEMPO>] [--sections <LISTA>] [--from <NOMBRE>] [--listen <DIRECCIÓN>] <SCRIPT_O_PROYECTO>
-gaanim [--present] [--monitor <ÍNDICE>] [--duration <TIEMPO>] [--sections <LISTA>] [--from <NOMBRE>] [--listen <DIRECCIÓN>] <PAQUETE.gaanim>
+gaanim [--present] [--monitor <ÍNDICE>] [--auto <ESPERA>] [--loop] [--duration <TIEMPO>] [--sections <LISTA>] [--from <NOMBRE>] [--listen <DIRECCIÓN>] <SCRIPT_O_PROYECTO>
+gaanim [--present] [--monitor <ÍNDICE>] [--auto <ESPERA>] [--loop] [--duration <TIEMPO>] [--sections <LISTA>] [--from <NOMBRE>] [--listen <DIRECCIÓN>] <PAQUETE.gaanim>
 ```
 
 Sin argumentos, `gaanim` abre el Inicio: crear un proyecto, abrir una carpeta o
@@ -73,6 +74,8 @@ muestra la cámara grabada.
   [*Opción*], [*Efecto*],
   [`--present`], [Abre la escena en modo presentación: pantalla completa sin bordes para la audiencia y Presenter View para quien presenta. Requiere `<SCRIPT_O_PROYECTO>`.],
   [`--monitor <ÍNDICE>`], [Monitor de la presentación, contado desde `0`. Sin él se usa el monitor principal. Solo es válido junto con `--present`.],
+  [`--auto <ESPERA>`], [Con `--present`, sigue sola tras esperar ese tiempo en cada pausa: `8s`, `8` (segundos), `1m30s` o `0:45`. Una tecla o un clic reinician la espera (ver #link("/guias/presentaciones/#modo-quiosco")[Modo quiosco]).],
+  [`--loop`], [Con `--present`, vuelve a empezar al terminar, tras la espera de `--auto` si la hay. Con cualquiera de las dos opciones no se abre Presenter View, no aparece la barra de la audiencia y el cursor se oculta.],
   [`--duration <TIEMPO>`], [Duración prevista de la charla: `20m`, `1h30m`, `90s`, `20:00` o un número de minutos. Presenter View la cuenta hacia atrás y muestra si vas adelantado o retrasado (ver #link("/guias/presentaciones/#tiempo-de-la-charla")[El tiempo de la charla]).],
   [`--sections <LISTA>`], [Reproduce solo los segmentos indicados, separados por comas, por ejemplo `resultados,cierre`.],
   [`--from <NOMBRE>`], [Empieza en ese segmento y sigue hasta el final. Combinado con `--sections`, recorta la lista a partir de ese nombre.],
@@ -478,7 +481,7 @@ La extensión de `--output` elige el formato.
   [`.webp`], [WebP animado. Necesita FFmpeg.], [Sí],
   [`.gif`], [GIF. Necesita FFmpeg.], [No],
   [`.png`], [Secuencia de PNG, un archivo por fotograma. No necesita FFmpeg.], [Sí],
-  [`.pdf`], [Diapositivas: una página por cada pausa de la presentación y otra para el final, con las notas del orador si se piden con `--notes`. No necesita FFmpeg.], [No],
+  [`.pdf`], [Diapositivas: una página por cada pausa de la presentación y otra para el final, con las notas del orador si se piden con `--notes`; o una por diapositiva (`--per-slide`), o varias por hoja para repartir (`--handout`). No necesita FFmpeg.], [No],
   [`.gaanim`], [Paquete de reproducción: todos los fotogramas que dibuja la escena, con sus segmentos, pausas, marcadores y audio, en un archivo que se reproduce, presenta y exporta sin Python.], [No],
 )
 
@@ -505,6 +508,9 @@ número de fotograma desde 0 (`frames/f_%04d.png` escribe `f_0000.png`,
   [`--to <SEGUNDOS|NOMBRE>`], [fin de la escena], [Fin del tramo exportado; un segmento lo termina en su final.],
   [`--frame <SEGUNDOS|NOMBRE>[,…]`], [—], [Escribe exactamente un PNG en cada instante, en lugar de un tramo; un segmento da su primera pausa. Necesita una salida `.png` y no se combina con `--from` ni `--to`.],
   [`--notes`], [desactivado], [Solo PDF: añade tras la última página de cada diapositiva una página con sus notas (`scene.segment(notes=...)`).],
+  [`--per-slide`], [desactivado], [Solo PDF: una página por diapositiva, la de su última pausa, en lugar de una por pausa.],
+  [`--handout <CxR|notes>`], [—], [Solo PDF: las diapositivas en hojas para repartir, una vez cada una: `2x3` pone seis por hoja (columnas por filas, de 1 a 6) y `notes` una por hoja con sus notas debajo (ver #link(<diapositivas-pdf>)[Diapositivas en PDF]).],
+  [`--paper <a4|letter>`], [`a4`], [La hoja de `--handout`.],
   [`--sections <LISTA>`], [todos], [Con `{segment}`, los segmentos que se exportan: nombres de segmentos o claves de `Section`, separados por comas, como en la vista previa.],
   [`--members <RUTAS>`], [todos], [Con un workspace, los miembros que se exportan: rutas o patrones como los de `members`, separados por comas.],
   [`--message-format <FORMATO>`], [`human`], [`json`: mensajes y progreso con su porcentaje en JSON por líneas, sin barra (ver #link(<message-format>)[Mensajes para herramientas]).],
@@ -650,20 +656,45 @@ Con `--notes`, tras la última página de cada diapositiva (cada
 puede buscar y copiar. Una diapositiva sin notas no añade página. `--from`,
 `--to`, `--frame`, `--fps`, `--transparent` y `--encoder` no se aplican.
 
+Los objetos enlazados con `link_to` se convierten en enlaces del PDF: los que
+van a un segmento llevan a su primera página y los que van a una dirección
+web la abren (ver #link("/guias/presentaciones/#enlaces")[Enlaces y
+diapositivas de respaldo]). Las hojas de `--handout` no los llevan.
+
+Con `--per-slide`, cada diapositiva ocupa una sola página: la de su última
+pausa, o el final de la escena para la última diapositiva. Una diapositiva con
+seis pasos deja de ocupar seis páginas casi iguales.
+
+Con `--handout`, el PDF es para repartir o imprimir: hojas A4 (o Letter con
+`--paper letter`) con cada diapositiva una vez, como con `--per-slide`.
+
+- `--handout 2x3` coloca seis diapositivas por hoja, en dos columnas y tres
+  filas, cada una sobre su número y su nombre. Con más columnas que filas
+  (`3x2`) la hoja se pone apaisada.
+- `--handout notes` pone una diapositiva por hoja con sus notas debajo, en
+  texto que se puede buscar, o líneas para escribir si no tiene notas. Por
+  eso no se combina con `--notes`.
+- El pie de cada hoja lleva el título de la charla y el número de hoja.
+
 ```bash
 gaanim export mi-charla --output mi-charla.pdf
 gaanim export mi-charla --output material.pdf --notes
+gaanim export mi-charla --output resumen.pdf --per-slide
+gaanim export mi-charla --output reparto.pdf --handout 2x3
+gaanim export mi-charla --output guion.pdf --handout notes --paper letter
 gaanim export mi-charla.gaanim --output mi-charla.pdf   # sin Python
 ```
 
 Un paquete se exporta a PDF igual, sin ejecutar Python. El diálogo
-*Export* del editor también ofrece el formato PDF, con una casilla para las
-notas.
+*Export* del editor también ofrece el formato PDF: en *Pages* elige una página
+por paso (*Every step*), por diapositiva (*Per slide*), seis por hoja
+(*Handout*) o una por hoja con sus notas (*Notes*), con una casilla para las
+notas y la hoja A4 o Letter de los repartos.
 
 == Paquetes <exportar-paquetes>
 
 Con `--output` terminado en `.gaanim`, `export` graba un paquete de la escena
-completa; `--from`, `--to`, `--transparent`, `--notes` y `--encoder` no se aplican, y
+completa; `--from`, `--to`, `--transparent`, `--notes`, `--per-slide`, `--handout`, `--paper` y `--encoder` no se aplican, y
 `--fps` (60 por defecto) debe ser un entero. Con un paquete como entrada,
 `export` lo renderiza a vídeo o a PDF sin ejecutar Python: acepta los demás formatos y
 opciones, incluidos los tramos con marcadores, y el vídeo tiene la frecuencia

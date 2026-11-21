@@ -15,6 +15,8 @@ pub struct HostOptions {
     /// Planned length of the talk (`--duration`), which Presenter View
     /// counts down.
     pub duration: Option<std::time::Duration>,
+    /// Run the presentation by itself (`--auto`, `--loop`).
+    pub kiosk: crate::Kiosk,
     /// Show Presenter View alone in the window: the web player's second
     /// page, which follows the audience page through
     /// [`crate::presenter_link`].
@@ -165,6 +167,7 @@ pub fn host_app(options: &HostOptions) -> App {
         active: options.present || options.presenter_page,
     })
     .insert_resource(options.selection.clone())
+    .insert_resource(options.kiosk)
     .insert_resource(crate::presenter::pace::TalkDuration::given(
         options.duration,
     ))

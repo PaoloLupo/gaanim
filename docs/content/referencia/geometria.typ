@@ -1023,6 +1023,57 @@ scene.render()
 ```
 ]
 
+=== Construcciones con regla y compás <construcciones>
+
+Construye geometría como con regla y compás: puntos, rectas y circunferencias
+que se calculan a partir de otros puntos y se recalculan en cada fotograma
+cuando estos se mueven, sin ningún `Computed` en el script. Una recta es una de
+estas construcciones o un par de puntos `(A, B)` por los que pasa; una
+circunferencia, una de `circle_through` o `circle_around`. Las rectas se
+dibujan de lado a lado del encuadre. Una construcción sin respuesta (rectas
+paralelas, un punto dentro de la circunferencia, tres puntos alineados) no
+tiene posición, y lo que se construye sobre ella se oculta hasta que la vuelve
+a tener, en lugar de fallar a mitad de la animación. Como `tracking_line`, las
+rectas, circunferencias y marcas se muestran cuando un `play` las revela.
+
+#api-entry(
+  name: "Geometry.intersect / circumcenter / incenter / centroid / foot",
+  kind: "factory",
+  signature: "intersect(a, b, *, which=0) -> PointRef · circumcenter(A, B, C) -> PointRef · incenter(A, B, C) -> PointRef · centroid(A, B, C) -> PointRef · foot(P, line) -> PointRef",
+  desc: [Puntos reactivos que no se dibujan, para usarlos como extremos o marcarlos con `marker`. `intersect` corta dos rectas, una recta y una circunferencia o dos circunferencias: con una circunferencia, `which=0` es el punto más cercano al primer punto de la recta y `1` el otro; entre dos circunferencias, a la izquierda (`0`) o a la derecha (`1`) de la recta del primer centro al segundo. `circumcenter` es el centro de la circunferencia por los tres puntos, `incenter` el de la inscrita, `centroid` el baricentro y `foot` el pie de la perpendicular desde `P`. Un `which` distinto de 0 o 1 lanza `ValueError`; algo que no es una recta ni una circunferencia, `TypeError`.],
+)
+
+#api-entry(
+  name: "Geometry.line_through / perpendicular / parallel / perpendicular_bisector / angle_bisector / tangents",
+  kind: "factory",
+  signature: "line_through(A, B) · perpendicular(line, *, through) · parallel(line, *, through) · perpendicular_bisector(A, B) · angle_bisector(A, O, B) · tangents(circle, *, from_) -> tuple",
+  desc: [Rectas completas (`ConstructedLine`): la recta por dos puntos, la perpendicular o la paralela a una recta por un punto, la mediatriz de un segmento, la bisectriz del ángulo en `O` y las dos tangentes a una circunferencia desde un punto, ocultas mientras el punto está dentro. `through` y `toward` son dos puntos de la recta, que otras construcciones aceptan como recta.],
+)[
+```python
+# show-code: true
+# player
+from gaanim import Scene
+scene = Scene(frame=(16, 9))
+G = scene.geometry
+A, B, C = (G.dot(0.1).move_to(x, y) for x, y in ((-2.4, -1.3), (2.6, -1.1), (-0.6, 1.7)))
+sides = [G.tracking_line(p, q) for p, q in ((A, B), (B, C), (C, A))]
+bisectors = [G.perpendicular_bisector(p, q).stroke(scene.colors.rule, 0.02) for p, q in ((A, B), (B, C), (C, A))]
+circle = G.circle_through(A, B, C).no_fill().stroke(scene.colors.accent, 0.035)
+center = G.marker(G.circumcenter(A, B, C)).fill(scene.colors.accent)
+scene.play([line.animate.create() for line in sides + bisectors] + [circle.animate.create(), center.animate.fade_in()])
+scene.play([C.animate.move_to(1.8, 1.5)], duration=2.0)
+# output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
+  name: "Geometry.circle_through / circle_around / marker",
+  kind: "factory",
+  signature: "circle_through(A, B, C) -> ConstructedCircle · circle_around(center, through) -> ConstructedCircle · marker(point, *, radius=0.07) -> Drawable",
+  desc: [`circle_through` es la circunferencia por tres puntos, oculta mientras están alineados; `circle_around`, la de centro `center` que pasa por un punto o tiene un radio en unidades de la escena. `center` y `on` dan su centro y un punto de ella. `marker` es un punto del color `foreground` del tema que sigue a un punto y se oculta mientras no tiene posición. Un radio que no sea positivo lanza `ValueError`.],
+)
+
 == Dibujos axonométricos
 
 Para planos técnicos en isométrica o dimétrica, con el estilo plano del resto

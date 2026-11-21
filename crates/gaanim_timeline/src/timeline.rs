@@ -496,6 +496,32 @@ pub struct Timeline {
     /// [`gaanim_scene::StepRate`], which its clips then follow.
     #[cfg_attr(feature = "serde", serde(default))]
     pub stepped_objects: bool,
+    /// Backup segments (`scene.segment(..., skip=True)`), by id: a
+    /// presentation's playback and steps pass over them, and only a link
+    /// visits one.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub backup_segments: Vec<u32>,
+    /// Set while presenting, when backup segments are passed over.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub presenting: bool,
+    /// The segment a link jumped to, while the presentation is there.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub visit: Option<Visit>,
+    /// Where links lie at each resting instant, as a playback bundle
+    /// recorded them; a live scene finds them on its drawables instead.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub link_zones: Vec<(f64, Vec<gaanim_scene::links::LinkZone>)>,
+}
+
+/// A visit to a segment a link jumped to: playback stays inside it, and
+/// moving on from its end, or back from its start, returns to `origin`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Visit {
+    pub segment: u32,
+    pub start: f64,
+    pub end: f64,
+    /// The instant the presentation rested on when the link was followed.
+    pub origin: f64,
 }
 
 /// A musical tempo: `bpm` beats per minute from `offset` seconds, grouped
@@ -868,6 +894,10 @@ impl Default for Timeline {
             stop_gates: Vec::new(),
             step_windows: Vec::new(),
             stepped_objects: false,
+            backup_segments: Vec::new(),
+            presenting: false,
+            visit: None,
+            link_zones: Vec::new(),
         }
     }
 }
@@ -1113,14 +1143,71 @@ impl Timeline {
             })
     }
 
+    /// The ranges playback and steps keep to: the visited segment while a
+    /// link's visit lasts; otherwise the selection (or the whole timeline)
+    /// without the backup segments while presenting. Empty: no limit.
+    pub fn playable_ranges(&self) -> Vec<(f64, f64)> {
+        const EPSILON: f64 = 1e-9;
+        if let Some(visit) = self.visit {
+            return vec![(visit.start, visit.end)];
+        }
+        let backups: Vec<(f64, f64)> = if self.presenting {
+            self.segments
+                .iter()
+                .filter(|segment| self.backup_segments.contains(&segment.id))
+                .map(|segment| (segment.start_time, segment.end_time))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        if backups.is_empty() {
+            return self.play_ranges.clone();
+        }
+        let base = if self.play_ranges.is_empty() {
+            vec![(0.0, self.cached_duration.max(0.0))]
+        } else {
+            self.play_ranges.clone()
+        };
+        let mut ranges = Vec::with_capacity(base.len() + backups.len());
+        for (start, end) in base {
+            let mut pieces = vec![(start, end)];
+            for &(skip_start, skip_end) in &backups {
+                pieces = pieces
+                    .into_iter()
+                    .flat_map(|(start, end)| {
+                        let before = (start, end.min(skip_start));
+                        let after = (start.max(skip_end), end);
+                        [before, after]
+                            .into_iter()
+                            .filter(|(start, end)| end - start > EPSILON)
+                            .collect::<Vec<_>>()
+                    })
+                    .collect();
+            }
+            ranges.extend(pieces);
+        }
+        // A presentation of backups only plays them all.
+        if ranges.is_empty() {
+            return self.play_ranges.clone();
+        }
+        ranges
+    }
+
+    /// Whether playback keeps to some ranges ([`Self::playable_ranges`]).
+    pub fn has_play_limits(&self) -> bool {
+        !self.play_ranges.is_empty()
+            || self.visit.is_some()
+            || (self.presenting && !self.backup_segments.is_empty())
+    }
+
     /// First playable time: the start of the selection, or zero.
     pub fn playback_start(&self) -> f64 {
-        self.play_ranges.first().map_or(0.0, |range| range.0)
+        self.playable_ranges().first().map_or(0.0, |range| range.0)
     }
 
     /// Last playable time: the end of the selection, or the timeline end.
     pub fn playback_end(&self) -> f64 {
-        self.play_ranges
+        self.playable_ranges()
             .last()
             .map_or(self.cached_duration, |range| range.1)
     }
@@ -1128,11 +1215,73 @@ impl Timeline {
     /// Whether `time` lies in the selection; always true without one.
     pub fn is_playable(&self, time: f64) -> bool {
         const EPSILON: f64 = 1e-5;
-        self.play_ranges.is_empty()
-            || self
-                .play_ranges
+        let ranges = self.playable_ranges();
+        ranges.is_empty()
+            || ranges
                 .iter()
                 .any(|(start, end)| time >= start - EPSILON && time <= end + EPSILON)
+    }
+
+    /// Whether segment `id` is a backup that the presentation passes over
+    /// now: presenting, and not visiting it.
+    fn passes_over(&self, id: u32) -> bool {
+        self.presenting
+            && self.backup_segments.contains(&id)
+            && self.visit.is_none_or(|visit| visit.segment != id)
+    }
+
+    /// Follow a link to segment `id`: play it from its start, then return
+    /// to where the presentation rests now. Returns whether it exists.
+    pub fn visit_segment(&mut self, id: u32) -> bool {
+        let Some(segment) = self.segments.iter().find(|segment| segment.id == id) else {
+            return false;
+        };
+        let (start, end) = (segment.start_time, segment.end_time);
+        let origin = self
+            .visit
+            .map_or(self.seek_request.unwrap_or(self.current_time), |visit| {
+                visit.origin
+            });
+        self.visit = Some(Visit {
+            segment: id,
+            start,
+            end,
+            origin,
+        });
+        self.seek_request = Some(start);
+        self.is_playing = true;
+        true
+    }
+
+    /// Leave a link's visit, back where it was followed.
+    pub fn return_from_visit(&mut self) -> bool {
+        let Some(visit) = self.visit.take() else {
+            return false;
+        };
+        self.rest_at(visit.origin);
+        true
+    }
+
+    /// End a visit the presentation left another way, such as a jump from
+    /// the overview.
+    pub fn drop_stale_visit(&mut self) {
+        const EPSILON: f64 = 1e-5;
+        if let Some(visit) = self.visit
+            && self.seek_request.is_none()
+            && (self.current_time < visit.start - EPSILON
+                || self.current_time > visit.end + EPSILON)
+        {
+            self.visit = None;
+        }
+    }
+
+    /// The link zones a bundle recorded for the instant `time`.
+    pub fn recorded_link_zones(&self, time: f64) -> Option<&[gaanim_scene::links::LinkZone]> {
+        const EPSILON: f64 = 1e-5;
+        self.link_zones
+            .iter()
+            .find(|(at, _)| (at - time).abs() <= EPSILON)
+            .map(|(_, zones)| zones.as_slice())
     }
 
     /// Next playback target within the selection and whether to keep playing.
@@ -1142,21 +1291,18 @@ impl Timeline {
     /// the last range pauses there.
     pub fn selected_playback_step(&self, current: f64, next: f64) -> (f64, bool) {
         const EPSILON: f64 = 1e-5;
-        let Some(index) = self
-            .play_ranges
-            .iter()
-            .position(|(_, end)| *end > current + EPSILON)
-        else {
+        let ranges = self.playable_ranges();
+        let Some(index) = ranges.iter().position(|(_, end)| *end > current + EPSILON) else {
             return (self.playback_end(), false);
         };
-        let (start, end) = self.play_ranges[index];
+        let (start, end) = ranges[index];
         if current < start - EPSILON {
             return (start, true);
         }
         if next < end {
             return (next, true);
         }
-        match self.play_ranges.get(index + 1) {
+        match ranges.get(index + 1) {
             Some((next_start, _)) => (*next_start, true),
             None => (end, false),
         }
@@ -1194,6 +1340,14 @@ impl Timeline {
     /// an ambient loop it leaves the loop and plays on from its end; while
     /// playing it jumps to the next stop; paused, it resumes playback.
     pub fn advance(&mut self) {
+        // At the end of a link's visit, "next" goes back where it came from.
+        if let Some(visit) = self.visit
+            && !self.is_playing
+            && self.current_time >= visit.end - 1e-5
+        {
+            self.return_from_visit();
+            return;
+        }
         if let Some((_, end)) = self.ambient_loop_at(self.current_time) {
             self.seek_request = Some(end);
             self.is_playing = true;
@@ -1213,6 +1367,19 @@ impl Timeline {
         let from = self
             .ambient_loop_at(self.current_time)
             .map_or(self.current_time, |(start, _)| start);
+        // Back past the start of a link's visit returns where it came from.
+        if let Some(visit) = self.visit {
+            match self
+                .previous_stop(from)
+                .filter(|stop| *stop > visit.start + 1e-5)
+            {
+                Some(stop) => self.rest_at(stop),
+                None => {
+                    self.return_from_visit();
+                }
+            }
+            return;
+        }
         let target = self
             .previous_stop(from)
             .unwrap_or_else(|| self.playback_start());
@@ -1264,6 +1431,7 @@ impl Timeline {
         let mut stops = self
             .segments
             .iter()
+            .filter(|segment| !self.passes_over(segment.id))
             .flat_map(|segment| segment.stops.iter().map(|stop| stop.time))
             .collect::<Vec<_>>();
         stops.retain(|stop| self.is_playable(*stop));

@@ -492,6 +492,178 @@ def validate_stub_attribute_writability(module: object, tree: ast.Module) -> lis
     return failures
 
 
+def validate_data_structures_contract(module: object) -> list[str]:
+    """Arrays, stacks, queues and linked lists keep their cells' identity."""
+    failures: list[str] = []
+    scene = module.Scene(frame=(16, 9))
+    arr = scene.viz.array([5, 2, 9], indices=True)
+    if type(arr).__name__ != "Array":
+        failures.append("scene.viz.array must return an Array")
+    first, second = arr.item(0), arr.item(1)
+    pointer = arr.pointer("i", 0)
+    scene.play([arr.animate.compare(0, 1)])
+    scene.play([arr.animate.swap(0, 1), pointer.animate.move_to(1)])
+    if arr.values != [2, 5, 9] or arr.item(0) is not second or arr.item(1) is not first:
+        failures.append(f"swap must exchange values and cells: {arr.values!r}")
+    if pointer.index != 1:
+        failures.append(f"a moved pointer must report its index: {pointer.index}")
+    scene.play([arr.animate.insert(1, 7)])
+    scene.play([arr.animate.remove(-1)])
+    if arr.values != [2, 7, 5] or len(arr) != 3:
+        failures.append(f"insert and remove must update the values: {arr.values!r}")
+    for call, error_type in (
+        (lambda: arr.item(3), IndexError),
+        (lambda: arr.animate.swap(1, 1), ValueError),
+        (lambda: arr.pointer("  "), ValueError),
+        (lambda: scene.viz.array([1], cell_size=0), ValueError),
+        (lambda: scene.viz.stack().animate.pop(), IndexError),
+        (lambda: scene.viz.queue().animate.dequeue(), IndexError),
+    ):
+        try:
+            call()
+            failures.append(f"expected {error_type.__name__}")
+        except error_type:
+            pass
+    stack = scene.viz.stack(["a"])
+    scene.play([stack.animate.push("b")])
+    scene.play([stack.animate.pop()])
+    queue = scene.viz.queue([1, 2])
+    scene.play([queue.animate.enqueue(3)])
+    scene.play([queue.animate.dequeue()])
+    nodes = scene.viz.linked_list([3, 8])
+    scene.play([nodes.animate.insert_after(0, 5)])
+    if stack.values != ["a"] or queue.values != [2, 3] or nodes.values != [3, 5, 8]:
+        failures.append(f"stack, queue and list values: {stack.values!r} {queue.values!r} {nodes.values!r}")
+    if not isinstance(nodes.arrow(1), module.Drawable):
+        failures.append("LinkedList.arrow must give the arrow between nodes")
+    return failures
+
+
+def validate_constructions_contract(module: object) -> list[str]:
+    """Ruler-and-compass constructions return reactive points, lines and circles."""
+    failures: list[str] = []
+    scene = module.Scene(frame=(16, 9))
+    G = scene.geometry
+    A, B, C = (G.dot(0.1).move_to(x, y) for x, y in ((-2, -1), (2, -1), (0, 2)))
+    lines = [
+        G.line_through(A, B), G.perpendicular((A, B), through=C), G.parallel((A, B), through=C),
+        G.perpendicular_bisector(A, B), G.angle_bisector(B, A, C),
+    ]
+    if not all(isinstance(line, module.ConstructedLine) and isinstance(line, module.Drawable) for line in lines):
+        failures.append("constructed lines must be ConstructedLine drawables")
+    circle = G.circle_through(A, B, C)
+    if not isinstance(circle, module.ConstructedCircle):
+        failures.append("circle_through must return a ConstructedCircle")
+    points = [
+        G.intersect(lines[0], lines[1]), G.intersect(lines[0], circle, which=1), G.intersect(circle, G.circle_around(A, 1.5)),
+        G.circumcenter(A, B, C), G.incenter(A, B, C), G.centroid(A, B, C), G.foot(C, (A, B)), circle.center,
+    ]
+    if not all(isinstance(point, module.PointRef) for point in points):
+        failures.append("constructed points must be PointRef")
+    t1, t2 = G.tangents(circle, from_=(5, 0))
+    if not isinstance(t1, module.ConstructedLine) or not isinstance(G.marker(points[3]), module.Drawable):
+        failures.append("tangents and marker must return drawables")
+    for call, error_type in (
+        (lambda: G.intersect(lines[0], lines[1], which=2), ValueError),
+        (lambda: G.intersect((0.0, 1.0), lines[1]), TypeError),
+        (lambda: G.tangents(lines[0], from_=A), TypeError),
+        (lambda: G.circle_around(A, -1.0), ValueError),
+        (lambda: G.marker(A, radius=0), ValueError),
+    ):
+        try:
+            call()
+            failures.append(f"expected {error_type.__name__}")
+        except error_type:
+            pass
+    return failures
+
+
+def validate_links_contract(module: object) -> list[str]:
+    """Drawables link to segments or addresses, and backup segments exist."""
+    failures: list[str] = []
+    scene = module.Scene(frame=(16, 9))
+    scene.segment("Results")
+    card = scene.slides.card("Details")
+    backup = scene.segment("Backup", skip=True)
+    if card.link_to(backup) is not card:
+        failures.append("Drawable.link_to must return the same drawable")
+    for target in ("https://doi.org/10.1000/182", "Results", "mailto:ana@example.org"):
+        try:
+            card.link_to(target)
+        except Exception as error:  # noqa: BLE001
+            failures.append(f"link_to({target!r}) must be accepted: {error!r}")
+    for target, error_type in ((42, TypeError), ("  ", ValueError)):
+        try:
+            card.link_to(target)
+            failures.append(f"link_to({target!r}) must raise {error_type.__name__}")
+        except error_type:
+            pass
+    other = module.Scene(frame=(16, 9)).segment("Elsewhere")
+    try:
+        card.link_to(other)
+        failures.append("link_to a segment of another scene must raise ValueError")
+    except ValueError:
+        pass
+    try:
+        scene.segment("Plain", skip=False)
+    except Exception as error:  # noqa: BLE001
+        failures.append(f"segment(skip=False) must be accepted: {error!r}")
+    return failures
+
+
+def validate_slide_builds_contract(module: object) -> list[str]:
+    """Bullet lists and slide tables keep their parts and build one step each."""
+    failures: list[str] = []
+    scene = module.Scene(frame=(16, 9))
+    steps = scene.slides.bullets(["Measure", "Model", "Verify"], width=6)
+    table = scene.slides.table(["Case", "Load"], [["A", "12 kN"], ["B", "18 kN"]])
+    if not (isinstance(steps, module.BulletList) and isinstance(steps, module.Drawable)):
+        failures.append("SlideKit.bullets must return a BulletList Drawable")
+    if not (isinstance(table, module.SlideTable) and isinstance(table, module.Drawable)):
+        failures.append("SlideKit.table must return a SlideTable Drawable")
+    if len(steps.items) != 3 or not all(isinstance(item, module.Drawable) for item in steps.items):
+        failures.append(f"BulletList.items must give one Drawable per point: {steps.items!r}")
+    if table.shape != (2, 2):
+        failures.append(f"SlideTable.shape must count data rows only: {table.shape!r}")
+    parts = (
+        table.header, table.header_cell("Load"), table.row(0), table.row(-1),
+        table.cell(1, 1), table.cell(1, "Load"), *table.column("Case"),
+    )
+    if not all(isinstance(part, module.Drawable) for part in parts) or len(table.column(0)) != 2:
+        failures.append("SlideTable parts must be Drawables, columns without the header")
+    for call, error in (
+        (lambda: table.row(2), IndexError),
+        (lambda: table.cell(0, "Weight"), KeyError),
+        (lambda: table.cell(0, 1.5), TypeError),
+        (lambda: steps.build(dim=1.5), ValueError),
+        (lambda: steps.build(duration=0), ValueError),
+        (lambda: steps.build(names=["a", "b"]), ValueError),
+        (lambda: steps.build(names=["a", " ", "c"]), ValueError),
+        (lambda: table.build(by="cell"), ValueError),
+    ):
+        try:
+            call()
+        except error:
+            pass
+        else:
+            failures.append(f"slide builds accepted invalid input; expected {error.__name__}")
+    if scene.stops:
+        failures.append("a rejected build must not author stops")
+    long = scene.slides.bullets(["A point whose text runs well past forty characters"])
+    steps.build(dim=0.35)
+    table.build(by="row", stop=False)
+    table.build(by="column", names=["first", "second"])
+    long.build()
+    names = [stop.name for stop in scene.stops]
+    expected = ["Measure", "Model", "Verify", "first", "second", "A point whose text runs well past forty…"]
+    if names != expected:
+        failures.append(f"slide builds authored stops {names!r}, expected {expected!r}")
+    times = [stop.time for stop in scene.stops]
+    if times != sorted(times) or not math.isclose(times[0], 0.4, abs_tol=1e-6):
+        failures.append(f"each build step must play before its stop: {times!r}")
+    return failures
+
+
 def validate_editorial_contract(module: object) -> list[str]:
     """Exercise the editorial kit without starting the renderer."""
     failures: list[str] = []
@@ -4518,6 +4690,10 @@ def main() -> int:
     missing.extend(validate_fluent_setters_keep_their_class(module))
     missing.extend(validate_readout_number_formats(module))
     missing.extend(validate_editorial_contract(module))
+    missing.extend(validate_slide_builds_contract(module))
+    missing.extend(validate_links_contract(module))
+    missing.extend(validate_data_structures_contract(module))
+    missing.extend(validate_constructions_contract(module))
     missing.extend(validate_theme_typography_contract(module))
     missing.extend(validate_default_theme_contract(module, tree))
     missing.extend(validate_theme_colors_contract(module, tree))

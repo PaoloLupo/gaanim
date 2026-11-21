@@ -3,6 +3,7 @@ pub use media_frame::{ImageFit, MediaFrame};
 pub mod axis_box;
 pub mod components;
 pub mod hierarchy;
+pub mod links;
 pub mod model;
 pub mod occlusion;
 // Bevy's log and asset subsystems are left out of the playground's Pyodide

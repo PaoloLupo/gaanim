@@ -11,6 +11,7 @@ from typing import Any, Callable, ClassVar, Iterator, Literal, Mapping, Optional
 from .live import Player, Pose, State
 from .questions import Question
 from .matrix import Matrix
+from .data_structures import Array, LinkedList, Queue, Stack
 from .pointer import Pointer
 from .timeline import Timeline
 from .sections import SceneSections
@@ -1100,6 +1101,33 @@ class AnchorPoint:
 
 class PointRef:
     """Non-rendered reactive XY point derived from endpoints or scalar expressions."""
+
+class ConstructedLine(Drawable):
+    """A whole line from a ruler-and-compass construction on ``scene.geometry``.
+
+    It is drawn across the frame, follows the points it is built from every
+    frame and hides while one of them has no position. Pass it to
+    ``intersect``, ``perpendicular``, ``parallel`` or ``foot``.
+    """
+    @property
+    def through(self) -> PointRef:
+        """A point the line runs through."""
+        ...
+    @property
+    def toward(self) -> PointRef:
+        """A second point on the line."""
+        ...
+
+class ConstructedCircle(Drawable):
+    """A circle from ``scene.geometry.circle_through`` or ``circle_around``, recomputed every frame."""
+    @property
+    def center(self) -> PointRef:
+        """The center."""
+        ...
+    @property
+    def on(self) -> PointRef:
+        """A point on the circle."""
+        ...
 
 class Direction:
     UP: ClassVar[Direction]
@@ -3985,6 +4013,28 @@ class Drawable:
         Example:
             head = wolf.part("Head")
             scene.play(head.animate.scale_by(1.3))
+        """
+        ...
+    def link_to(self, target: Segment | str) -> Self:
+        """Link this drawable to a segment or a web address.
+
+        While presenting, a click on the drawable follows the link instead of
+        advancing: a ``Segment`` plays from its start (a backup made with
+        ``scene.segment(..., skip=True)`` included), and moving on from its
+        end, or back from its start, returns to the step the click came
+        from; a string with a scheme, such as ``"https://doi.org/..."`` or
+        ``"mailto:..."``, opens in the browser, and any other string names a
+        segment, found when the scene builds (``gaanim check`` reports one
+        that does not exist). The pointer turns into a hand over a link. A
+        PDF deck keeps the links, to the segment's first page or to the
+        address, and so does a ``.gaanim`` bundle; videos ignore them. A
+        later call replaces the link. A segment of another scene raises
+        ``ValueError``, and a target that is neither raises ``TypeError``.
+
+        Example:
+            backup = scene.segment("Trial details", skip=True)
+            chip.link_to(backup)
+            reference.link_to("https://doi.org/10.1000/182")
         """
         ...
     def copy(self) -> Drawable:
@@ -10730,6 +10780,98 @@ class Geometry:
     def polar_point(self, origin: Endpoint, radius: _ReactiveScalar, angle: _ReactiveScalar) -> PointRef:
         """Create a reactive polar point; angle is measured in radians."""
         ...
+    def intersect(self, a: ConstructedLine | ConstructedCircle | tuple[Endpoint, Endpoint], b: ConstructedLine | ConstructedCircle | tuple[Endpoint, Endpoint], *, which: Literal[0, 1] = 0) -> PointRef:
+        """The point where two lines, a line and a circle, or two circles meet, recomputed every frame.
+
+        A line is one from these constructions (``line_through``,
+        ``perpendicular``...) or a pair of points ``(A, B)`` it runs
+        through; a circle is one from ``circle_through`` or
+        ``circle_around``. Where a line meets a circle, ``which=0`` is the
+        point nearer the line's first point and ``1`` the other; two circles
+        meet left (``0``) or right (``1``) of the line from the first center
+        to the second. Where they do not meet (parallel lines, a line that
+        misses the circle) the point has no position, and what is built on
+        it hides until it has one again. A ``which`` other than 0 or 1
+        raises ``ValueError``; anything that is not a line or a circle,
+        ``TypeError``.
+
+        Example:
+            G = scene.geometry
+            P = G.intersect((A, B), (C, D))
+            dot = G.marker(P)
+        """
+        ...
+    def line_through(self, a: Endpoint, b: Endpoint) -> ConstructedLine:
+        """The whole line through two points, drawn across the frame and recomputed every frame.
+
+        Like every constructed line it hides while a point it depends on has
+        no position, and it shows once a ``play`` reveals it
+        (``line.animate.create()``), as ``tracking_line`` does.
+        """
+        ...
+    def perpendicular(self, line: ConstructedLine | tuple[Endpoint, Endpoint], *, through: Endpoint) -> ConstructedLine:
+        """The whole line through ``through`` perpendicular to ``line``.
+
+        Example:
+            h = scene.geometry.perpendicular((A, B), through=C)
+        """
+        ...
+    def parallel(self, line: ConstructedLine | tuple[Endpoint, Endpoint], *, through: Endpoint) -> ConstructedLine:
+        """The whole line through ``through`` parallel to ``line``."""
+        ...
+    def perpendicular_bisector(self, a: Endpoint, b: Endpoint) -> ConstructedLine:
+        """The whole line through the midpoint of ``a`` and ``b``, perpendicular to their segment."""
+        ...
+    def angle_bisector(self, a: Endpoint, vertex: Endpoint, b: Endpoint) -> ConstructedLine:
+        """The whole line that halves the angle at ``vertex`` between ``a`` and ``b``."""
+        ...
+    def tangents(self, circle: ConstructedCircle, *, from_: Endpoint) -> tuple[ConstructedLine, ConstructedLine]:
+        """The two tangents to ``circle`` from a point, hidden while the point is inside it.
+
+        Each runs through ``from_`` and the point where it touches the
+        circle. A circle that is not from ``circle_through`` or
+        ``circle_around`` raises ``TypeError``.
+
+        Example:
+            t1, t2 = scene.geometry.tangents(circle, from_=P)
+        """
+        ...
+    def circle_through(self, a: Endpoint, b: Endpoint, c: Endpoint) -> ConstructedCircle:
+        """The circle through three points, recomputed every frame and hidden while they are in a row.
+
+        Example:
+            c = scene.geometry.circle_through(A, B, C)
+            scene.play([c.animate.create()])
+        """
+        ...
+    def circle_around(self, center: Endpoint, through: Endpoint | float) -> ConstructedCircle:
+        """The circle around ``center`` through a point, or of a radius in scene units.
+
+        A radius that is not a positive number raises ``ValueError``.
+        """
+        ...
+    def circumcenter(self, a: Endpoint, b: Endpoint, c: Endpoint) -> PointRef:
+        """The center of the circle through three points; no position while they are in a row."""
+        ...
+    def incenter(self, a: Endpoint, b: Endpoint, c: Endpoint) -> PointRef:
+        """The center of the circle inside the triangle that touches its three sides."""
+        ...
+    def centroid(self, a: Endpoint, b: Endpoint, c: Endpoint) -> PointRef:
+        """Where the triangle's medians meet."""
+        ...
+    def foot(self, point: Endpoint, line: ConstructedLine | tuple[Endpoint, Endpoint]) -> PointRef:
+        """The foot of the perpendicular from ``point`` to ``line``."""
+        ...
+    def marker(self, point: Endpoint, *, radius: float = 0.07) -> Drawable:
+        """A dot in the theme's foreground color that follows a point and hides while it has no position.
+
+        Like the constructed lines it shows once a ``play`` reveals it. A
+        radius that is not a positive number raises ``ValueError``.
+
+        Example:
+            O = scene.geometry.marker(scene.geometry.circumcenter(A, B, C))
+        """
+        ...
 
 class Typography:
     """Callable scene-owned typography API for structured text, equations, Typst, measurement, and code."""
@@ -12428,6 +12570,98 @@ class Visualization:
             scene.play([line.axis.animate.create(), *[part.animate.fade_in() for part in first.parts]])
         """
         ...
+    def array(
+        self,
+        values: Sequence[Any],
+        *,
+        cell_size: float = 0.9,
+        gap: float = 0.12,
+        indices: bool = False,
+        format: Callable[[Any], str] | None = None,
+    ) -> Array:
+        """An array of cells, each a box and its value, to explain an algorithm.
+
+        ``indices=True`` writes each slot's index under it, and
+        ``array.pointer("i", 0)`` adds a named arrow below that
+        ``i.animate.move_to(k)`` slides. ``array.animate.compare(i, j)``,
+        ``swap(i, j)``, ``insert(index, value)`` and ``remove(index)`` return a
+        ``Composition`` to play, alone or with other animations; a swap moves
+        the two cells, so every cell keeps its identity, and ``item(k)``,
+        ``cell(k)`` (the box) and ``label(k)`` follow the cells as the
+        operations left them. ``format`` turns a value into its text
+        (``str`` by default). The cells are 0.9 units square with 0.12 between
+        them, in the theme's ``panel`` and ``rule`` colors. Place the array
+        with ``place``/``move_to`` before its first operation and before
+        adding pointers. A size that is not positive, or a negative gap,
+        raises ``ValueError``.
+
+        Example:
+            arr = scene.viz.array([5, 2, 9, 1], indices=True).place(zone)
+            i = arr.pointer("i", 0)
+            scene.play([arr.animate.compare(0, 1)])
+            scene.play([arr.animate.swap(0, 1), i.animate.move_to(1)])
+            arr.cell(3).fill(scene.colors.success)
+        """
+        ...
+    def stack(
+        self,
+        values: Sequence[Any] = (),
+        *,
+        cell_size: float = 0.9,
+        gap: float = 0.08,
+        format: Callable[[Any], str] | None = None,
+    ) -> Stack:
+        """A stack of cells, bottom first, that grows upward.
+
+        ``stack.animate.push(value)`` drops a cell on top and ``pop()`` lifts
+        the top one off, each a ``Composition``. Place it before the first
+        push. Popping an empty stack raises ``IndexError``.
+
+        Example:
+            stack = scene.viz.stack(["a", "b"]).place(zone)
+            scene.play([stack.animate.push("c")])
+        """
+        ...
+    def queue(
+        self,
+        values: Sequence[Any] = (),
+        *,
+        cell_size: float = 0.9,
+        gap: float = 0.12,
+        format: Callable[[Any], str] | None = None,
+    ) -> Queue:
+        """A queue of cells, front on the left.
+
+        ``queue.animate.enqueue(value)`` adds a cell at the back and
+        ``dequeue()`` takes the front one out on the left while the rest move
+        up, each a ``Composition``. Dequeuing an empty queue raises
+        ``IndexError``.
+
+        Example:
+            queue = scene.viz.queue([1, 2]).place(zone)
+            scene.play([queue.animate.dequeue()])
+        """
+        ...
+    def linked_list(
+        self,
+        values: Sequence[Any],
+        *,
+        cell_size: float = 0.9,
+        gap: float = 0.7,
+        format: Callable[[Any], str] | None = None,
+    ) -> LinkedList:
+        """Nodes holding ``values``, each linked to the next by an arrow.
+
+        ``nodes.animate.insert_after(index, value)`` makes room and links a
+        new node after node ``index``; ``remove(index)`` unlinks one and
+        closes the gap. Nodes keep their identity, and ``arrow(k)`` is the
+        arrow out of node ``k``.
+
+        Example:
+            nodes = scene.viz.linked_list([3, 8]).place(zone)
+            scene.play([nodes.animate.insert_after(0, 5)])
+        """
+        ...
     def matrix(
         self,
         data: Any,
@@ -12464,6 +12698,113 @@ class Visualization:
         dimensions, labels, modes, weights, delimiters, fractions or
         factories raise ``ValueError``/``TypeError``. Returns
         :class:`gaanim.Matrix`.
+        """
+        ...
+
+class BulletList(Drawable):
+    """A bullet list from ``scene.slides.bullets``: one ``Drawable`` whose points stay addressable.
+
+    Each point is a group of its bullet and its text, so it can be styled,
+    animated or revealed on its own while the list moves, fades and is
+    placed as a whole.
+    """
+    @property
+    def items(self) -> tuple[Drawable, ...]:
+        """One ``Drawable`` per point, each its bullet and its text, in order.
+
+        Example:
+            steps.items[1].fill(scene.colors.accent)
+        """
+        ...
+    def build(
+        self,
+        *,
+        dim: Optional[float] = None,
+        duration: float = 0.4,
+        names: Optional[Sequence[str]] = None,
+        stop: bool = True,
+    ) -> None:
+        """Reveal the points one per presentation step, from the current cursor.
+
+        Each point fades in over ``duration`` seconds, then ``scene.stop``
+        pauses under its name: by default its text, cut to 40 characters, or
+        the matching entry of ``names``. Points stay hidden until their step,
+        even when the list is already on screen. With ``dim``, the previous
+        point fades to that opacity as the next one appears, so the current
+        one stands out; ``None`` leaves them as they are. ``stop=False``
+        plays the steps one after another without pausing. A ``dim`` outside
+        0..1, a non-positive ``duration``, or ``names`` of another length or
+        with an empty name raise ``ValueError``.
+
+        Example:
+            steps = scene.slides.bullets(["Measure", "Model", "Verify"], width=6)
+            steps.build(dim=0.35)
+        """
+        ...
+
+class SlideTable(Drawable):
+    """A table from ``scene.slides.table``: one ``Drawable`` whose header, rows and cells stay addressable.
+
+    Rows and columns count from 0 over the data, without the header row;
+    negative indices count from the end. A column is its index or its
+    header text.
+    """
+    @property
+    def shape(self) -> tuple[int, int]:
+        """``(rows, columns)`` of the data, without the header row."""
+        ...
+    @property
+    def header(self) -> Drawable:
+        """The header row: a ``Drawable`` holding the header texts."""
+        ...
+    def header_cell(self, column: int | str) -> Drawable:
+        """The header text of ``column``."""
+        ...
+    def row(self, index: int) -> Drawable:
+        """Data row ``index``: a ``Drawable`` holding its cell texts.
+
+        An index out of range raises ``IndexError``.
+
+        Example:
+            scene.play([table.row(0).animate.fill(scene.colors.accent)])
+        """
+        ...
+    def cell(self, row: int, column: int | str) -> Drawable:
+        """The text of data row ``row`` in ``column``.
+
+        An index out of range raises ``IndexError`` and an unknown header
+        ``KeyError``.
+
+        Example:
+            table.cell(1, "Load").fill(scene.colors.success)
+        """
+        ...
+    def column(self, column: int | str) -> tuple[Drawable, ...]:
+        """The cell texts of ``column``, top to bottom, header excluded."""
+        ...
+    def build(
+        self,
+        *,
+        by: Literal["row", "column"] = "row",
+        dim: Optional[float] = None,
+        duration: float = 0.4,
+        names: Optional[Sequence[str]] = None,
+        stop: bool = True,
+    ) -> None:
+        """Reveal the data rows (or columns) one per presentation step, from the current cursor.
+
+        The header, the background and the rules stay as they are; each row
+        (or each column's cells) fades in over ``duration`` seconds, then
+        ``scene.stop`` pauses under its name: by default the row's first
+        cell (or the column's header), cut to 40 characters, or the matching
+        entry of ``names``. Cells stay hidden until their step. ``dim``,
+        ``stop`` and the errors are those of ``BulletList.build``; ``by``
+        other than ``"row"`` or ``"column"`` raises ``ValueError``.
+
+        Example:
+            table = scene.slides.table(["Case", "Load"], [["A", "12 kN"], ["B", "18 kN"]])
+            scene.play([table.animate.fade_in()])
+            table.build(by="row", dim=0.5)
         """
         ...
 
@@ -12783,17 +13124,19 @@ class SlideKit:
         bullet_radius: float = 0.08,
         bullet_color: Optional[ColorLike] = None,
         color: Optional[ColorLike] = None,
-    ) -> Drawable:
+    ) -> BulletList:
         """Create a bullet list ``width`` wide, centered at the origin, one item every ``gap``.
 
         Bullets of ``bullet_radius`` take the theme accent and the text its
         foreground unless ``bullet_color`` and ``color`` say otherwise. Each
         item is left-aligned, starting just after its bullet, and wraps to
         the rest of ``width``. An empty list or non-positive sizes raise
-        ``ValueError``.
+        ``ValueError``. The list is one ``Drawable``; ``items`` gives each
+        point and ``build`` reveals them one per presentation step.
 
         Example:
             steps = scene.slides.bullets(["Measure", "Model", "Verify"], width=6)
+            steps.build(dim=0.35)
         """
         ...
     def table(
@@ -12806,15 +13149,18 @@ class SlideKit:
         header_background: Optional[ColorLike] = None,
         rule_color: Optional[ColorLike] = None,
         color: Optional[ColorLike] = None,
-    ) -> Drawable:
+    ) -> SlideTable:
         """Create a table centered at the origin: a header row over ``rows``, ``width`` wide.
 
         Columns share the width equally and rows are ``row_height`` tall.
         Every row needs one cell per header. Empty headers or cells, or
-        non-positive sizes, raise ``ValueError``.
+        non-positive sizes, raise ``ValueError``. The table is one
+        ``Drawable``; ``row``, ``column`` and ``cell`` give its parts and
+        ``build`` reveals the rows one per presentation step.
 
         Example:
             results = scene.slides.table(["Case", "Load"], [["A", "12 kN"], ["B", "18 kN"]])
+            results.build(by="row")
         """
         ...
 
@@ -13333,6 +13679,7 @@ class Scene:
         target: Optional[float] = None,
         step_rate: Optional[float] = None,
         camera: Literal["keep", "reset"] = "keep",
+        skip: bool = False,
     ) -> Segment:
         """Create and activate a named structural segment.
 
@@ -13358,7 +13705,11 @@ class Scene:
         ``camera="reset"`` starts the segment from the scene's 2D view: every
         camera constraint lets go and the camera resets at once, after a
         stop at that instant, while the segment before keeps its camera as a
-        transition shows it leave. Empty or duplicate names, a transition on
+        transition shows it leave. ``skip=True`` makes a backup segment, such
+        as an appendix or an answer to an expected question: a presentation's
+        steps and playback pass over it, and only a link
+        (``Drawable.link_to``) visits it; previews, videos and PDF decks keep
+        it in its place. Empty or duplicate names, a transition on
         the first segment, a target that is not a positive number of
         seconds, a step rate that is not a positive number, a ``camera``
         other than ``"keep"`` or ``"reset"``, and a narration script that
@@ -13368,6 +13719,7 @@ class Scene:
             result = scene.segment("example", background="#0f172a")
             collage = scene.segment("collage", step_rate=12)
             summary = scene.segment("summary", Transition.cross_fade(0.4), camera="reset")
+            backup = scene.segment("Trial details", skip=True)
         """
         ...
     def link(self, from_: Segment, to: Segment, transition: Transition) -> None:

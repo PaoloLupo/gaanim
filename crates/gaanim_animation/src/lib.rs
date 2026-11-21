@@ -67,9 +67,7 @@ pub use signals::{
     shape_readout_text_advance, shape_readout_text_with_weight, signal_binding_system,
     tangent_on_curve_system, validate_number_format,
 };
-pub use tween::{
-    AnimatableLens, CameraStateSource, DeltaTime, MorphTable, sync_delta_time_system,
-};
+pub use tween::{AnimatableLens, CameraStateSource, DeltaTime, MorphTable, sync_delta_time_system};
 pub use updaters::{
     AmbientClock, AngleArrowheads, AngleLabelPlacement, AngleSweep, DimensionLabelOrientation,
     DimensionLabelPlacement, DimensionSide, EndpointAngle, EndpointDistance, EndpointFollow,
@@ -194,10 +192,15 @@ impl bevy::prelude::Plugin for GaanimAnimationPlugin {
                         any_with_component::<ReactiveLineRegen>
                             .or_else(any_with_component::<ReactiveMeshRegen>),
                     ),
+                // It resolves layout boxes and their backgrounds first, so it
+                // also runs in scenes with boxes and no tracking lines.
                 tracking_line_system.after(reactive_3d_regen_system).run_if(
                     any_with_component::<TrackingLine>
                         .or_else(any_with_component::<updaters::TrackingConnector>)
-                        .or_else(any_with_component::<TrackingLine3D>),
+                        .or_else(any_with_component::<updaters::TrackingCircle>)
+                        .or_else(any_with_component::<TrackingLine3D>)
+                        .or_else(any_with_component::<updaters::LayoutBoundsTrack>)
+                        .or_else(any_with_component::<updaters::LayoutBackground>),
                 ),
                 tracking_angle_system
                     .after(tracking_line_system)
@@ -401,6 +404,51 @@ mod tests {
                 .first(),
             Some(PathEl::MoveTo(point)) if *point == Point::new(expected.x, expected.y)
         ));
+    }
+
+    #[test]
+    fn layout_backgrounds_resolve_without_tracking_lines() {
+        let mut app = App::new();
+        app.insert_resource(Time::<()>::default())
+            .insert_resource(gaanim_text::font::FontRegistry::new())
+            .add_plugins((
+                gaanim_scene::hierarchy::GaanimScenePlugin,
+                GaanimAnimationPlugin,
+            ));
+
+        let size = Bounds3D::new_2d(-3.0, -1.0, 3.0, 1.0);
+        let container = app
+            .world_mut()
+            .spawn((SpatialTransform::default(), LocalBounds(size)))
+            .id();
+        let empty = Arc::new(BezPath::new());
+        let background = app
+            .world_mut()
+            .spawn((
+                SpatialTransform::default(),
+                Path2D(empty.clone()),
+                PathSource(empty),
+                LocalBounds(Bounds3D::default()),
+                updaters::LayoutBackground {
+                    container,
+                    radius: 0.0,
+                },
+            ))
+            .id();
+
+        app.update();
+
+        let path = &app
+            .world()
+            .get::<Path2D>(background)
+            .expect("background path")
+            .0;
+        let drawn = gaanim_core::kurbo::Shape::bounding_box(path.as_ref());
+        assert_eq!(
+            (drawn.x0, drawn.y0, drawn.x1, drawn.y1),
+            (-3.0, -1.0, 3.0, 1.0),
+            "the background fills its box"
+        );
     }
 
     #[test]

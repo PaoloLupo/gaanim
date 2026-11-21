@@ -11,6 +11,80 @@ indica también qué tienes que ajustar en tus escenas al actualizar. Para
 instalar una versión nueva, sigue
 #link("/empezar/instalacion/")[Instalación].
 
+= Próxima versión
+
+Sin publicar todavía.
+
+== Listas y tablas por pasos
+
+- `scene.slides.bullets` devuelve un `BulletList` y `scene.slides.table` un
+  `SlideTable`. Siguen siendo un solo `Drawable`, así que el código que ya los
+  colocaba, movía o hacía aparecer funciona igual, pero sus partes quedan a
+  mano: `items` en la lista; `row`, `column`, `cell`, `header` y `shape` en la
+  tabla, donde una columna es su índice o el texto de su cabecera.
+- `build()` revela los puntos, o las filas (`by="column"`, las columnas), uno
+  por paso de la presentación, con un `scene.stop` por paso que toma el nombre
+  de su texto; `dim=0.35` atenúa el paso anterior al aparecer el siguiente.
+  Ver #link("/referencia/diapositivas/#listas-por-pasos")[Diapositivas].
+
+== Modo quiosco
+
+- `gaanim --present --auto 8s --loop` deja una presentación corriendo sola,
+  desde el script o desde un paquete `.gaanim`: cada pausa sigue tras la
+  espera y al terminar vuelve a empezar. Una tecla o un clic reinician la
+  espera, y en quiosco no se abre Presenter View, no aparece la barra de la
+  audiencia y el cursor se oculta. Ver
+  #link("/guias/presentaciones/#modo-quiosco")[Modo quiosco].
+
+== Construcciones con regla y compás
+
+- `scene.geometry` construye intersecciones (`intersect`), perpendiculares,
+  paralelas, mediatrices, bisectrices, tangentes desde un punto,
+  circunferencias por tres puntos y el circuncentro, el incentro, el
+  baricentro y el pie de una perpendicular. Se recalculan en cada fotograma
+  cuando se mueven sus puntos, sin ningún `Computed`, y una construcción sin
+  respuesta se oculta en lugar de fallar. Ver
+  #link("/referencia/geometria/#construcciones")[Construcciones con regla y compás].
+
+== Estructuras de datos
+
+- `scene.viz.array` dibuja un arreglo con índices y punteros con nombre, y
+  `compare`, `swap`, `insert` y `remove` mueven sus celdas, que conservan su
+  identidad. `scene.viz.stack`, `queue` y `linked_list` añaden `push` y `pop`,
+  `enqueue` y `dequeue`, e `insert_after` y `remove`. Cada operación es una
+  `Composition` que se combina con otras animaciones. Ver
+  #link("/referencia/visualization/#estructuras-de-datos")[Estructuras de datos].
+
+== Enlaces y diapositivas de respaldo
+
+- `drawable.link_to(segmento)` salta, con un clic al presentar, a otro
+  segmento, que se reproduce y vuelve al paso de origen; `link_to("https://...")`
+  abre la dirección. `scene.segment(..., skip=True)` crea diapositivas de
+  respaldo que el avance normal se salta. Los paquetes `.gaanim` y el PDF de
+  diapositivas conservan los enlaces, y `gaanim check` avisa de los que van a
+  un segmento inexistente. Ver
+  #link("/guias/presentaciones/#enlaces")[Enlaces y diapositivas de respaldo].
+
+== Láser, rotulador y zoom al presentar
+
+- Al presentar, `L` muestra un puntero láser, `D` un rotulador para dibujar
+  sobre la diapositiva (`C` borra, y cambiar de paso también) y `Z` amplía la
+  diapositiva alrededor del cursor, con la rueda para acercar o alejar.
+  Funcionan en la pantalla de la audiencia y en *Now on screen* de Presenter
+  View, también con un paquete `.gaanim` y en el reproductor web, y no tocan la
+  escena ni aparecen en las exportaciones. Ver
+  #link("/guias/presentaciones/#senalar-y-dibujar")[Señalar y dibujar].
+
+== PDF para repartir
+
+- `gaanim export mi-charla --output resumen.pdf --per-slide` escribe una
+  página por diapositiva, la de su última pausa, en lugar de una por pausa.
+- `--handout 2x3` pone seis diapositivas por hoja A4 (`--paper letter` para
+  Letter), cada una con su número y su nombre, y `--handout notes` una por
+  hoja con sus notas debajo, en texto que se puede buscar. Las opciones valen
+  también para un paquete `.gaanim` y están en el diálogo *Export*. Ver
+  #link("/referencia/cli/#diapositivas-pdf")[Diapositivas en PDF].
+
 = 0.17.1
 
 Publicada el 23 de octubre de 2026. `scene.viz.map` dibuja mapas: pone

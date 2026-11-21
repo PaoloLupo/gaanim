@@ -490,12 +490,15 @@ pub struct ExportCommand {
     pub fps: Option<FrameRate>,
     /// `--frame`: instants written as single PNGs instead of a range.
     pub frames: Vec<ExportBound>,
-    /// `--notes`: a PDF deck prints each slide's speaker notes.
-    pub notes: bool,
+    /// `--notes`, `--per-slide`, `--handout` and `--paper`: how a PDF deck
+    /// is printed.
+    pub deck: gaanim_export::deck::DeckLayout,
     /// `--members`: the workspace members to export, as patterns.
     pub members: Option<String>,
     /// `--sections`: the segments a `{segment}` export writes.
     pub sections: Option<String>,
+    /// `--paper` was given, which only a handout takes.
+    pub paper_given: bool,
 }
 
 impl Default for ExportCommand {
@@ -513,9 +516,10 @@ impl Default for ExportCommand {
             to: None,
             fps: None,
             frames: Vec::new(),
-            notes: false,
+            deck: Default::default(),
             members: None,
             sections: None,
+            paper_given: false,
         }
     }
 }
@@ -599,7 +603,24 @@ impl ExportCommand {
                         })?;
                 }
                 "--transparent" => command.transparent = true,
-                "--notes" => command.notes = true,
+                "--notes" => command.deck.notes = true,
+                "--per-slide" => command.deck.per_slide = true,
+                flag @ ("--handout" | "--paper") => {
+                    index += 1;
+                    let value = args.get(index).ok_or_else(|| {
+                        if flag == "--handout" {
+                            "--handout requires a layout such as 2x3 or notes".to_string()
+                        } else {
+                            "--paper requires a4 or letter".to_string()
+                        }
+                    })?;
+                    if flag == "--handout" {
+                        command.deck.handout = Some(gaanim_export::deck::Handout::parse(value)?);
+                    } else {
+                        command.deck.paper = gaanim_export::deck::Paper::parse(value)?;
+                        command.paper_given = true;
+                    }
+                }
                 flag @ ("--width" | "--height") => {
                     index += 1;
                     let value = args
@@ -735,9 +756,10 @@ impl ExportCommand {
 
     /// Check the options that apply to a video `format`.
     pub fn validate_video(&self, format: &str) -> Result<(), String> {
-        if self.notes {
+        if self.deck != Default::default() || self.paper_given {
             return Err(
-                "--notes prints speaker notes in a PDF; use an output ending in .pdf".to_string(),
+                "--notes, --per-slide, --handout and --paper print a PDF deck; use an output ending in .pdf"
+                    .to_string(),
             );
         }
         if self.transparent && !TRANSPARENT_EXTENSIONS.contains(&format) {
@@ -770,12 +792,24 @@ impl ExportCommand {
             (self.transparent, "--transparent"),
             (self.encoder != VideoEncoder::Auto, "--encoder"),
         ];
-        match ignored.iter().find(|(given, _)| *given) {
-            Some((_, flags)) => Err(format!(
+        if let Some((_, flags)) = ignored.iter().find(|(given, _)| *given) {
+            return Err(format!(
                 "a PDF has a page for each point where the presentation rests; drop {flags}"
-            )),
-            None => Ok(()),
+            ));
         }
+        if self.paper_given && self.deck.handout.is_none() {
+            return Err("--paper is the sheet of a handout; add --handout, e.g. 2x3".to_string());
+        }
+        if self.deck.notes && self.deck.handout == Some(gaanim_export::deck::Handout::Notes) {
+            return Err("--handout notes already prints the notes; drop --notes".to_string());
+        }
+        if self.deck.notes && self.deck.handout.is_some() {
+            return Err(
+                "a handout's grid has no room for notes; use --handout notes instead of --notes"
+                    .to_string(),
+            );
+        }
+        Ok(())
     }
 
     /// The PNG each `--frame` instant, at `times`, is written to: `output`
@@ -964,9 +998,18 @@ fn capture_page(
     std::ops::ControlFlow::Continue(())
 }
 
-/// Lay out `pages` around the captured `frames` and write the PDF to
-/// `output`; returns the number of pages.
+/// The links of a deck's frames: the zones on each frame page, in order,
+/// and the segment id of each slide, which internal links go to.
+#[derive(Debug, Default)]
+pub struct DeckLinks {
+    pub zones: Vec<Vec<gaanim_scene::links::LinkZone>>,
+    pub segment_ids: Vec<u32>,
+}
+
+/// Lay out `pages` around the captured `frames`, as `layout` prints them,
+/// and write the PDF to `output`; returns the number of pages (or sheets).
 #[cfg(not(target_arch = "wasm32"))]
+#[allow(clippy::too_many_arguments)]
 fn write_deck(
     output: &str,
     pages: &[gaanim_export::deck::DeckPage],
@@ -974,27 +1017,97 @@ fn write_deck(
     frames: Vec<Vec<u8>>,
     size: (u32, u32),
     title: &str,
+    layout: &gaanim_export::deck::DeckLayout,
+    links: &DeckLinks,
 ) -> Result<usize, String> {
     use gaanim_export::deck::DeckPage;
     use gaanim_export::pdf::PdfPage;
+    // A `[stop]` mark prints as an arrow where the speaker advances.
+    let printable_notes = |slide: usize| {
+        gaanim_timeline::notes::printable(slides[slide].notes.as_deref().unwrap_or_default().trim())
+    };
+    let too_few = || "the renderer produced fewer frames than the deck has pages".to_owned();
     let mut frames = frames.into_iter();
-    let pages = pages
-        .iter()
-        .map(|page| match *page {
-            DeckPage::Frame { .. } => frames.next().map(PdfPage::Frame),
-            DeckPage::Notes { slide } => Some(PdfPage::Notes {
-                title: slides[slide].name.clone(),
-                // A `[stop]` mark prints as an arrow where the speaker advances.
-                notes: gaanim_timeline::notes::printable(
-                    slides[slide].notes.as_deref().unwrap_or_default().trim(),
-                ),
-            }),
-        })
-        .collect::<Option<Vec<_>>>()
-        .ok_or_else(|| "the renderer produced fewer frames than the deck has pages".to_owned())?;
-    let count = pages.len();
-    let pdf =
-        gaanim_export::pdf::deck_pdf(pages, size, title).map_err(|error| error.to_string())?;
+    let (pdf, count) = if let Some(handout) = layout.handout {
+        let handout_slides = pages
+            .iter()
+            .filter_map(|page| match *page {
+                DeckPage::Frame { slide, .. } => Some(slide),
+                DeckPage::Notes { .. } => None,
+            })
+            .map(|slide| {
+                Some(gaanim_export::pdf::HandoutSlide {
+                    frame: frames.next()?,
+                    number: slide + 1,
+                    name: slides
+                        .get(slide)
+                        .map(|slide| slide.name.clone())
+                        .unwrap_or_default(),
+                    notes: if slides.get(slide).is_some() {
+                        printable_notes(slide)
+                    } else {
+                        String::new()
+                    },
+                })
+            })
+            .collect::<Option<Vec<_>>>()
+            .ok_or_else(too_few)?;
+        let sheets = handout_slides.len().div_ceil(handout.per_sheet());
+        let pdf =
+            gaanim_export::pdf::handout_pdf(handout_slides, size, title, handout, layout.paper)
+                .map_err(|error| error.to_string())?;
+        (pdf, sheets)
+    } else {
+        // The first page of each slide, which links to it go to.
+        let first_pages: std::collections::HashMap<usize, usize> = pages
+            .iter()
+            .enumerate()
+            .rev()
+            .filter_map(|(index, page)| match *page {
+                DeckPage::Frame { slide, .. } => Some((slide, index + 1)),
+                DeckPage::Notes { .. } => None,
+            })
+            .collect();
+        let mut frame_index = 0;
+        let pages = pages
+            .iter()
+            .map(|page| match *page {
+                DeckPage::Frame { .. } => {
+                    let zones = links.zones.get(frame_index).map_or(&[][..], Vec::as_slice);
+                    frame_index += 1;
+                    let links = zones
+                        .iter()
+                        .filter_map(|zone| {
+                            use gaanim_export::pdf::{PdfDestination, PdfLink};
+                            use gaanim_scene::links::LinkTarget;
+                            let to = match &zone.target {
+                                LinkTarget::Url(url) => PdfDestination::Url(url.clone()),
+                                LinkTarget::Segment(id) => {
+                                    let slide =
+                                        links.segment_ids.iter().position(|seg| seg == id)?;
+                                    PdfDestination::Page(*first_pages.get(&slide)?)
+                                }
+                            };
+                            Some(PdfLink {
+                                rect: zone.rect,
+                                to,
+                            })
+                        })
+                        .collect();
+                    frames.next().map(|pdf| PdfPage::Frame { pdf, links })
+                }
+                DeckPage::Notes { slide } => Some(PdfPage::Notes {
+                    title: slides[slide].name.clone(),
+                    notes: printable_notes(slide),
+                }),
+            })
+            .collect::<Option<Vec<_>>>()
+            .ok_or_else(too_few)?;
+        let count = pages.len();
+        let pdf =
+            gaanim_export::pdf::deck_pdf(pages, size, title).map_err(|error| error.to_string())?;
+        (pdf, count)
+    };
     if let Some(parent) = Path::new(output)
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -1007,9 +1120,10 @@ fn write_deck(
 
 /// Export `canvas` as a PDF deck at `output`, titled after the project
 /// `script` belongs to (or the script): a page at the export size for every
-/// point where its presentation rests, and with `--notes` each slide's
-/// speaker notes after its last page. Captured frames count in `telemetry`.
-/// Returns the number of pages.
+/// point where its presentation rests (or each slide's last), with each
+/// slide's notes after it, or several slides to a sheet, as `command.deck`
+/// prints them. Captured frames count in `telemetry`. Returns the number of
+/// pages or sheets.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn export_slides_pdf(
     canvas: gaanim_api::canvas::SceneModel,
@@ -1026,13 +1140,31 @@ pub fn export_slides_pdf(
             segment.stops.iter().map(|stop| stop.time).collect(),
         )
     }));
-    let pages = gaanim_export::deck::deck_pages(&slides, manifest.duration(), command.notes);
+    let pages = gaanim_export::deck::deck_pages(&slides, manifest.duration(), &command.deck);
     let size = command.output_size(canvas.frame.aspect_ratio());
     let mut config = ExportConfig::new(output).with_quality(quality_preset(&command.quality));
     (config.width, config.height) = size;
     config.fit = command.fit;
     config.aspect_ratio = AspectRatioPreset::Custom;
     let times = frame_times(&pages);
+    // Links become PDF links, found where they lie at each page's instant.
+    let links = DeckLinks {
+        zones: if canvas.resolved_links().is_empty() {
+            Vec::new()
+        } else {
+            let scene = canvas.clone();
+            gaanim_export::exporter::link_zones_at(
+                move |world| gaanim_api::runtime::replay_canvas_into(world, scene),
+                &times,
+            )
+            .map_err(|error| error.to_string())?
+        },
+        segment_ids: manifest
+            .segments
+            .iter()
+            .map(|segment| segment.id.raw())
+            .collect(),
+    };
     let mut frames = Vec::with_capacity(times.len());
     gaanim_export::prelude::capture_scene_direct_streaming(
         config,
@@ -1042,7 +1174,16 @@ pub fn export_slides_pdf(
     )
     .map_err(|error| error.to_string())?;
     let title = script.and_then(bundle_title).unwrap_or_default();
-    write_deck(output, &pages, &slides, frames, size, &title)
+    write_deck(
+        output,
+        &pages,
+        &slides,
+        frames,
+        size,
+        &title,
+        &command.deck,
+        &links,
+    )
 }
 
 /// The aspect of the frame a bundle recorded at `output_size`.
@@ -1080,10 +1221,30 @@ pub fn export_bundle_pdf(
             segment.stops.iter().map(|stop| stop.time).collect(),
         )
     }));
-    let pages = gaanim_export::deck::deck_pages(&slides, bundle.scene.duration, command.notes);
+    let pages = gaanim_export::deck::deck_pages(&slides, bundle.scene.duration, &command.deck);
     let title = bundle.scene.title.clone();
-    drop(bundle);
     let times = frame_times(&pages);
+    let links = DeckLinks {
+        zones: times
+            .iter()
+            .map(|time| {
+                bundle
+                    .scene
+                    .link_zones
+                    .iter()
+                    .find(|(at, _)| (at - time).abs() <= 1e-5)
+                    .map(|(_, zones)| zones.clone())
+                    .unwrap_or_default()
+            })
+            .collect(),
+        segment_ids: bundle
+            .scene
+            .segments
+            .iter()
+            .map(|segment| segment.id)
+            .collect(),
+    };
+    drop(bundle);
     let mut frames = Vec::with_capacity(times.len());
     gaanim_export::prelude::capture_bundle_streaming(
         input,
@@ -1094,8 +1255,17 @@ pub fn export_bundle_pdf(
         |frame| capture_page(&mut frames, &frame, times.len(), &telemetry),
     )
     .map_err(|error| CommandError::Failed(error.to_string()))?;
-    write_deck(&output, &pages, &slides, frames, (width, height), &title)
-        .map_err(CommandError::Failed)
+    write_deck(
+        &output,
+        &pages,
+        &slides,
+        frames,
+        (width, height),
+        &title,
+        &command.deck,
+        &links,
+    )
+    .map_err(CommandError::Failed)
 }
 
 /// Frames per second a bundle records for an export `quality`: the rate a
@@ -1499,7 +1669,7 @@ mod tests {
     #[test]
     fn decks_export_to_pdf_with_or_without_notes() {
         let deck = ExportCommand::parse(&args(&["talk.py", "-o", "talk.pdf", "--notes"])).unwrap();
-        assert!(deck.notes);
+        assert!(deck.deck.notes);
         assert_eq!(
             deck.output_format().unwrap(),
             ("talk.pdf".to_string(), PDF_EXTENSION.to_string())
@@ -1520,6 +1690,43 @@ mod tests {
             arguments.extend_from_slice(flags);
             let command = ExportCommand::parse(&args(&arguments)).unwrap();
             assert!(command.validate_pdf().is_err(), "{flags:?}");
+        }
+    }
+
+    #[test]
+    fn decks_print_one_page_per_slide_or_as_handouts() {
+        use gaanim_export::deck::{Handout, Paper};
+        let parse = |flags: &[&str]| {
+            let mut arguments = vec!["talk.py", "-o", "talk.pdf"];
+            arguments.extend_from_slice(flags);
+            ExportCommand::parse(&args(&arguments))
+        };
+        let handout = parse(&["--per-slide", "--handout", "2x3", "--paper", "letter"]).unwrap();
+        assert!(handout.deck.per_slide);
+        assert_eq!(
+            handout.deck.handout,
+            Some(Handout::Grid {
+                columns: 2,
+                rows: 3
+            })
+        );
+        assert_eq!(handout.deck.paper, Paper::Letter);
+        assert!(handout.validate_pdf().is_ok());
+        assert!(handout.validate_video("mp4").is_err());
+        assert!(
+            parse(&["--handout", "notes"])
+                .unwrap()
+                .validate_pdf()
+                .is_ok()
+        );
+        assert!(parse(&["--handout", "9x9"]).is_err());
+        assert!(parse(&["--paper", "a3"]).is_err());
+        for flags in [
+            &["--paper", "a4"][..],
+            &["--handout", "notes", "--notes"],
+            &["--handout", "2x2", "--notes"],
+        ] {
+            assert!(parse(flags).unwrap().validate_pdf().is_err(), "{flags:?}");
         }
     }
 

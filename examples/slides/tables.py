@@ -2,7 +2,9 @@
 
 scene.slides.table draws a compact table in one call. A table built from a
 column of grid rows keeps every row and cell as a box, so columns can be
-aligned, and rows, columns and cells highlighted or revealed one at a time.
+aligned, and rows, columns and cells highlighted or revealed one at a time;
+a slide table keeps its rows, columns and cells too, and builds them a step
+at a time.
 Each label is the code that builds or changes the table above it.
 """
 
@@ -173,6 +175,25 @@ def row_by_row():
 scene.segment("row_by_row")
 table, rows = data_table()
 steps([("for row in rows: scene.play(row.reveal()); scene.stop()", row_by_row)])
+
+# A slide table keeps its parts: row(), column() and cell() (a column is its
+# index or its header) are drawables, and build() reveals the rows, or the
+# columns, one per presentation step with a stop after each.
+scene.segment("slide_table_build")
+by_row = S.table(HEADERS, ROWS, width=10)
+by_column = S.table(HEADERS, ROWS, width=10)
+stacked([
+    ('table.build(by="row", dim=0.4)', by_row),
+    ('table.build(by="column")', by_column),
+])
+start = scene.cursor
+by_row.build(by="row", dim=0.4)
+by_column.build(by="column")
+scene.play([by_row.cell(-1, "Time").animate.fill(accent).duration(0.4),
+            by_column.column("Time")[0].animate.fill(accent).duration(0.4)])
+scene.wait(0.6)
+# Third row appearing, second column appearing, and the highlighted cells.
+seeks.extend([start + 1.0, start + 1.8, scene.cursor - 0.1])
 
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
     scene.snapshots(snapshots, seeks)

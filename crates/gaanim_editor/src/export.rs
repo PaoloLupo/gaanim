@@ -59,8 +59,8 @@ pub struct ExportState {
     pub bundle: bool,
     /// Export a PDF deck, a page for each point where the presentation rests.
     pub deck: bool,
-    /// The deck prints each slide's speaker notes.
-    pub notes: bool,
+    /// How the deck is printed: its notes, one page per slide, a handout.
+    pub deck_layout: gaanim_export::deck::DeckLayout,
     pub quality: ExportQuality,
     /// Frame rate chosen in the dialog; `None` takes the quality's.
     pub fps: Option<FrameRate>,
@@ -292,7 +292,10 @@ impl Default for ExportState {
             format: ExportFormat::Mp4,
             bundle: false,
             deck: false,
-            notes: true,
+            deck_layout: gaanim_export::deck::DeckLayout {
+                notes: true,
+                ..Default::default()
+            },
             quality: ExportQuality::Standard,
             fps: None,
             transparent: false,
@@ -567,7 +570,7 @@ pub fn export_dialog_system(
     // Collect all values BEFORE the button handlers (to avoid borrow issues)
     let mut current_format = state.format;
     let mut current_choice = FormatChoice::of(&state);
-    let mut current_notes = state.notes;
+    let mut current_layout = state.deck_layout;
     let mut current_quality = state.quality;
     let mut current_fps = state.fps;
     let mut current_transparent = state.transparent;
@@ -646,8 +649,17 @@ pub fn export_dialog_system(
                             },
                         ));
                         let pages =
-                            gaanim_export::deck::deck_pages(&slides, dur, current_notes).len();
-                        let noun = if pages == 1 { "page" } else { "pages" };
+                            gaanim_export::deck::deck_pages(&slides, dur, &current_layout).len();
+                        let pages = match current_layout.handout {
+                            Some(handout) => pages.div_ceil(handout.per_sheet()),
+                            None => pages,
+                        };
+                        let noun = match (current_layout.handout, pages) {
+                            (Some(_), 1) => "sheet",
+                            (Some(_), _) => "sheets",
+                            (None, 1) => "page",
+                            (None, _) => "pages",
+                        };
                         format!("{} · {pages} {noun}", crate::format_time(dur))
                     } else {
                         format!("{} · {} frames at {} fps", crate::format_time(dur), total, fps)
@@ -734,10 +746,7 @@ pub fn export_dialog_system(
                     )
                     .wrap(),
                 );
-                crate::ui_kit::checkbox(ui, &mut current_notes, "Include speaker notes")
-                    .on_hover_text(
-                        "Adds, after each slide's last page, a page with the notes from scene.segment(notes=...).",
-                    );
+                deck_layout_controls(ui, &mut current_layout);
             }
             let recording = current_choice == FormatChoice::Bundle;
             let deck = current_choice == FormatChoice::Deck;
@@ -986,7 +995,7 @@ pub fn export_dialog_system(
     state.format = current_format;
     state.bundle = current_choice == FormatChoice::Bundle && offers_bundle;
     state.deck = current_choice == FormatChoice::Deck;
-    state.notes = current_notes;
+    state.deck_layout = current_layout;
     state.quality = current_quality;
     state.fps = current_fps;
     state.transparent = current_transparent;
@@ -1030,7 +1039,13 @@ pub fn export_dialog_system(
             let out = out_path.to_string_lossy().into_owned();
             let fmt = state.format;
             let record_bundle = state.bundle;
-            let deck = state.deck.then_some(state.notes);
+            // A handout prints notes beside its slides or not at all.
+            let deck = state.deck.then_some(state.deck_layout).map(|mut layout| {
+                if layout.handout.is_some() {
+                    layout.notes = false;
+                }
+                layout
+            });
             let qual = state.quality;
             let fps = state.fps;
             let transparent = state.transparent && keeps_alpha(fmt) && !record_bundle;
@@ -1095,7 +1110,7 @@ pub fn export_dialog_system(
                             video_encoder,
                             fps,
                             transparent,
-                            notes: deck.unwrap_or(false),
+                            deck: deck.unwrap_or_default(),
                         },
                         output_size,
                         output_fit,
@@ -1110,7 +1125,8 @@ pub fn export_dialog_system(
                             width: Some(output_size.0),
                             height: Some(output_size.1),
                             fit: output_fit,
-                            notes: deck.unwrap_or(false),
+                            deck: deck.unwrap_or_default(),
+                            paper_given: deck.is_some_and(|deck| deck.handout.is_some()),
                             ..Default::default()
                         };
                         export_deck(&command, canvas, telemetry.clone())
@@ -1350,8 +1366,8 @@ struct WorkerEncoding {
     video_encoder: VideoEncoder,
     fps: Option<FrameRate>,
     transparent: bool,
-    /// A PDF deck prints each slide's speaker notes.
-    notes: bool,
+    /// How a PDF deck is printed.
+    deck: gaanim_export::deck::DeckLayout,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1392,9 +1408,7 @@ fn run_export_worker(
     if encoding.transparent {
         command.arg("--transparent");
     }
-    if encoding.notes {
-        command.arg("--notes");
-    }
+    command.args(deck_worker_args(&encoding.deck));
     command
         .env("GAANIM_EXPORT_WORKER", "1")
         .current_dir(project_dir)
@@ -1728,6 +1742,105 @@ fn export_format_arg(format: ExportFormat) -> &'static str {
     }
 }
 
+/// What a PDF deck prints, as the export dialog offers it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DeckPrint {
+    /// A page for every step.
+    Steps,
+    /// A page for each slide's last step.
+    Slides,
+    /// Six slides to a sheet.
+    Grid,
+    /// A slide to a sheet, over its notes.
+    NotesSheet,
+}
+
+/// The dialog's grid: six slides to a sheet, as in presentation software.
+const DIALOG_GRID: gaanim_export::deck::Handout = gaanim_export::deck::Handout::Grid {
+    columns: 2,
+    rows: 3,
+};
+
+impl DeckPrint {
+    fn of(layout: &gaanim_export::deck::DeckLayout) -> Self {
+        match layout.handout {
+            Some(gaanim_export::deck::Handout::Notes) => Self::NotesSheet,
+            Some(gaanim_export::deck::Handout::Grid { .. }) => Self::Grid,
+            None if layout.per_slide => Self::Slides,
+            None => Self::Steps,
+        }
+    }
+
+    fn apply(self, layout: &mut gaanim_export::deck::DeckLayout) {
+        let (per_slide, handout) = match self {
+            Self::Steps => (false, None),
+            Self::Slides => (true, None),
+            Self::Grid => (false, Some(DIALOG_GRID)),
+            Self::NotesSheet => (false, Some(gaanim_export::deck::Handout::Notes)),
+        };
+        layout.per_slide = per_slide;
+        layout.handout = handout;
+    }
+}
+
+/// The deck's pages, notes and paper in the export dialog.
+fn deck_layout_controls(ui: &mut egui::Ui, layout: &mut gaanim_export::deck::DeckLayout) {
+    use gaanim_export::deck::Paper;
+    section_label(ui, "Pages");
+    let mut print = DeckPrint::of(layout);
+    segmented(
+        ui,
+        "export_deck_print",
+        &mut print,
+        &[
+            (DeckPrint::Steps, "Every step", "a page per stop"),
+            (DeckPrint::Slides, "Per slide", "its last step"),
+            (DeckPrint::Grid, "Handout", "6 per sheet"),
+            (DeckPrint::NotesSheet, "Notes", "slide over notes"),
+        ],
+    );
+    print.apply(layout);
+    if layout.handout.is_some() {
+        section_label(ui, "Paper");
+        segmented(
+            ui,
+            "export_deck_paper",
+            &mut layout.paper,
+            &[(Paper::A4, "A4", ""), (Paper::Letter, "Letter", "")],
+        );
+    } else {
+        crate::ui_kit::checkbox(ui, &mut layout.notes, "Include speaker notes").on_hover_text(
+            "Adds, after each slide's last page, a page with the notes from scene.segment(notes=...).",
+        );
+    }
+}
+
+/// The export worker's options for printing a deck as `layout` does.
+fn deck_worker_args(layout: &gaanim_export::deck::DeckLayout) -> Vec<String> {
+    use gaanim_export::deck::Handout;
+    let mut args = Vec::new();
+    match layout.handout {
+        Some(handout) => {
+            args.push("--handout".to_string());
+            args.push(match handout {
+                Handout::Grid { columns, rows } => format!("{columns}x{rows}"),
+                Handout::Notes => "notes".to_string(),
+            });
+            args.push("--paper".to_string());
+            args.push(layout.paper.name().to_string());
+        }
+        None => {
+            if layout.notes {
+                args.push("--notes".to_string());
+            }
+            if layout.per_slide {
+                args.push("--per-slide".to_string());
+            }
+        }
+    }
+    args
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -1737,6 +1850,34 @@ mod tests {
     use bevy::platform::time::Instant;
     use std::path::Path;
     use std::time::Duration;
+
+    #[test]
+    fn dialog_deck_choices_reach_the_worker_as_options() {
+        use super::{DeckPrint, deck_worker_args};
+        use gaanim_export::deck::{DeckLayout, Paper};
+        let mut layout = DeckLayout {
+            notes: true,
+            ..Default::default()
+        };
+        assert_eq!(deck_worker_args(&layout), ["--notes"]);
+        DeckPrint::Slides.apply(&mut layout);
+        assert_eq!(DeckPrint::of(&layout), DeckPrint::Slides);
+        assert_eq!(deck_worker_args(&layout), ["--notes", "--per-slide"]);
+        DeckPrint::Grid.apply(&mut layout);
+        layout.paper = Paper::Letter;
+        assert_eq!(
+            deck_worker_args(&layout),
+            ["--handout", "2x3", "--paper", "letter"]
+        );
+        DeckPrint::NotesSheet.apply(&mut layout);
+        assert_eq!(DeckPrint::of(&layout), DeckPrint::NotesSheet);
+        assert_eq!(
+            deck_worker_args(&layout),
+            ["--handout", "notes", "--paper", "letter"]
+        );
+        DeckPrint::Steps.apply(&mut layout);
+        assert_eq!(deck_worker_args(&layout), ["--notes"]);
+    }
 
     #[test]
     fn worker_watchdog_stops_on_cancel_or_stalled_progress() {

@@ -113,6 +113,14 @@ only says whether there is one",
                     "Monitor used by --present (default: the primary one)",
                 ),
                 (
+                    "--auto <WAIT>",
+                    "With --present, go on from each stop after this wait, e.g. 8s;\na key or a click starts the wait again",
+                ),
+                (
+                    "--loop",
+                    "With --present, start over at the end: with --auto, a kiosk\nwithout Presenter View, playback dock or cursor",
+                ),
+                (
                     "--duration <TIME>",
                     "Planned length of the talk, e.g. 20m or 1h30m: Presenter View\ncounts it down and shows how far ahead or behind you are",
                 ),
@@ -148,6 +156,9 @@ only says whether there is one",
                 ("Home  End", "First or last step"),
                 ("O", "Overview of every slide, with search"),
                 ("B  W", "Black or white screen for the audience"),
+                ("L", "Laser pointer: tap to keep it on, hold to show it"),
+                ("D  C", "Draw on the slide; clear the drawing"),
+                ("Z", "Zoom around the cursor; scroll for more or less"),
                 ("P", "Reopen the presenter window"),
             ],
         ),
@@ -175,6 +186,10 @@ only says whether there is one",
                 (
                     "gaanim --present talk.gaanim",
                     "Present the recording, without Python",
+                ),
+                (
+                    "gaanim --present --auto 8s --loop talk.gaanim",
+                    "Run it by itself on a stand's screen",
                 ),
             ],
         ),
@@ -355,6 +370,15 @@ const EXPORT: Page = Page {
                     "--notes",
                     "PDF only: after the last page of each slide, a page with\nits scene.segment(notes=...)",
                 ),
+                (
+                    "--per-slide",
+                    "PDF only: one page per slide, its last step, instead of a\npage per scene.stop()",
+                ),
+                (
+                    "--handout <CxR|notes>",
+                    "PDF only: slides on sheets to hand out, one per slide:\n2x3 puts six on a sheet, notes one over its notes",
+                ),
+                ("--paper <a4|letter>", "The sheet of --handout (default a4)"),
                 (
                     "--message-format <FORMAT>",
                     "human (default) or json: messages and progress with its\npercent as JSON lines on stdout, without the bar",
@@ -764,6 +788,9 @@ mod tests {
             ".mov",
             ".pdf",
             "--notes",
+            "--per-slide",
+            "--handout",
+            "--paper",
         ] {
             assert!(export.contains(option), "{option}");
         }
@@ -774,6 +801,8 @@ mod tests {
             "export",
             "--diff",
             "--present",
+            "--auto",
+            "--loop",
             "RUST_LOG",
             "EXAMPLES",
         ] {
