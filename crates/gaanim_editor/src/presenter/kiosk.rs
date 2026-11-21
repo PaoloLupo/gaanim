@@ -157,14 +157,16 @@ pub(crate) fn kiosk_system(
     }
 }
 
-/// Hide the cursor over a kiosk's audience screen; show it again when the
-/// presentation ends.
+/// Hide the cursor over a kiosk's audience screen, and where the laser
+/// pointer takes its place; show it again when the presentation ends.
 pub(crate) fn kiosk_cursor_system(
     kiosk: Res<Kiosk>,
     presentation: Res<PresentationMode>,
+    ink: Option<Res<super::ink::PresentationInk>>,
     mut cursors: Query<&mut CursorOptions, With<PrimaryWindow>>,
 ) {
-    let visible = !(kiosk.active() && presentation.active);
+    let laser = ink.is_some_and(|ink| ink.laser);
+    let visible = !((kiosk.active() || laser) && presentation.active);
     for mut cursor in &mut cursors {
         if cursor.visible != visible {
             cursor.visible = visible;

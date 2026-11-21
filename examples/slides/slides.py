@@ -4,7 +4,8 @@ Each scene.segment() is a slide: template= lays out its slots, notes= are
 the speaker notes Presenter View shows, and a transition leads into it. Each
 scene.stop() is a step where a presentation waits for the speaker; exports
 and previews play straight through. Every slide shows the code that makes it.
-Present it with `gaanim --present slides.py`, or leave it running on a
+Present it with `gaanim --present slides.py` (L, D and Z point, draw and
+zoom over a slide while presenting), or leave it running on a
 stand's screen with `gaanim --present --auto 8s --loop slides.py`, which
 goes on from each step after eight seconds and starts over at the end.
 `gaanim export slides.py -o handout.pdf --handout 2x3` prints it six slides

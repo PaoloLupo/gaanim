@@ -36,6 +36,16 @@ Sin publicar todavía.
   audiencia y el cursor se oculta. Ver
   #link("/guias/presentaciones/#modo-quiosco")[Modo quiosco].
 
+== Láser, rotulador y zoom al presentar
+
+- Al presentar, `L` muestra un puntero láser, `D` un rotulador para dibujar
+  sobre la diapositiva (`C` borra, y cambiar de paso también) y `Z` amplía la
+  diapositiva alrededor del cursor, con la rueda para acercar o alejar.
+  Funcionan en la pantalla de la audiencia y en *Now on screen* de Presenter
+  View, también con un paquete `.gaanim` y en el reproductor web, y no tocan la
+  escena ni aparecen en las exportaciones. Ver
+  #link("/guias/presentaciones/#senalar-y-dibujar")[Señalar y dibujar].
+
 == PDF para repartir
 
 - `gaanim export mi-charla --output resumen.pdf --per-slide` escribe una

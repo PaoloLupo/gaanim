@@ -603,9 +603,36 @@ reproducción y el vídeo exportado siguen tu ritmo (ver
   [`O`], [vista general: busca por nombre de diapositiva, paso o notas; `Enter` salta a la primera coincidencia],
   [`T`], [mostrar el tramo que toca decir como subtítulo en el prompter, o volver a las notas de la diapositiva; en el editor, `Shift+T` abre o cierra el subtítulo del prompter],
   [`B` / `W`], [poner la pantalla de la audiencia en negro o en blanco],
+  [`L`], [puntero láser: una pulsación lo deja encendido hasta la siguiente; mantenida, se ve mientras dura (ver #link(<senalar-y-dibujar>)[Señalar y dibujar])],
+  [`D` / `C`], [rotulador para dibujar sobre la diapositiva; borrar lo dibujado],
+  [`Z`], [ampliar la diapositiva alrededor del cursor; la rueda acerca o aleja],
   [`P`], [volver a abrir la vista del presentador si la cerraste],
-  [`Esc`], [cerrar la vista general o el negro/blanco; después, salir del modo presentación],
+  [`Esc`], [cerrar la vista general o el negro/blanco; después, apagar el láser, el rotulador y el zoom; después, salir del modo presentación],
 )
+
+== Señalar y dibujar <senalar-y-dibujar>
+
+Mientras presentas puedes señalar, dibujar y ampliar sobre la diapositiva sin
+tocar la escena. Funcionan desde la pantalla de la audiencia y desde la vista
+grande de *Now on screen* en Presenter View: lo que haces en una se ve en la
+otra.
+
+- `L` enciende el puntero láser, un punto rojo que sigue al ratón y ocupa el
+  lugar del cursor. Una pulsación corta lo deja encendido hasta volver a
+  pulsar; mantenida, se apaga al soltarla.
+- `D` activa el rotulador: arrastra para dibujar. Mientras está activo, un clic
+  en la diapositiva dibuja en lugar de avanzar. `C` borra los trazos, y pasar a
+  otro paso también los borra.
+- `Z` amplía la diapositiva al doble alrededor del cursor, que sigue al
+  moverlo, y la rueda acerca o aleja (de 1,25× a 6×). Desde un script, la
+  escena se vuelve a dibujar a ese tamaño, así que el texto sigue nítido; un
+  paquete `.gaanim` amplía los fotogramas que grabó. Mientras dibujas, el zoom
+  se queda quieto.
+- Los trazos se guardan en coordenadas de la diapositiva: se quedan sobre lo
+  que marcan si cambia el tamaño de la ventana o el zoom.
+- Nada de esto aparece en las exportaciones, las capturas ni las miniaturas.
+  Funciona igual al presentar un paquete `.gaanim` y entre las dos páginas del
+  reproductor web.
 
 Saltar a una diapositiva muestra su estado inicial aunque la anterior termine
 con una pausa en el mismo instante.

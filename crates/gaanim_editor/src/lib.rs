@@ -293,6 +293,7 @@ impl Plugin for GaanimEditorPlugin {
             .init_resource::<presenter::PresentationTimer>()
             .init_resource::<presenter::kiosk::Kiosk>()
             .init_resource::<presenter::kiosk::KioskClock>()
+            .init_resource::<presenter::ink::PresentationInk>()
             .init_resource::<fps_overlay::FpsOverlay>()
             .init_resource::<EditorFullscreenState>()
             .init_resource::<PresentationMode>()
@@ -367,6 +368,8 @@ impl Plugin for GaanimEditorPlugin {
                         .after(presenter::presentation_input_system)
                         .before(gaanim_timeline::timeline_playback_system),
                     presenter::kiosk::kiosk_cursor_system,
+                    presenter::ink::audience_ink_input_system
+                        .after(presenter::presentation_input_system),
                 ),
             )
             .add_systems(Startup, presenter::spawn_presenter_window_system)
@@ -430,8 +433,12 @@ impl Plugin for GaanimEditorPlugin {
             )
             .add_systems(
                 EguiPrimaryContextPass,
-                presentation_blank_overlay_system
-                    .after(presenter::audience_playback_controls_system),
+                (
+                    presenter::ink::audience_ink_overlay_system
+                        .after(presenter::audience_playback_controls_system),
+                    presentation_blank_overlay_system
+                        .after(presenter::audience_playback_controls_system),
+                ),
             )
             .add_systems(EguiPrimaryContextPass, export::export_dialog_system)
             .add_systems(
@@ -3506,6 +3513,7 @@ fn presentation_escape_system(
         ),
     >,
     mut commands: Commands,
+    mut ink: ResMut<presenter::ink::PresentationInk>,
 ) {
     if !presentation_mode.active || !keys.just_pressed(KeyCode::Escape) {
         return;
@@ -3517,6 +3525,10 @@ fn presentation_escape_system(
     }
     if *blank != AudienceBlank::None {
         *blank = AudienceBlank::None;
+        return;
+    }
+    if ink.active() || !ink.state.strokes.is_empty() {
+        ink.reset();
         return;
     }
     // The web player's Presenter View page is nothing but Presenter View.
@@ -4102,6 +4114,7 @@ fn viewport_adjust_system(
     mut viewport_frame: ResMut<ViewportFrame>,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     presentation: Res<PresentationMode>,
+    ink: Option<Res<presenter::ink::PresentationInk>>,
 ) {
     let Some(base_camera) = shown_camera(rig.as_deref(), authored.as_deref()) else {
         return;
@@ -4131,9 +4144,21 @@ fn viewport_adjust_system(
         viewport_frame.size = frame_size;
         viewport_frame.output_size = glam::DVec2::new(anim_w, anim_h);
         view_override.0 = None;
-        camera_viewport.scale = fit_scale;
-        camera_viewport.offset_y = 0.0;
-        camera_viewport.offset_x = 0.0;
+        // `Z` zooms around a point of the slide, which stays where it was.
+        let (zoom, offset) = match ink.as_ref().and_then(|ink| ink.state.zoom) {
+            Some(zoom) => {
+                let factor = f64::from(zoom.factor);
+                let focus = viewport_frame.origin
+                    + glam::DVec2::new(f64::from(zoom.focus[0]), f64::from(zoom.focus[1]))
+                        * frame_size;
+                let center = glam::DVec2::new(window_w, window_h) * 0.5;
+                (factor, (focus - center) * (1.0 - factor))
+            }
+            None => (1.0, glam::DVec2::ZERO),
+        };
+        camera_viewport.scale = fit_scale * zoom;
+        camera_viewport.offset_x = offset.x;
+        camera_viewport.offset_y = offset.y;
         return;
     }
 
@@ -4632,6 +4657,7 @@ mod tests {
         app.init_resource::<ButtonInput<KeyCode>>()
             .init_resource::<AudienceBlank>()
             .init_resource::<presenter::PresenterOverviewState>()
+            .init_resource::<presenter::ink::PresentationInk>()
             .insert_resource(PresentationMode { active: true })
             .add_systems(Update, presentation_escape_system);
         app.world_mut().spawn((
