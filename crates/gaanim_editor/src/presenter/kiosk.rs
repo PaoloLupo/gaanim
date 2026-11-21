@@ -140,6 +140,11 @@ pub(crate) fn kiosk_system(
         clock.rest = None;
         return;
     }
+    // The kiosk decides what the end does: a script's preview loops over
+    // the whole timeline, which would wrap around without the wait.
+    if timeline.loop_range.is_some() {
+        timeline.loop_range = None;
+    }
     let input =
         keys.get_just_pressed().next().is_some() || mouse.get_just_pressed().next().is_some();
     match clock.step(&kiosk, rest_of(&timeline), input, time.delta_secs_f64()) {
