@@ -11,6 +11,7 @@ from typing import Any, Callable, ClassVar, Iterator, Literal, Mapping, Optional
 from .live import Player, Pose, State
 from .questions import Question
 from .matrix import Matrix
+from .data_structures import Array, LinkedList, Queue, Stack
 from .pointer import Pointer
 from .timeline import Timeline
 from .sections import SceneSections
@@ -12448,6 +12449,98 @@ class Visualization:
             line = scene.viz.timeline(1980, 2026, breaks=[(2016, 0.55)])
             first = line.event(1985, "Masonry", "First tests", side="above")
             scene.play([line.axis.animate.create(), *[part.animate.fade_in() for part in first.parts]])
+        """
+        ...
+    def array(
+        self,
+        values: Sequence[Any],
+        *,
+        cell_size: float = 0.9,
+        gap: float = 0.12,
+        indices: bool = False,
+        format: Callable[[Any], str] | None = None,
+    ) -> Array:
+        """An array of cells, each a box and its value, to explain an algorithm.
+
+        ``indices=True`` writes each slot's index under it, and
+        ``array.pointer("i", 0)`` adds a named arrow below that
+        ``i.animate.move_to(k)`` slides. ``array.animate.compare(i, j)``,
+        ``swap(i, j)``, ``insert(index, value)`` and ``remove(index)`` return a
+        ``Composition`` to play, alone or with other animations; a swap moves
+        the two cells, so every cell keeps its identity, and ``item(k)``,
+        ``cell(k)`` (the box) and ``label(k)`` follow the cells as the
+        operations left them. ``format`` turns a value into its text
+        (``str`` by default). The cells are 0.9 units square with 0.12 between
+        them, in the theme's ``panel`` and ``rule`` colors. Place the array
+        with ``place``/``move_to`` before its first operation and before
+        adding pointers. A size that is not positive, or a negative gap,
+        raises ``ValueError``.
+
+        Example:
+            arr = scene.viz.array([5, 2, 9, 1], indices=True).place(zone)
+            i = arr.pointer("i", 0)
+            scene.play([arr.animate.compare(0, 1)])
+            scene.play([arr.animate.swap(0, 1), i.animate.move_to(1)])
+            arr.cell(3).fill(scene.colors.success)
+        """
+        ...
+    def stack(
+        self,
+        values: Sequence[Any] = (),
+        *,
+        cell_size: float = 0.9,
+        gap: float = 0.08,
+        format: Callable[[Any], str] | None = None,
+    ) -> Stack:
+        """A stack of cells, bottom first, that grows upward.
+
+        ``stack.animate.push(value)`` drops a cell on top and ``pop()`` lifts
+        the top one off, each a ``Composition``. Place it before the first
+        push. Popping an empty stack raises ``IndexError``.
+
+        Example:
+            stack = scene.viz.stack(["a", "b"]).place(zone)
+            scene.play([stack.animate.push("c")])
+        """
+        ...
+    def queue(
+        self,
+        values: Sequence[Any] = (),
+        *,
+        cell_size: float = 0.9,
+        gap: float = 0.12,
+        format: Callable[[Any], str] | None = None,
+    ) -> Queue:
+        """A queue of cells, front on the left.
+
+        ``queue.animate.enqueue(value)`` adds a cell at the back and
+        ``dequeue()`` takes the front one out on the left while the rest move
+        up, each a ``Composition``. Dequeuing an empty queue raises
+        ``IndexError``.
+
+        Example:
+            queue = scene.viz.queue([1, 2]).place(zone)
+            scene.play([queue.animate.dequeue()])
+        """
+        ...
+    def linked_list(
+        self,
+        values: Sequence[Any],
+        *,
+        cell_size: float = 0.9,
+        gap: float = 0.7,
+        format: Callable[[Any], str] | None = None,
+    ) -> LinkedList:
+        """Nodes holding ``values``, each linked to the next by an arrow.
+
+        ``nodes.animate.insert_after(index, value)`` makes room and links a
+        new node after node ``index``; ``remove(index)`` unlinks one and
+        closes the gap. Nodes keep their identity, and ``arrow(k)`` is the
+        arrow out of node ``k``.
+
+        Example:
+            nodes = scene.viz.linked_list([3, 8]).place(zone)
+            scene.play([nodes.animate.insert_after(0, 5)])
         """
         ...
     def matrix(

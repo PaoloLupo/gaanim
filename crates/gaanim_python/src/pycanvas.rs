@@ -5436,6 +5436,82 @@ impl PyVisualization {
             .unbind())
     }
 
+    /// An array of cells with indices and pointers; see `gaanim_core.pyi`.
+    #[pyo3(signature = (values, **options))]
+    fn array<'py>(
+        &self,
+        py: Python<'py>,
+        values: &Bound<'py, PyAny>,
+        options: Option<&Bound<'py, PyDict>>,
+    ) -> PyResult<Py<PyAny>> {
+        crate::custom::ensure_authoring_allowed()?;
+        let module = py.import("gaanim.data_structures")?;
+        Ok(module
+            .getattr("_build_array")?
+            .call((self.scene.bind(py), values), options)?
+            .unbind())
+    }
+
+    /// A stack of cells that grows upward; see `gaanim_core.pyi`.
+    #[pyo3(signature = (values=None, **options))]
+    fn stack<'py>(
+        &self,
+        py: Python<'py>,
+        values: Option<&Bound<'py, PyAny>>,
+        options: Option<&Bound<'py, PyDict>>,
+    ) -> PyResult<Py<PyAny>> {
+        crate::custom::ensure_authoring_allowed()?;
+        let module = py.import("gaanim.data_structures")?;
+        Ok(module
+            .getattr("_build_stack")?
+            .call(
+                (
+                    self.scene.bind(py),
+                    values.map_or_else(|| PyTuple::empty(py).into_any(), |values| values.clone()),
+                ),
+                options,
+            )?
+            .unbind())
+    }
+
+    /// A queue of cells, front on the left; see `gaanim_core.pyi`.
+    #[pyo3(signature = (values=None, **options))]
+    fn queue<'py>(
+        &self,
+        py: Python<'py>,
+        values: Option<&Bound<'py, PyAny>>,
+        options: Option<&Bound<'py, PyDict>>,
+    ) -> PyResult<Py<PyAny>> {
+        crate::custom::ensure_authoring_allowed()?;
+        let module = py.import("gaanim.data_structures")?;
+        Ok(module
+            .getattr("_build_queue")?
+            .call(
+                (
+                    self.scene.bind(py),
+                    values.map_or_else(|| PyTuple::empty(py).into_any(), |values| values.clone()),
+                ),
+                options,
+            )?
+            .unbind())
+    }
+
+    /// Nodes linked by arrows; see `gaanim_core.pyi`.
+    #[pyo3(signature = (values, **options))]
+    fn linked_list<'py>(
+        &self,
+        py: Python<'py>,
+        values: &Bound<'py, PyAny>,
+        options: Option<&Bound<'py, PyDict>>,
+    ) -> PyResult<Py<PyAny>> {
+        crate::custom::ensure_authoring_allowed()?;
+        let module = py.import("gaanim.data_structures")?;
+        Ok(module
+            .getattr("_build_linked_list")?
+            .call((self.scene.bind(py), values), options)?
+            .unbind())
+    }
+
     /// Draw one element per signal (a spectrum, a waveform); see
     /// `gaanim_core.pyi`.
     #[pyo3(signature = (values, **options))]

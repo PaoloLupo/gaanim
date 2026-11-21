@@ -36,6 +36,15 @@ Sin publicar todavía.
   audiencia y el cursor se oculta. Ver
   #link("/guias/presentaciones/#modo-quiosco")[Modo quiosco].
 
+== Estructuras de datos
+
+- `scene.viz.array` dibuja un arreglo con índices y punteros con nombre, y
+  `compare`, `swap`, `insert` y `remove` mueven sus celdas, que conservan su
+  identidad. `scene.viz.stack`, `queue` y `linked_list` añaden `push` y `pop`,
+  `enqueue` y `dequeue`, e `insert_after` y `remove`. Cada operación es una
+  `Composition` que se combina con otras animaciones. Ver
+  #link("/referencia/visualization/#estructuras-de-datos")[Estructuras de datos].
+
 == Enlaces y diapositivas de respaldo
 
 - `drawable.link_to(segmento)` salta, con un clic al presentar, a otro

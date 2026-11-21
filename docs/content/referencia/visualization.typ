@@ -1288,6 +1288,81 @@ scene.render()
 ```
 ]
 
+== Estructuras de datos <estructuras-de-datos>
+
+`scene.viz.array`, `stack`, `queue` y `linked_list` explican algoritmos sin
+dibujar cada celda: cada celda es un grupo con su caja y su valor, en los
+colores `panel` y `rule` del tema, y las operaciones mueven esas celdas, así
+que cada una conserva su identidad tras intercambios, inserciones y
+eliminaciones. Cada operación devuelve una `Composition` que se reproduce con
+`scene.play`, sola o junto a otras animaciones, como el resaltado de una línea
+de `Code`. Coloca la estructura (`place`, `move_to`, `next_to`) antes de la
+primera operación y antes de añadir punteros: las celdas y flechas nuevas van
+donde esté entonces.
+
+#api-entry(
+  name: "Visualization.array",
+  kind: "factory",
+  params: (
+    (name: "values", type: "Sequence[Any]", default: none, desc: [Los valores, en orden.]),
+    (name: "cell_size / gap", type: "float", default: "0.9 / 0.12", desc: [Lado de cada celda y espacio entre celdas.]),
+    (name: "indices", type: "bool", default: "False", desc: [Escribe el índice de cada hueco debajo.]),
+    (name: "format", type: "Callable[[Any], str] | None", default: "None", desc: [Convierte un valor en su texto; por defecto, `str`.]),
+  ),
+  returns: (type: "Array", desc: [`item(k)` (la celda), `cell(k)` (su caja), `label(k)` (su texto), `values`, `items`, `pointer(...)` y `animate`.]),
+  desc: [`item`, `cell` y `label` siguen a las celdas tal como las dejaron las operaciones: tras un intercambio, `item(0)` es la celda que llegó al hueco 0. Un índice fuera de rango lanza `IndexError`; un tamaño no positivo o un hueco negativo, `ValueError`.],
+)[
+```python
+# show-code: true
+# player
+from gaanim import Scene
+scene = Scene(frame=(16, 9))
+arr = scene.viz.array([5, 2, 9, 1], indices=True)
+i = arr.pointer("i", 0)
+scene.play([arr.animate.compare(0, 1)])
+scene.play([arr.animate.swap(0, 1), i.animate.move_to(1)])
+scene.play([arr.animate.insert(2, 7)])
+arr.cell(3).fill(scene.colors.success)
+scene.wait(0.5)
+# output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
+  name: "array.animate.compare / swap / insert / remove",
+  kind: "method",
+  signature: "compare(i, j, *, color=None, duration=0.6) -> Composition · swap(i, j, *, duration=0.9) -> Composition · insert(index, value, *, duration=0.8) -> Composition · remove(index, *, duration=0.8) -> Composition",
+  desc: [`compare` resalta las dos celdas a la vez, en `scene.colors.accent` si no se da otro color. `swap` intercambia dos celdas: la primera sube por encima de la segunda mientras se cruzan, lejos de los índices y los punteros; el mismo índice dos veces lanza `ValueError`. `insert` hace sitio en `index` (`len(arr)` añade al final) y deja caer el valor nuevo; `remove` saca la celda y cierra el hueco. Los índices escritos se añaden o se quitan al final. `animate` conserva además el vocabulario de `Drawable.animate` sobre la estructura inicial.],
+)
+
+#api-entry(
+  name: "array.pointer",
+  kind: "method",
+  signature: "pointer(name, index=0, *, color=None) -> ArrayPointer",
+  desc: [Una flecha con nombre bajo la celda `index`, debajo de los índices, en `scene.colors.accent` por defecto. `pointer.animate.move_to(k)` la desliza bajo otra celda (`len(arr)` queda pasado el final) y `pointer.index` dice dónde está. Añádela después de colocar el arreglo. Un nombre vacío lanza `ValueError`.],
+)
+
+#api-entry(
+  name: "Visualization.stack / queue / linked_list",
+  kind: "factory",
+  signature: "stack(values=(), *, cell_size=0.9, gap=0.08, format=None) -> Stack · queue(values=(), *, cell_size=0.9, gap=0.12, format=None) -> Queue · linked_list(values, *, cell_size=0.9, gap=0.7, format=None) -> LinkedList",
+  desc: [Una pila crece hacia arriba: `stack.animate.push(valor)` deja caer una celda encima y `pop()` levanta la de arriba, que `stack.top` nombra. Una cola tiene el frente a la izquierda: `queue.animate.enqueue(valor)` añade una celda al final y `dequeue()` saca la primera por la izquierda mientras las demás avanzan. Una lista enlazada une cada nodo con el siguiente por una flecha (`nodes.arrow(k)` sale del nodo `k`): `nodes.animate.insert_after(k, valor)` hace sitio y enlaza un nodo nuevo tras el nodo `k`, y `remove(k)` lo desenlaza y cierra el hueco. Sacar de una pila o una cola vacías lanza `IndexError`.],
+)[
+```python
+# show-code: true
+# player
+from gaanim import Scene
+scene = Scene(frame=(16, 9))
+nodes = scene.viz.linked_list([3, 8, 4])
+scene.play([nodes.animate.insert_after(0, 5)])
+scene.play([nodes.animate.remove(2)])
+scene.wait(0.5)
+# output: preview.webp
+scene.render()
+```
+]
+
 == Gráficos declarativos
 
 `ChartSpec` es una receta inmutable: datos, marca, codificaciones, ejes y guías.

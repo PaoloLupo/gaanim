@@ -259,6 +259,7 @@ Axes, plots, charts, vector fields and live readouts.
 
 | Example | Description |
 | --- | --- |
+| [Data structures](visualization/data_structures.py) | An array sorted by bubble sort with indices and pointers, a stack and a queue that push, pop, enqueue and dequeue, and a linked list that inserts and removes nodes. |
 | [Axes](visualization/axes.py) | Linear, log, symlog, power, category and time axes, tick steps, number formats, styles, titles and crossings. |
 | [Coordinate spaces](visualization/coordinate_spaces.py) | Cartesian, polar and complex planes, number lines, grids and numbers, coordinates that place objects and animated views. |
 | [Maps](visualization/maps.py) | Mercator and equirectangular maps, labeled graticules, countries from a GeoJSON file, lines, places, and polygons with holes and islands that the frame clips. |

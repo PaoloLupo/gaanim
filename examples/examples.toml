@@ -634,6 +634,10 @@ path = "3d/framing_3d.py"
 description = "A portal frame kept beside a panel of steps by screen_offset while the camera orbits and dollies, labels pinned above its points with billboard(offset=, anchor=), and a camera bound to coordinates computed from a parameter."
 
 [[example]]
+path = "visualization/data_structures.py"
+description = "An array sorted by bubble sort with indices and pointers, a stack and a queue that push, pop, enqueue and dequeue, and a linked list that inserts and removes nodes."
+
+[[example]]
 path = "visualization/axes.py"
 description = "Linear, log, symlog, power, category and time axes, tick steps, number formats, styles, titles and crossings."
 

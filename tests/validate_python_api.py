@@ -492,6 +492,53 @@ def validate_stub_attribute_writability(module: object, tree: ast.Module) -> lis
     return failures
 
 
+def validate_data_structures_contract(module: object) -> list[str]:
+    """Arrays, stacks, queues and linked lists keep their cells' identity."""
+    failures: list[str] = []
+    scene = module.Scene(frame=(16, 9))
+    arr = scene.viz.array([5, 2, 9], indices=True)
+    if type(arr).__name__ != "Array":
+        failures.append("scene.viz.array must return an Array")
+    first, second = arr.item(0), arr.item(1)
+    pointer = arr.pointer("i", 0)
+    scene.play([arr.animate.compare(0, 1)])
+    scene.play([arr.animate.swap(0, 1), pointer.animate.move_to(1)])
+    if arr.values != [2, 5, 9] or arr.item(0) is not second or arr.item(1) is not first:
+        failures.append(f"swap must exchange values and cells: {arr.values!r}")
+    if pointer.index != 1:
+        failures.append(f"a moved pointer must report its index: {pointer.index}")
+    scene.play([arr.animate.insert(1, 7)])
+    scene.play([arr.animate.remove(-1)])
+    if arr.values != [2, 7, 5] or len(arr) != 3:
+        failures.append(f"insert and remove must update the values: {arr.values!r}")
+    for call, error_type in (
+        (lambda: arr.item(3), IndexError),
+        (lambda: arr.animate.swap(1, 1), ValueError),
+        (lambda: arr.pointer("  "), ValueError),
+        (lambda: scene.viz.array([1], cell_size=0), ValueError),
+        (lambda: scene.viz.stack().animate.pop(), IndexError),
+        (lambda: scene.viz.queue().animate.dequeue(), IndexError),
+    ):
+        try:
+            call()
+            failures.append(f"expected {error_type.__name__}")
+        except error_type:
+            pass
+    stack = scene.viz.stack(["a"])
+    scene.play([stack.animate.push("b")])
+    scene.play([stack.animate.pop()])
+    queue = scene.viz.queue([1, 2])
+    scene.play([queue.animate.enqueue(3)])
+    scene.play([queue.animate.dequeue()])
+    nodes = scene.viz.linked_list([3, 8])
+    scene.play([nodes.animate.insert_after(0, 5)])
+    if stack.values != ["a"] or queue.values != [2, 3] or nodes.values != [3, 5, 8]:
+        failures.append(f"stack, queue and list values: {stack.values!r} {queue.values!r} {nodes.values!r}")
+    if not isinstance(nodes.arrow(1), module.Drawable):
+        failures.append("LinkedList.arrow must give the arrow between nodes")
+    return failures
+
+
 def validate_links_contract(module: object) -> list[str]:
     """Drawables link to segments or addresses, and backup segments exist."""
     failures: list[str] = []
@@ -4606,6 +4653,7 @@ def main() -> int:
     missing.extend(validate_editorial_contract(module))
     missing.extend(validate_slide_builds_contract(module))
     missing.extend(validate_links_contract(module))
+    missing.extend(validate_data_structures_contract(module))
     missing.extend(validate_theme_typography_contract(module))
     missing.extend(validate_default_theme_contract(module, tree))
     missing.extend(validate_theme_colors_contract(module, tree))

@@ -275,6 +275,7 @@ const GAANIM_MATRIX: &str = include_str!("../../gaanim_python/gaanim/matrix.py")
 const GAANIM_AUDIO_VIZ: &str = include_str!("../../gaanim_python/gaanim/audio_viz.py");
 const GAANIM_POINTER: &str = include_str!("../../gaanim_python/gaanim/pointer.py");
 const GAANIM_TIMELINE: &str = include_str!("../../gaanim_python/gaanim/timeline.py");
+const GAANIM_DATA_STRUCTURES: &str = include_str!("../../gaanim_python/gaanim/data_structures.py");
 const GAANIM_ANIMATION_TYPES: &str = include_str!("../../gaanim_python/gaanim/animation_types.py");
 const GAANIM_TYPE_ALIASES: &str = include_str!("../../gaanim_python/gaanim/_type_aliases.py");
 const GAANIM_LIVE: &str = include_str!("../../gaanim_python/gaanim/live.py");
@@ -341,6 +342,13 @@ fn bootstrap_gaanim_package(py: Python<'_>) -> PyResult<()> {
     let timeline_name = std::ffi::CString::new("gaanim.timeline").unwrap();
     let timeline = PyModule::from_code(py, &timeline_source, &timeline_file, &timeline_name)?;
     modules.set_item("gaanim.timeline", &timeline)?;
+
+    let structures_source = std::ffi::CString::new(GAANIM_DATA_STRUCTURES).unwrap();
+    let structures_file = std::ffi::CString::new("gaanim/data_structures.py").unwrap();
+    let structures_name = std::ffi::CString::new("gaanim.data_structures").unwrap();
+    let structures =
+        PyModule::from_code(py, &structures_source, &structures_file, &structures_name)?;
+    modules.set_item("gaanim.data_structures", &structures)?;
 
     let types_source = std::ffi::CString::new(GAANIM_ANIMATION_TYPES).unwrap();
     let types_file = std::ffi::CString::new("gaanim/animation_types.py").unwrap();
