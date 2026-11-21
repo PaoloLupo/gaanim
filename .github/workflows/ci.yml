@@ -120,6 +120,7 @@ jobs:
             examples/math/matrices.py
             examples/visualization/chart_marks.py
             examples/layout/reflow.py
+            examples/layout/boxes.py
             examples/showcase/dashboard.py
             examples/math/derivations.py
             examples/3d/primitives_3d.py
