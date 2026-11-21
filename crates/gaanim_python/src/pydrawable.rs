@@ -4306,6 +4306,30 @@ impl PyDrawable {
         crate::pylayout::reflow_owner_and_advance(&handle, duration, advance);
         Ok(slf)
     }
+    /// Link this drawable to a segment or a web address; see
+    /// `gaanim_core.pyi`.
+    fn link_to<'py>(
+        slf: &Bound<'py, Self>,
+        target: &Bound<'_, PyAny>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        crate::custom::ensure_authoring_allowed()?;
+        let value_error = |error: gaanim_api::canvas::LinkError| {
+            pyo3::exceptions::PyValueError::new_err(error.to_string())
+        };
+        let handle = slf.borrow().0.clone();
+        if let Ok(segment) = target.cast::<crate::pycanvas::PySegment>() {
+            handle
+                .link_to_segment(&segment.borrow().inner)
+                .map_err(value_error)?;
+        } else if let Ok(text) = target.extract::<String>() {
+            handle.link_to(gaanim_api::canvas::LinkSpec::parse(&text).map_err(value_error)?);
+        } else {
+            return Err(pyo3::exceptions::PyTypeError::new_err(
+                "link_to takes a Segment from scene.segment(...) or a web address",
+            ));
+        }
+        Ok(slf.clone().into_any())
+    }
     #[pyo3(signature = (x, y=None, anchor=None))]
     fn move_to<'py>(
         slf: &Bound<'py, Self>,

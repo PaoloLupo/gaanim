@@ -126,6 +126,9 @@ pub const THUMBNAIL: &str = "thumbnail.png";
 const POLLS: &str = "polls.json";
 /// Live zones, as JSON: the player runs them, so frames never hold them.
 const LIVE: &str = "live.json";
+/// Backup segments and where links lie at each resting instant, as JSON
+/// (see [`LinksEntry`]).
+const LINKS: &str = "links.json";
 /// The scene's rehearsal, as JSON: live zones replay it outside a
 /// presentation.
 const REHEARSAL: &str = "rehearsal.json";
@@ -245,6 +248,92 @@ pub struct SceneData {
     pub poll_texts: Vec<LiveTextRecord>,
     /// Readouts of live poll values.
     pub poll_readouts: Vec<LiveReadoutRecord>,
+    /// Backup segments (`skip=True`), by id.
+    pub backup_segments: Vec<u32>,
+    /// Where links lie at each resting instant (stops and the end).
+    pub link_zones: Vec<(f64, Vec<gaanim_scene::links::LinkZone>)>,
+}
+
+/// The [`LINKS`] entry.
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct LinksEntry {
+    #[serde(default)]
+    backup_segments: Vec<u32>,
+    #[serde(default)]
+    rests: Vec<LinkRest>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct LinkRest {
+    time: f64,
+    zones: Vec<LinkRecord>,
+}
+
+/// A link zone: a segment id or a web address, and its box in the frame.
+#[derive(Debug, Serialize, Deserialize)]
+struct LinkRecord {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    segment: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    url: Option<String>,
+    rect: [f32; 4],
+}
+
+impl LinksEntry {
+    fn of(scene: &SceneData) -> Self {
+        use gaanim_scene::links::LinkTarget;
+        Self {
+            backup_segments: scene.backup_segments.clone(),
+            rests: scene
+                .link_zones
+                .iter()
+                .map(|(time, zones)| LinkRest {
+                    time: *time,
+                    zones: zones
+                        .iter()
+                        .map(|zone| {
+                            let (segment, url) = match &zone.target {
+                                LinkTarget::Segment(id) => (Some(*id), None),
+                                LinkTarget::Url(url) => (None, Some(url.clone())),
+                            };
+                            LinkRecord {
+                                segment,
+                                url,
+                                rect: zone.rect,
+                            }
+                        })
+                        .collect(),
+                })
+                .collect(),
+        }
+    }
+
+    fn apply(self, scene: &mut SceneData) {
+        use gaanim_scene::links::{LinkTarget, LinkZone};
+        scene.backup_segments = self.backup_segments;
+        scene.link_zones = self
+            .rests
+            .into_iter()
+            .map(|rest| {
+                let zones = rest
+                    .zones
+                    .into_iter()
+                    .filter_map(|record| {
+                        let target = match (record.segment, record.url) {
+                            (Some(id), _) => LinkTarget::Segment(id),
+                            (None, Some(url)) => LinkTarget::Url(url),
+                            (None, None) => return None,
+                        };
+                        Some(LinkZone {
+                            target,
+                            rect: record.rect,
+                        })
+                    })
+                    .collect();
+                (rest.time, zones)
+            })
+            .collect();
+    }
 }
 
 // A presented bundle redraws these recorded elements from the live results:
@@ -949,6 +1038,8 @@ impl SceneData {
             poll_bars: Vec::new(),
             poll_texts: Vec::new(),
             poll_readouts: Vec::new(),
+            backup_segments: Vec::new(),
+            link_zones: Vec::new(),
         })
     }
 }
@@ -1333,6 +1424,12 @@ impl<W: Write + Seek> BundleWriter<W> {
                 .map_err(|error| BundleError::Corrupt(error.to_string()))?;
             self.write_entry(LIVE, &json)?;
         }
+        if !scene.backup_segments.is_empty() || scene.link_zones.iter().any(|(_, z)| !z.is_empty())
+        {
+            let json = serde_json::to_vec(&LinksEntry::of(scene))
+                .map_err(|error| BundleError::Corrupt(error.to_string()))?;
+            self.write_entry(LINKS, &json)?;
+        }
         if let Some(rehearsal) = scene
             .rehearsal
             .as_ref()
@@ -1716,6 +1813,11 @@ impl Bundle {
             scene.live_zones =
                 serde_json::from_slice(&read_entry(&archive, Some(&manifest), LIVE)?)
                     .map_err(|error| BundleError::Corrupt(format!("{LIVE}: {error}")))?;
+        }
+        if manifest.entries.contains_key(LINKS) {
+            serde_json::from_slice::<LinksEntry>(&read_entry(&archive, Some(&manifest), LINKS)?)
+                .map_err(|error| BundleError::Corrupt(format!("{LINKS}: {error}")))?
+                .apply(&mut scene);
         }
         if manifest.entries.contains_key(REHEARSAL) {
             scene.rehearsal = Some(

@@ -275,6 +275,54 @@ pub(crate) fn setup_scene_system(world: &mut World) {
     }
 }
 
+/// Where the scene's links lie at each of `times`, in the camera's frame
+/// (see [`gaanim_scene::links::link_zones`]). The scene is built in a world
+/// of its own, without a GPU: an export, a bundle and a PDF deck call it only
+/// for scenes with links.
+pub fn link_zones_at<F>(
+    setup_world_fn: F,
+    times: &[f64],
+) -> Result<Vec<Vec<gaanim_scene::links::LinkZone>>>
+where
+    F: FnOnce(&mut World) + Send + Sync + 'static,
+{
+    let mut app = App::new();
+    app.add_plugins(bevy::prelude::MinimalPlugins)
+        .add_plugins(gaanim_scene::GaanimScenePlugin)
+        .add_plugins(gaanim_animation::GaanimAnimationPlugin)
+        .add_plugins(gaanim_timeline::GaanimTimelinePlugin)
+        .add_plugins(gaanim_media::GaanimMediaPlugin)
+        .add_plugins(gaanim_text::GaanimTextPlugin)
+        .add_plugins(gaanim_renderer::GaanimDerivedGeometryPlugin);
+    app.insert_resource(SetupCallback(Some(Box::new(setup_world_fn))));
+    app.add_systems(Startup, setup_scene_system);
+    app.finish();
+    app.cleanup();
+    app.update();
+    check_custom_animation_errors(app.world())?;
+    let mut zones = Vec::with_capacity(times.len());
+    for &time in times {
+        app.world_mut().resource_mut::<Timeline>().seek_request = Some(time.max(0.0));
+        app.update();
+        check_custom_animation_errors(app.world())?;
+        let camera = frame_camera(app.world()).map(|resolved| resolved.camera);
+        zones.push(match camera {
+            Some(camera) => gaanim_scene::links::link_zones(app.world_mut(), &camera),
+            None => Vec::new(),
+        });
+    }
+    Ok(zones)
+}
+
+/// Whether the world holds a drawable that links somewhere.
+pub fn has_links(world: &mut World) -> bool {
+    world
+        .query::<&gaanim_scene::links::Hyperlink>()
+        .iter(world)
+        .next()
+        .is_some()
+}
+
 /// Headless GPU-direct export: bypasses Bevy's render graph and winit entirely.
 ///
 /// Uses a minimal Bevy App (ECS + timeline only), own wgpu context with Vello,

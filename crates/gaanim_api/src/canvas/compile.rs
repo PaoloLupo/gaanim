@@ -3028,6 +3028,7 @@ impl SceneModel {
             *metadata = compiled;
         }
         timeline.set_segments(segment_metadata.clone());
+        timeline.backup_segments = self.backup_segment_ids();
         timeline.talk_target = self.talk_target;
         timeline.beat_grid = self.tempo;
         timeline.set_markers(
@@ -3792,6 +3793,25 @@ impl SceneModel {
             ..self.lighting_3d
         });
         builder.commands.insert_resource(self.transparency_3d);
+        // Linked drawables carry their link, once every drawable is spawned.
+        // A drawable compiles under its actual id, which `id_map` names.
+        let links: Vec<_> = self
+            .resolved_links()
+            .into_iter()
+            .map(|(id, target)| (id_map.get(&id).copied().unwrap_or(id), target))
+            .collect();
+        if !links.is_empty() {
+            builder.commands.queue(move |world: &mut World| {
+                let entities = gaanim_scene::ObjectEntities::of(world);
+                for (id, target) in links {
+                    if let Some(&entity) = entities.get(&id) {
+                        world
+                            .entity_mut(entity)
+                            .insert(gaanim_scene::links::Hyperlink(target));
+                    }
+                }
+            });
+        }
         Compiled {
             checkpoint,
             ids: id_map,

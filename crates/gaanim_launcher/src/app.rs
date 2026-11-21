@@ -1455,6 +1455,7 @@ fn presentation_preflight(
             .map(|(_, message)| format!("layout: {message}")),
     );
     report.warnings.extend(canvas.script_warnings());
+    report.warnings.extend(canvas.link_problems());
 
     if manifest.segments.is_empty() {
         report
@@ -1521,6 +1522,7 @@ fn scene_preflight(canvas: &gaanim_api::canvas::SceneModel, source: &str) -> Pre
     report.warnings.extend(canvas.launched_past_end_warning());
     report.warnings.extend(canvas.measurement_warning());
     report.warnings.extend(canvas.rest_warnings());
+    report.warnings.extend(canvas.link_problems());
     report.warnings.extend(
         canvas
             .compiled_layout_diagnostics()

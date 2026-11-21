@@ -492,6 +492,39 @@ def validate_stub_attribute_writability(module: object, tree: ast.Module) -> lis
     return failures
 
 
+def validate_links_contract(module: object) -> list[str]:
+    """Drawables link to segments or addresses, and backup segments exist."""
+    failures: list[str] = []
+    scene = module.Scene(frame=(16, 9))
+    scene.segment("Results")
+    card = scene.slides.card("Details")
+    backup = scene.segment("Backup", skip=True)
+    if card.link_to(backup) is not card:
+        failures.append("Drawable.link_to must return the same drawable")
+    for target in ("https://doi.org/10.1000/182", "Results", "mailto:ana@example.org"):
+        try:
+            card.link_to(target)
+        except Exception as error:  # noqa: BLE001
+            failures.append(f"link_to({target!r}) must be accepted: {error!r}")
+    for target, error_type in ((42, TypeError), ("  ", ValueError)):
+        try:
+            card.link_to(target)
+            failures.append(f"link_to({target!r}) must raise {error_type.__name__}")
+        except error_type:
+            pass
+    other = module.Scene(frame=(16, 9)).segment("Elsewhere")
+    try:
+        card.link_to(other)
+        failures.append("link_to a segment of another scene must raise ValueError")
+    except ValueError:
+        pass
+    try:
+        scene.segment("Plain", skip=False)
+    except Exception as error:  # noqa: BLE001
+        failures.append(f"segment(skip=False) must be accepted: {error!r}")
+    return failures
+
+
 def validate_slide_builds_contract(module: object) -> list[str]:
     """Bullet lists and slide tables keep their parts and build one step each."""
     failures: list[str] = []
@@ -4572,6 +4605,7 @@ def main() -> int:
     missing.extend(validate_readout_number_formats(module))
     missing.extend(validate_editorial_contract(module))
     missing.extend(validate_slide_builds_contract(module))
+    missing.extend(validate_links_contract(module))
     missing.extend(validate_theme_typography_contract(module))
     missing.extend(validate_default_theme_contract(module, tree))
     missing.extend(validate_theme_colors_contract(module, tree))

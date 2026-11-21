@@ -65,10 +65,25 @@ pub fn frame_pdf(rgba: &[u8], width: u32, height: u32) -> Vec<u8> {
 /// A page of a deck, ready to lay out.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PdfPage {
-    /// A frame, as a one-page PDF from [`frame_pdf`].
-    Frame(Vec<u8>),
+    /// A frame, as a one-page PDF from [`frame_pdf`], and the links on it.
+    Frame { pdf: Vec<u8>, links: Vec<PdfLink> },
     /// A slide's name over its speaker notes.
     Notes { title: String, notes: String },
+}
+
+/// A link on a frame page: its box, 0 to 1 across the page with y down,
+/// and where it goes.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PdfLink {
+    pub rect: [f32; 4],
+    pub to: PdfDestination,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum PdfDestination {
+    /// A page of the deck, counted from 1.
+    Page(usize),
+    Url(String),
 }
 
 /// Width of a deck's pages in points, that of a widescreen slide in
@@ -94,12 +109,31 @@ pub fn deck_pdf(pages: Vec<PdfPage>, (width, height): (u32, u32), title: &str) -
     let mut files = Vec::new();
     for (index, page) in pages.into_iter().enumerate() {
         match page {
-            PdfPage::Frame(pdf) => {
+            PdfPage::Frame { pdf, links } => {
                 let path = format!("/page-{}.pdf", index + 1);
                 source.push_str(&format!(
-                    "#page(image({}, width: 100%, height: 100%))\n",
+                    "#page[#image({}, width: 100%, height: 100%)",
                     typst_string(&path)
                 ));
+                // Each link is a box over its drawable that the PDF reader
+                // follows.
+                for link in links {
+                    let [left, top, right, bottom] = link.rect.map(f64::from);
+                    let to = match &link.to {
+                        PdfDestination::Page(page) => {
+                            format!("(page: {page}, x: 0pt, y: 0pt)")
+                        }
+                        PdfDestination::Url(url) => typst_string(url),
+                    };
+                    source.push_str(&format!(
+                        "#place(top + left, dx: {:.3}pt, dy: {:.3}pt, link({to}, box(width: {:.3}pt, height: {:.3}pt)))",
+                        left.max(0.0) * PAGE_WIDTH,
+                        top.max(0.0) * page_height,
+                        (right.min(1.0) - left.max(0.0)).max(0.0) * PAGE_WIDTH,
+                        (bottom.min(1.0) - top.max(0.0)).max(0.0) * page_height,
+                    ));
+                }
+                source.push_str("]\n");
                 files.push((path, pdf));
             }
             PdfPage::Notes { title, notes } => source.push_str(&format!(
@@ -283,15 +317,38 @@ mod tests {
             frame_pdf(&pixels, 32, 18)
         };
         let pages = vec![
-            PdfPage::Frame(solid([200, 30, 30])),
+            PdfPage::Frame {
+                pdf: solid([200, 30, 30]),
+                links: vec![
+                    PdfLink {
+                        rect: [0.1, 0.1, 0.4, 0.3],
+                        to: PdfDestination::Page(3),
+                    },
+                    PdfLink {
+                        rect: [0.5, 0.5, 0.9, 0.7],
+                        to: PdfDestination::Url("https://doi.org/10.1000/1".to_string()),
+                    },
+                ],
+            },
             PdfPage::Notes {
                 title: "Señales \"de\" prueba".to_string(),
                 notes: "Primera línea\\ con barra.\nSegunda: ñandú, 東京.".to_string(),
             },
-            PdfPage::Frame(solid([30, 30, 200])),
+            PdfPage::Frame {
+                pdf: solid([30, 30, 200]),
+                links: Vec::new(),
+            },
         ];
         let bytes = deck_pdf(pages, (32, 18), "Deck").unwrap();
         let pdf = hayro_syntax::Pdf::new(bytes).unwrap();
+        // The links became annotations on the first page: one to a page,
+        // one to the address.
+        use hayro_syntax::object::{Array, Dict, dict::keys::ANNOTS};
+        let annotations = pdf.pages()[0]
+            .raw()
+            .get::<Array<'_>>(ANNOTS)
+            .map_or(0, |annotations| annotations.iter::<Dict<'_>>().count());
+        assert_eq!(annotations, 2, "link annotations");
         let pages = pdf.pages();
         assert_eq!(pages.len(), 3);
         for page in pages.iter() {

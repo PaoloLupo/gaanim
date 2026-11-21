@@ -610,6 +610,22 @@ where
         .world()
         .get_resource::<gaanim_animation::rehearsal::Rehearsal>()
         .cloned();
+    // Where links lie at every resting instant, for a presentation of the
+    // bundle and its PDF to follow them without the scene.
+    let backup_segments = app.world().resource::<Timeline>().backup_segments.clone();
+    let link_zones = if crate::exporter::has_links(app.world_mut()) {
+        let mut rests: Vec<f64> = segments
+            .iter()
+            .flat_map(|segment| segment.stops.iter().map(|stop| stop.time))
+            .chain([duration])
+            .collect();
+        rests.sort_by(f64::total_cmp);
+        rests.dedup_by(|a, b| (*a - *b).abs() <= 1e-9);
+        let zones = crate::exporter::link_zones_at(setup_world_fn.clone(), &rests)?;
+        rests.into_iter().zip(zones).collect()
+    } else {
+        Vec::new()
+    };
     let background = app.world().get_resource::<CanvasBackground>().cloned();
 
     if let Some(parent) = config
@@ -748,6 +764,8 @@ where
         poll_bars,
         poll_texts,
         poll_readouts,
+        backup_segments,
+        link_zones,
     };
     let SinkState {
         mut writer, cover, ..

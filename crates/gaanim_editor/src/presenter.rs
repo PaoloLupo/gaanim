@@ -2,6 +2,7 @@
 
 pub(crate) mod ink;
 pub mod kiosk;
+pub(crate) mod links;
 mod mirror;
 pub(crate) mod pace;
 pub(crate) mod prompter;
@@ -751,7 +752,12 @@ pub(crate) fn presentation_input_system(
     link: Option<ResMut<crate::presenter_link::PresenterLink>>,
     mut preferences: ResMut<PresenterPreferences>,
     mut commands: Commands,
-    (mut ink, time): (ResMut<ink::PresentationInk>, Res<Time<bevy::time::Real>>),
+    (mut ink, time, current_links, frame): (
+        ResMut<ink::PresentationInk>,
+        Res<Time<bevy::time::Real>>,
+        Res<links::CurrentLinks>,
+        Res<crate::ViewportFrame>,
+    ),
 ) {
     if !presentation_mode.active {
         return;
@@ -842,9 +848,18 @@ pub(crate) fn presentation_input_system(
             }
         }
     }
-    // With the pen, a click on the slide draws instead.
+    // With the pen, a click on the slide draws instead; on a link, it
+    // follows the link.
     if primary_focused && !pointer_captured && !ink.pen && mouse.just_pressed(MouseButton::Left) {
-        actions.push(PresentationAction::Advance);
+        let link = primary_window
+            .single()
+            .ok()
+            .and_then(|(window, _)| window.cursor_position())
+            .and_then(|cursor| links::link_under(&current_links, &frame, ink.state.zoom, cursor));
+        match link {
+            Some(link) => links::follow(link, &mut timeline),
+            None => actions.push(PresentationAction::Advance),
+        }
     }
 
     for action in actions {
@@ -3330,6 +3345,8 @@ mod tests {
             .init_resource::<PresenterOverviewState>()
             .init_resource::<PresenterPreferences>()
             .init_resource::<super::ink::PresentationInk>()
+            .init_resource::<super::links::CurrentLinks>()
+            .init_resource::<crate::ViewportFrame>()
             .init_resource::<Time<bevy::time::Real>>()
             .insert_resource(PresentationMode { active: true })
             .add_systems(Update, presentation_input_system);

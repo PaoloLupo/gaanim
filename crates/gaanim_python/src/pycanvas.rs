@@ -3369,7 +3369,7 @@ fn constraint_scope(scope: &str) -> PyResult<bool> {
 pub struct PySegment {
     scene: Py<PyScene>,
     template: Option<Py<PyAny>>,
-    inner: SegmentHandle,
+    pub(crate) inner: SegmentHandle,
 }
 
 #[pymethods]
@@ -7918,7 +7918,7 @@ impl PyTypography {
 
 #[pymethods]
 impl PyScene {
-    #[pyo3(signature = (name, transition=None, *, notes=None, template=None, background=None, post=None, target=None, step_rate=None, camera="keep"))]
+    #[pyo3(signature = (name, transition=None, *, notes=None, template=None, background=None, post=None, target=None, step_rate=None, camera="keep", skip=false))]
     #[allow(clippy::too_many_arguments)]
     fn segment<'py>(
         slf: &Bound<'py, Self>,
@@ -7931,6 +7931,7 @@ impl PyScene {
         target: Option<f64>,
         step_rate: Option<f64>,
         camera: &str,
+        skip: bool,
     ) -> PyResult<PySegment> {
         crate::custom::ensure_authoring_allowed()?;
         let release_camera = match camera {
@@ -7981,6 +7982,11 @@ impl PyScene {
             canvas
                 .set_segment_step_rate(&handle, step_rate)
                 .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+            if skip {
+                canvas
+                    .set_segment_backup(&handle, true)
+                    .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+            }
             if release_camera {
                 canvas
                     .release_camera()

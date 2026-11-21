@@ -656,6 +656,11 @@ Con `--notes`, tras la última página de cada diapositiva (cada
 puede buscar y copiar. Una diapositiva sin notas no añade página. `--from`,
 `--to`, `--frame`, `--fps`, `--transparent` y `--encoder` no se aplican.
 
+Los objetos enlazados con `link_to` se convierten en enlaces del PDF: los que
+van a un segmento llevan a su primera página y los que van a una dirección
+web la abren (ver #link("/guias/presentaciones/#enlaces")[Enlaces y
+diapositivas de respaldo]). Las hojas de `--handout` no los llevan.
+
 Con `--per-slide`, cada diapositiva ocupa una sola página: la de su última
 pausa, o el final de la escena para la última diapositiva. Una diapositiva con
 seis pasos deja de ocupar seis páginas casi iguales.

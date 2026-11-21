@@ -396,6 +396,45 @@ y solo lo envía en la cabecera de la conexión cifrada con Zoom. Si crees que
 se filtró, genera otra clave en Zoom Platform Studio: la anterior deja de
 valer.
 
+== Enlaces y diapositivas de respaldo <enlaces>
+
+Una charla no siempre va en línea recta: un clic en un objeto puede saltar a
+otra diapositiva o abrir una página web, y las diapositivas de respaldo
+(apéndices, preguntas que esperas) quedan fuera del recorrido hasta que un
+enlace las visita.
+
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9), theme="presentation")
+scene.segment("Resultados")
+detalle = scene.slides.card("Detalle del ensayo", "Clic para ver el protocolo.")
+articulo = scene.slides.card("Artículo", "Abre doi.org en el navegador.")
+scene.stop("tarjetas")
+respaldo = scene.segment("Protocolo", skip=True)    # fuera del avance lineal
+detalle.link_to(respaldo)                           # clic: salta y luego vuelve
+articulo.link_to("https://doi.org/10.1000/182")     # clic: abre el navegador
+scene.wait(0.5)
+```
+
+- `scene.segment(..., skip=True)` crea una diapositiva de respaldo. Al
+  presentar, `→`, `←` y la reproducción pasan de largo; la vista previa, los
+  vídeos y el PDF la mantienen en su sitio.
+- `drawable.link_to(segmento)` hace que un clic en el objeto, al presentar,
+  reproduzca ese segmento desde su inicio en lugar de avanzar. Al llegar a su
+  final, `→` vuelve al paso desde el que hiciste clic, y `←` al principio del
+  segmento también vuelve. Saltar a otra parte desde la vista general termina
+  la visita.
+- `drawable.link_to("https://...")` abre la dirección en el navegador (también
+  `mailto:`). Una cadena sin esquema es el nombre de un segmento, que se busca
+  al construir la escena; `gaanim check` avisa si no existe.
+- Sobre un objeto enlazado el cursor se convierte en una mano. Los enlaces
+  funcionan igual al presentar un paquete `.gaanim`, que guarda dónde está
+  cada uno en cada pausa, y el PDF de diapositivas los conserva: los internos
+  llevan a la primera página del segmento y los externos a la dirección. Los
+  vídeos los ignoran.
+
+El ejemplo `examples/slides/links.py` reúne las tres formas.
+
 = Comprobar y presentar
 
 ```bash

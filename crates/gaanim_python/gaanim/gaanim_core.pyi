@@ -3987,6 +3987,28 @@ class Drawable:
             scene.play(head.animate.scale_by(1.3))
         """
         ...
+    def link_to(self, target: Segment | str) -> Self:
+        """Link this drawable to a segment or a web address.
+
+        While presenting, a click on the drawable follows the link instead of
+        advancing: a ``Segment`` plays from its start (a backup made with
+        ``scene.segment(..., skip=True)`` included), and moving on from its
+        end, or back from its start, returns to the step the click came
+        from; a string with a scheme, such as ``"https://doi.org/..."`` or
+        ``"mailto:..."``, opens in the browser, and any other string names a
+        segment, found when the scene builds (``gaanim check`` reports one
+        that does not exist). The pointer turns into a hand over a link. A
+        PDF deck keeps the links, to the segment's first page or to the
+        address, and so does a ``.gaanim`` bundle; videos ignore them. A
+        later call replaces the link. A segment of another scene raises
+        ``ValueError``, and a target that is neither raises ``TypeError``.
+
+        Example:
+            backup = scene.segment("Trial details", skip=True)
+            chip.link_to(backup)
+            reference.link_to("https://doi.org/10.1000/182")
+        """
+        ...
     def copy(self) -> Drawable:
         """An independent drawable declared like this one.
 
@@ -13445,6 +13467,7 @@ class Scene:
         target: Optional[float] = None,
         step_rate: Optional[float] = None,
         camera: Literal["keep", "reset"] = "keep",
+        skip: bool = False,
     ) -> Segment:
         """Create and activate a named structural segment.
 
@@ -13470,7 +13493,11 @@ class Scene:
         ``camera="reset"`` starts the segment from the scene's 2D view: every
         camera constraint lets go and the camera resets at once, after a
         stop at that instant, while the segment before keeps its camera as a
-        transition shows it leave. Empty or duplicate names, a transition on
+        transition shows it leave. ``skip=True`` makes a backup segment, such
+        as an appendix or an answer to an expected question: a presentation's
+        steps and playback pass over it, and only a link
+        (``Drawable.link_to``) visits it; previews, videos and PDF decks keep
+        it in its place. Empty or duplicate names, a transition on
         the first segment, a target that is not a positive number of
         seconds, a step rate that is not a positive number, a ``camera``
         other than ``"keep"`` or ``"reset"``, and a narration script that
@@ -13480,6 +13507,7 @@ class Scene:
             result = scene.segment("example", background="#0f172a")
             collage = scene.segment("collage", step_rate=12)
             summary = scene.segment("summary", Transition.cross_fade(0.4), camera="reset")
+            backup = scene.segment("Trial details", skip=True)
         """
         ...
     def link(self, from_: Segment, to: Segment, transition: Transition) -> None:

@@ -92,6 +92,13 @@ fn sync_editor_input_ignore_system(
         interactive.is_some_and(|interactive| interactive.enabled),
     );
     timeline.ignore_pointer = ignore_pointer;
+    // A presentation passes over backup segments.
+    if timeline.presenting != presentation_mode.active {
+        timeline.presenting = presentation_mode.active;
+        if !presentation_mode.active {
+            timeline.visit = None;
+        }
+    }
     // While recording narration, the recorder owns the keyboard and playback.
     if let Some(policy) = narration.as_ref().and_then(|session| session.stop_policy()) {
         timeline.ignore_input = true;
@@ -294,6 +301,8 @@ impl Plugin for GaanimEditorPlugin {
             .init_resource::<presenter::kiosk::Kiosk>()
             .init_resource::<presenter::kiosk::KioskClock>()
             .init_resource::<presenter::ink::PresentationInk>()
+            .init_resource::<presenter::links::CurrentLinks>()
+            .add_systems(PostUpdate, presenter::links::current_links_system)
             .init_resource::<fps_overlay::FpsOverlay>()
             .init_resource::<EditorFullscreenState>()
             .init_resource::<PresentationMode>()

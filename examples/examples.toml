@@ -805,6 +805,10 @@ path = "slides/tables.py"
 description = "Slide tables with their widths, row heights and alignment, built row by row or column by column, and data tables built from layout rows whose cells, rows and columns animate."
 
 [[example]]
+path = "slides/links.py"
+description = "Cards that jump to a backup slide the presentation otherwise skips, or open a web address, when clicked while presenting."
+
+[[example]]
 path = "slides/branding.py"
 description = "A deck theme derived from presentation, with a logo, footer and slide number placed on every slide but the cover."
 allow = ["theme", "margin", "colors", "titles"]

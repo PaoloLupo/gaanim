@@ -998,9 +998,18 @@ fn capture_page(
     std::ops::ControlFlow::Continue(())
 }
 
+/// The links of a deck's frames: the zones on each frame page, in order,
+/// and the segment id of each slide, which internal links go to.
+#[derive(Debug, Default)]
+pub struct DeckLinks {
+    pub zones: Vec<Vec<gaanim_scene::links::LinkZone>>,
+    pub segment_ids: Vec<u32>,
+}
+
 /// Lay out `pages` around the captured `frames`, as `layout` prints them,
 /// and write the PDF to `output`; returns the number of pages (or sheets).
 #[cfg(not(target_arch = "wasm32"))]
+#[allow(clippy::too_many_arguments)]
 fn write_deck(
     output: &str,
     pages: &[gaanim_export::deck::DeckPage],
@@ -1009,6 +1018,7 @@ fn write_deck(
     size: (u32, u32),
     title: &str,
     layout: &gaanim_export::deck::DeckLayout,
+    links: &DeckLinks,
 ) -> Result<usize, String> {
     use gaanim_export::deck::DeckPage;
     use gaanim_export::pdf::PdfPage;
@@ -1048,10 +1058,44 @@ fn write_deck(
                 .map_err(|error| error.to_string())?;
         (pdf, sheets)
     } else {
+        // The first page of each slide, which links to it go to.
+        let first_pages: std::collections::HashMap<usize, usize> = pages
+            .iter()
+            .enumerate()
+            .rev()
+            .filter_map(|(index, page)| match *page {
+                DeckPage::Frame { slide, .. } => Some((slide, index + 1)),
+                DeckPage::Notes { .. } => None,
+            })
+            .collect();
+        let mut frame_index = 0;
         let pages = pages
             .iter()
             .map(|page| match *page {
-                DeckPage::Frame { .. } => frames.next().map(PdfPage::Frame),
+                DeckPage::Frame { .. } => {
+                    let zones = links.zones.get(frame_index).map_or(&[][..], Vec::as_slice);
+                    frame_index += 1;
+                    let links = zones
+                        .iter()
+                        .filter_map(|zone| {
+                            use gaanim_export::pdf::{PdfDestination, PdfLink};
+                            use gaanim_scene::links::LinkTarget;
+                            let to = match &zone.target {
+                                LinkTarget::Url(url) => PdfDestination::Url(url.clone()),
+                                LinkTarget::Segment(id) => {
+                                    let slide =
+                                        links.segment_ids.iter().position(|seg| seg == id)?;
+                                    PdfDestination::Page(*first_pages.get(&slide)?)
+                                }
+                            };
+                            Some(PdfLink {
+                                rect: zone.rect,
+                                to,
+                            })
+                        })
+                        .collect();
+                    frames.next().map(|pdf| PdfPage::Frame { pdf, links })
+                }
                 DeckPage::Notes { slide } => Some(PdfPage::Notes {
                     title: slides[slide].name.clone(),
                     notes: printable_notes(slide),
@@ -1103,6 +1147,24 @@ pub fn export_slides_pdf(
     config.fit = command.fit;
     config.aspect_ratio = AspectRatioPreset::Custom;
     let times = frame_times(&pages);
+    // Links become PDF links, found where they lie at each page's instant.
+    let links = DeckLinks {
+        zones: if canvas.resolved_links().is_empty() {
+            Vec::new()
+        } else {
+            let scene = canvas.clone();
+            gaanim_export::exporter::link_zones_at(
+                move |world| gaanim_api::runtime::replay_canvas_into(world, scene),
+                &times,
+            )
+            .map_err(|error| error.to_string())?
+        },
+        segment_ids: manifest
+            .segments
+            .iter()
+            .map(|segment| segment.id.raw())
+            .collect(),
+    };
     let mut frames = Vec::with_capacity(times.len());
     gaanim_export::prelude::capture_scene_direct_streaming(
         config,
@@ -1112,7 +1174,16 @@ pub fn export_slides_pdf(
     )
     .map_err(|error| error.to_string())?;
     let title = script.and_then(bundle_title).unwrap_or_default();
-    write_deck(output, &pages, &slides, frames, size, &title, &command.deck)
+    write_deck(
+        output,
+        &pages,
+        &slides,
+        frames,
+        size,
+        &title,
+        &command.deck,
+        &links,
+    )
 }
 
 /// The aspect of the frame a bundle recorded at `output_size`.
@@ -1152,8 +1223,28 @@ pub fn export_bundle_pdf(
     }));
     let pages = gaanim_export::deck::deck_pages(&slides, bundle.scene.duration, &command.deck);
     let title = bundle.scene.title.clone();
-    drop(bundle);
     let times = frame_times(&pages);
+    let links = DeckLinks {
+        zones: times
+            .iter()
+            .map(|time| {
+                bundle
+                    .scene
+                    .link_zones
+                    .iter()
+                    .find(|(at, _)| (at - time).abs() <= 1e-5)
+                    .map(|(_, zones)| zones.clone())
+                    .unwrap_or_default()
+            })
+            .collect(),
+        segment_ids: bundle
+            .scene
+            .segments
+            .iter()
+            .map(|segment| segment.id)
+            .collect(),
+    };
+    drop(bundle);
     let mut frames = Vec::with_capacity(times.len());
     gaanim_export::prelude::capture_bundle_streaming(
         input,
@@ -1172,6 +1263,7 @@ pub fn export_bundle_pdf(
         (width, height),
         &title,
         &command.deck,
+        &links,
     )
     .map_err(CommandError::Failed)
 }

@@ -36,6 +36,16 @@ Sin publicar todavía.
   audiencia y el cursor se oculta. Ver
   #link("/guias/presentaciones/#modo-quiosco")[Modo quiosco].
 
+== Enlaces y diapositivas de respaldo
+
+- `drawable.link_to(segmento)` salta, con un clic al presentar, a otro
+  segmento, que se reproduce y vuelve al paso de origen; `link_to("https://...")`
+  abre la dirección. `scene.segment(..., skip=True)` crea diapositivas de
+  respaldo que el avance normal se salta. Los paquetes `.gaanim` y el PDF de
+  diapositivas conservan los enlaces, y `gaanim check` avisa de los que van a
+  un segmento inexistente. Ver
+  #link("/guias/presentaciones/#enlaces")[Enlaces y diapositivas de respaldo].
+
 == Láser, rotulador y zoom al presentar
 
 - Al presentar, `L` muestra un puntero láser, `D` un rotulador para dibujar

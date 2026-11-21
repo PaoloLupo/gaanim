@@ -394,6 +394,10 @@ pub(crate) fn audience_ink_overlay_system(
     frame: Res<ViewportFrame>,
     page: Query<(), (With<PrimaryWindow>, With<PresenterWindow>)>,
     ink: Res<PresentationInk>,
+    (links, windows): (
+        Res<super::links::CurrentLinks>,
+        Query<&Window, With<PrimaryWindow>>,
+    ),
 ) {
     if !presentation.active || !page.is_empty() {
         return;
@@ -403,6 +407,12 @@ pub(crate) fn audience_ink_overlay_system(
     };
     if ink.pen && ctx.is_pointer_over_egui() {
         ctx.set_cursor_icon(egui::CursorIcon::Crosshair);
+    } else if !ink.laser
+        && let Some(cursor) = windows.single().ok().and_then(Window::cursor_position)
+        && super::links::link_under(&links, &frame, ink.state.zoom, cursor).is_some()
+    {
+        // A linked drawable shows the hand a link does.
+        ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
     }
     if ink.state.laser.is_none() && ink.state.strokes.is_empty() {
         return;
