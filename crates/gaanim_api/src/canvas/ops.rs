@@ -951,6 +951,15 @@ pub(crate) enum Op {
         /// Dash and gap lengths, for a dashed line.
         dashes: Option<(f64, f64)>,
     },
+    /// Attach a circle around a reactive center.
+    AttachTrackingCircle {
+        target: ObjectId,
+        center: CanvasEndpoint,
+        radius: CanvasRadius,
+    },
+    /// Draw a reactive line or circle empty while its endpoints have no
+    /// position, as a construction with no answer.
+    HideUnresolved { target: ObjectId },
     /// Lay a 3D line's unit mesh between two endpoints every frame.
     AttachTrackingLine3D {
         target: ObjectId,
@@ -1283,6 +1292,19 @@ pub enum CanvasEndpoint {
     /// Where the main camera draws another endpoint on the frame, in the
     /// units a HUD drawable is placed in, every frame.
     Screen(Box<CanvasEndpoint>),
+    /// A point constructed from other endpoints, as with ruler and compass.
+    Construction {
+        kind: gaanim_math::Construction,
+        inputs: Vec<CanvasEndpoint>,
+    },
+}
+
+/// The radius of a reactive circle.
+#[derive(Debug, Clone)]
+pub enum CanvasRadius {
+    Fixed(f64),
+    /// The distance from the center to this endpoint.
+    Through(CanvasEndpoint),
 }
 
 /// Lightweight public reference to a derived, non-rendered endpoint.

@@ -905,6 +905,13 @@ fn compile_tracking_endpoint(
         CanvasEndpoint::Screen(point) => {
             TrackingEndpoint::Screen(Box::new(compile_tracking_endpoint(point, id_map, states)))
         }
+        CanvasEndpoint::Construction { kind, inputs } => TrackingEndpoint::Construction {
+            kind: *kind,
+            inputs: inputs
+                .iter()
+                .map(|input| compile_tracking_endpoint(input, id_map, states))
+                .collect(),
+        },
     }
 }
 
@@ -7597,6 +7604,43 @@ impl SceneModel {
                     }
                 }
 
+                Op::AttachTrackingCircle {
+                    target,
+                    center,
+                    radius,
+                } => {
+                    if let Some(target_id) = id_map.get(target).copied()
+                        && let Some(st) = builder.states.get(target_id)
+                    {
+                        let radius = match radius {
+                            super::ops::CanvasRadius::Fixed(radius) => {
+                                gaanim_animation::updaters::TrackingRadius::Fixed(*radius)
+                            }
+                            super::ops::CanvasRadius::Through(point) => {
+                                gaanim_animation::updaters::TrackingRadius::Through(
+                                    compile_tracking_endpoint(point, id_map, &builder.states),
+                                )
+                            }
+                        };
+                        let circle = gaanim_animation::updaters::TrackingCircle {
+                            center: compile_tracking_endpoint(center, id_map, &builder.states),
+                            radius,
+                        };
+                        builder.commands.entity(st.entity).insert(circle);
+                    }
+                }
+
+                Op::HideUnresolved { target } => {
+                    if let Some(target_id) = id_map.get(target).copied()
+                        && let Some(st) = builder.states.get(target_id)
+                    {
+                        builder
+                            .commands
+                            .entity(st.entity)
+                            .insert(gaanim_animation::updaters::HideUnresolved);
+                    }
+                }
+
                 Op::AttachTrackingLine3D { target, from, to } => {
                     if let Some(target_id) = id_map.get(target).copied()
                         && let Some(st) = builder.states.get(target_id)
@@ -9674,6 +9718,7 @@ impl SceneModel {
             }
             CanvasEndpoint::Between { from, to, .. } => built_on(from) || built_on(to),
             CanvasEndpoint::Rim { object, toward, .. } => moved(object) || built_on(toward),
+            CanvasEndpoint::Construction { inputs, .. } => inputs.iter().any(built_on),
             _ => false,
         }
     }
@@ -9794,6 +9839,14 @@ impl SceneModel {
                 let runtime = *id_map.get(object)?;
                 let matrix = builder.get_world_transform(runtime).to_mat4();
                 Some((authored_media_point(builder, runtime, *x, *y)?, matrix))
+            }
+            CanvasEndpoint::Construction { kind, inputs } => {
+                let points = inputs
+                    .iter()
+                    .map(|input| point(input).map(|(point, _)| point.truncate()))
+                    .collect::<Option<Vec<_>>>()?;
+                kind.solve(&points)
+                    .map(|point| (point.extend(0.0), DMat4::IDENTITY))
             }
             _ => None,
         }

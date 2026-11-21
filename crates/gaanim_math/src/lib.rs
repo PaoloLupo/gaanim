@@ -3,6 +3,7 @@ pub mod arrow;
 pub mod bounds;
 pub mod camera;
 pub mod camera_motion;
+pub mod construct;
 pub mod easing;
 pub mod matching;
 pub mod particles;
@@ -23,6 +24,7 @@ pub use camera::{
     Projection, ResolvedCamera, orbit_direction, orbit_distance,
 };
 pub use camera_motion::{TraumaShake, ZoomInterpolation, dolly_zoom};
+pub use construct::Construction;
 pub use easing::{EaseMode, EasingCurve, RateFunc, RepeatMode, StepJump};
 pub use particles::{EmitterShape, Particle, ParticleShape, ParticleSystem};
 pub use path::{

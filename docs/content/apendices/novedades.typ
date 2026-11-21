@@ -36,6 +36,16 @@ Sin publicar todavía.
   audiencia y el cursor se oculta. Ver
   #link("/guias/presentaciones/#modo-quiosco")[Modo quiosco].
 
+== Construcciones con regla y compás
+
+- `scene.geometry` construye intersecciones (`intersect`), perpendiculares,
+  paralelas, mediatrices, bisectrices, tangentes desde un punto,
+  circunferencias por tres puntos y el circuncentro, el incentro, el
+  baricentro y el pie de una perpendicular. Se recalculan en cada fotograma
+  cuando se mueven sus puntos, sin ningún `Computed`, y una construcción sin
+  respuesta se oculta en lugar de fallar. Ver
+  #link("/referencia/geometria/#construcciones")[Construcciones con regla y compás].
+
 == Estructuras de datos
 
 - `scene.viz.array` dibuja un arreglo con índices y punteros con nombre, y

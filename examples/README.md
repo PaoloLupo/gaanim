@@ -52,6 +52,7 @@ Geometry primitives, curves, arrows, strokes, boolean operations and clipping.
 
 | Example | Description |
 | --- | --- |
+| [Constructions](shapes/constructions.py) | Ruler-and-compass constructions that follow their points: perpendicular bisectors and the circle through three points, angle bisectors and the incircle, and tangents from a point that hide inside the circle. |
 | [Primitives](shapes/primitives.py) | Every closed shape, line, arc, polyline and diagram mark that scene.geometry draws. |
 | [Curves](shapes/curves.py) | Quadratic and cubic Bézier curves with their handles, composed curve commands and parametric polylines, one redrawn every frame. |
 | [Arrows](shapes/arrows.py) | Straight, double and curved arrows with their sizes, grow_arrow against create, tips on any stroke and connectors that follow moving boxes. |

@@ -197,6 +197,7 @@ impl bevy::prelude::Plugin for GaanimAnimationPlugin {
                 tracking_line_system.after(reactive_3d_regen_system).run_if(
                     any_with_component::<TrackingLine>
                         .or_else(any_with_component::<updaters::TrackingConnector>)
+                        .or_else(any_with_component::<updaters::TrackingCircle>)
                         .or_else(any_with_component::<TrackingLine3D>)
                         .or_else(any_with_component::<updaters::LayoutBoundsTrack>)
                         .or_else(any_with_component::<updaters::LayoutBackground>),

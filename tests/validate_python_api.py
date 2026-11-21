@@ -539,6 +539,45 @@ def validate_data_structures_contract(module: object) -> list[str]:
     return failures
 
 
+def validate_constructions_contract(module: object) -> list[str]:
+    """Ruler-and-compass constructions return reactive points, lines and circles."""
+    failures: list[str] = []
+    scene = module.Scene(frame=(16, 9))
+    G = scene.geometry
+    A, B, C = (G.dot(0.1).move_to(x, y) for x, y in ((-2, -1), (2, -1), (0, 2)))
+    lines = [
+        G.line_through(A, B), G.perpendicular((A, B), through=C), G.parallel((A, B), through=C),
+        G.perpendicular_bisector(A, B), G.angle_bisector(B, A, C),
+    ]
+    if not all(isinstance(line, module.ConstructedLine) and isinstance(line, module.Drawable) for line in lines):
+        failures.append("constructed lines must be ConstructedLine drawables")
+    circle = G.circle_through(A, B, C)
+    if not isinstance(circle, module.ConstructedCircle):
+        failures.append("circle_through must return a ConstructedCircle")
+    points = [
+        G.intersect(lines[0], lines[1]), G.intersect(lines[0], circle, which=1), G.intersect(circle, G.circle_around(A, 1.5)),
+        G.circumcenter(A, B, C), G.incenter(A, B, C), G.centroid(A, B, C), G.foot(C, (A, B)), circle.center,
+    ]
+    if not all(isinstance(point, module.PointRef) for point in points):
+        failures.append("constructed points must be PointRef")
+    t1, t2 = G.tangents(circle, from_=(5, 0))
+    if not isinstance(t1, module.ConstructedLine) or not isinstance(G.marker(points[3]), module.Drawable):
+        failures.append("tangents and marker must return drawables")
+    for call, error_type in (
+        (lambda: G.intersect(lines[0], lines[1], which=2), ValueError),
+        (lambda: G.intersect((0.0, 1.0), lines[1]), TypeError),
+        (lambda: G.tangents(lines[0], from_=A), TypeError),
+        (lambda: G.circle_around(A, -1.0), ValueError),
+        (lambda: G.marker(A, radius=0), ValueError),
+    ):
+        try:
+            call()
+            failures.append(f"expected {error_type.__name__}")
+        except error_type:
+            pass
+    return failures
+
+
 def validate_links_contract(module: object) -> list[str]:
     """Drawables link to segments or addresses, and backup segments exist."""
     failures: list[str] = []
@@ -4654,6 +4693,7 @@ def main() -> int:
     missing.extend(validate_slide_builds_contract(module))
     missing.extend(validate_links_contract(module))
     missing.extend(validate_data_structures_contract(module))
+    missing.extend(validate_constructions_contract(module))
     missing.extend(validate_theme_typography_contract(module))
     missing.extend(validate_default_theme_contract(module, tree))
     missing.extend(validate_theme_colors_contract(module, tree))

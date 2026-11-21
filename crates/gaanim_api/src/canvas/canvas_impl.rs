@@ -9488,6 +9488,10 @@ fn endpoint_is_valid(point: &CanvasEndpoint, state: &CanvasState) -> bool {
                 && radius.is_finite()
         }
         CanvasEndpoint::Screen(point) => endpoint_is_valid(point, state),
+        CanvasEndpoint::Construction { kind, inputs } => {
+            inputs.len() == kind.arity()
+                && inputs.iter().all(|input| endpoint_is_valid(input, state))
+        }
     }
 }
 

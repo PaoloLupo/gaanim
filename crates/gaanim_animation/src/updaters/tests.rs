@@ -1924,3 +1924,61 @@ fn a_still_surrounding_rect_marks_no_change() {
     surrounding_rect_system(&mut world);
     assert_eq!(ticks(&world), drawn, "an unchanged frame was written again");
 }
+
+#[test]
+fn constructions_follow_their_points_and_hide_without_an_answer() {
+    let mut world = World::new();
+    let point = |x: f64, y: f64| TrackingEndpoint::Static(DVec3::new(x, y, 0.0));
+    let movable = world.spawn(SpatialTransform::default()).id();
+    let center = TrackingEndpoint::Construction {
+        kind: gaanim_math::Construction::Circumcenter,
+        inputs: vec![
+            point(0.0, 0.0),
+            point(4.0, 0.0),
+            TrackingEndpoint::Entity(movable),
+        ],
+    };
+    let spawn = |world: &mut World| {
+        let empty = std::sync::Arc::new(BezPath::new());
+        world
+            .spawn((
+                SpatialTransform::default(),
+                Path2D(empty.clone()),
+                PathSource(empty),
+                LocalBounds(gaanim_math::Bounds3D::default()),
+            ))
+            .id()
+    };
+    let circle = spawn(&mut world);
+    world.entity_mut(circle).insert(TrackingCircle {
+        center: center.clone(),
+        radius: TrackingRadius::Through(point(0.0, 0.0)),
+    });
+    let line = spawn(&mut world);
+    world
+        .entity_mut(line)
+        .insert((TrackingLine::new(point(-1.0, -1.0), center), HideUnresolved));
+    let extent = |world: &World, entity| {
+        gaanim_core::kurbo::Shape::bounding_box(&*world.get::<Path2D>(entity).unwrap().0)
+    };
+
+    // A right triangle: the circumcenter is the hypotenuse's midpoint.
+    world
+        .get_mut::<SpatialTransform>(movable)
+        .unwrap()
+        .translation = DVec3::new(0.0, 3.0, 0.0);
+    tracking_line_system(&mut world);
+    let bounds = extent(&world, circle);
+    assert!((bounds.width() - 5.0).abs() < 1e-3, "{bounds:?}");
+    assert!((bounds.center().x - 2.0).abs() < 1e-3 && (bounds.center().y - 1.5).abs() < 1e-3);
+    assert!(!world.get::<Path2D>(line).unwrap().0.is_empty());
+
+    // Points in a row have no circumcenter: both hide.
+    world
+        .get_mut::<SpatialTransform>(movable)
+        .unwrap()
+        .translation = DVec3::new(8.0, 0.0, 0.0);
+    tracking_line_system(&mut world);
+    assert!(world.get::<Path2D>(circle).unwrap().0.is_empty());
+    assert!(world.get::<Path2D>(line).unwrap().0.is_empty());
+}

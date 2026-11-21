@@ -1102,6 +1102,33 @@ class AnchorPoint:
 class PointRef:
     """Non-rendered reactive XY point derived from endpoints or scalar expressions."""
 
+class ConstructedLine(Drawable):
+    """A whole line from a ruler-and-compass construction on ``scene.geometry``.
+
+    It is drawn across the frame, follows the points it is built from every
+    frame and hides while one of them has no position. Pass it to
+    ``intersect``, ``perpendicular``, ``parallel`` or ``foot``.
+    """
+    @property
+    def through(self) -> PointRef:
+        """A point the line runs through."""
+        ...
+    @property
+    def toward(self) -> PointRef:
+        """A second point on the line."""
+        ...
+
+class ConstructedCircle(Drawable):
+    """A circle from ``scene.geometry.circle_through`` or ``circle_around``, recomputed every frame."""
+    @property
+    def center(self) -> PointRef:
+        """The center."""
+        ...
+    @property
+    def on(self) -> PointRef:
+        """A point on the circle."""
+        ...
+
 class Direction:
     UP: ClassVar[Direction]
     DOWN: ClassVar[Direction]
@@ -10752,6 +10779,98 @@ class Geometry:
         ...
     def polar_point(self, origin: Endpoint, radius: _ReactiveScalar, angle: _ReactiveScalar) -> PointRef:
         """Create a reactive polar point; angle is measured in radians."""
+        ...
+    def intersect(self, a: ConstructedLine | ConstructedCircle | tuple[Endpoint, Endpoint], b: ConstructedLine | ConstructedCircle | tuple[Endpoint, Endpoint], *, which: Literal[0, 1] = 0) -> PointRef:
+        """The point where two lines, a line and a circle, or two circles meet, recomputed every frame.
+
+        A line is one from these constructions (``line_through``,
+        ``perpendicular``...) or a pair of points ``(A, B)`` it runs
+        through; a circle is one from ``circle_through`` or
+        ``circle_around``. Where a line meets a circle, ``which=0`` is the
+        point nearer the line's first point and ``1`` the other; two circles
+        meet left (``0``) or right (``1``) of the line from the first center
+        to the second. Where they do not meet (parallel lines, a line that
+        misses the circle) the point has no position, and what is built on
+        it hides until it has one again. A ``which`` other than 0 or 1
+        raises ``ValueError``; anything that is not a line or a circle,
+        ``TypeError``.
+
+        Example:
+            G = scene.geometry
+            P = G.intersect((A, B), (C, D))
+            dot = G.marker(P)
+        """
+        ...
+    def line_through(self, a: Endpoint, b: Endpoint) -> ConstructedLine:
+        """The whole line through two points, drawn across the frame and recomputed every frame.
+
+        Like every constructed line it hides while a point it depends on has
+        no position, and it shows once a ``play`` reveals it
+        (``line.animate.create()``), as ``tracking_line`` does.
+        """
+        ...
+    def perpendicular(self, line: ConstructedLine | tuple[Endpoint, Endpoint], *, through: Endpoint) -> ConstructedLine:
+        """The whole line through ``through`` perpendicular to ``line``.
+
+        Example:
+            h = scene.geometry.perpendicular((A, B), through=C)
+        """
+        ...
+    def parallel(self, line: ConstructedLine | tuple[Endpoint, Endpoint], *, through: Endpoint) -> ConstructedLine:
+        """The whole line through ``through`` parallel to ``line``."""
+        ...
+    def perpendicular_bisector(self, a: Endpoint, b: Endpoint) -> ConstructedLine:
+        """The whole line through the midpoint of ``a`` and ``b``, perpendicular to their segment."""
+        ...
+    def angle_bisector(self, a: Endpoint, vertex: Endpoint, b: Endpoint) -> ConstructedLine:
+        """The whole line that halves the angle at ``vertex`` between ``a`` and ``b``."""
+        ...
+    def tangents(self, circle: ConstructedCircle, *, from_: Endpoint) -> tuple[ConstructedLine, ConstructedLine]:
+        """The two tangents to ``circle`` from a point, hidden while the point is inside it.
+
+        Each runs through ``from_`` and the point where it touches the
+        circle. A circle that is not from ``circle_through`` or
+        ``circle_around`` raises ``TypeError``.
+
+        Example:
+            t1, t2 = scene.geometry.tangents(circle, from_=P)
+        """
+        ...
+    def circle_through(self, a: Endpoint, b: Endpoint, c: Endpoint) -> ConstructedCircle:
+        """The circle through three points, recomputed every frame and hidden while they are in a row.
+
+        Example:
+            c = scene.geometry.circle_through(A, B, C)
+            scene.play([c.animate.create()])
+        """
+        ...
+    def circle_around(self, center: Endpoint, through: Endpoint | float) -> ConstructedCircle:
+        """The circle around ``center`` through a point, or of a radius in scene units.
+
+        A radius that is not a positive number raises ``ValueError``.
+        """
+        ...
+    def circumcenter(self, a: Endpoint, b: Endpoint, c: Endpoint) -> PointRef:
+        """The center of the circle through three points; no position while they are in a row."""
+        ...
+    def incenter(self, a: Endpoint, b: Endpoint, c: Endpoint) -> PointRef:
+        """The center of the circle inside the triangle that touches its three sides."""
+        ...
+    def centroid(self, a: Endpoint, b: Endpoint, c: Endpoint) -> PointRef:
+        """Where the triangle's medians meet."""
+        ...
+    def foot(self, point: Endpoint, line: ConstructedLine | tuple[Endpoint, Endpoint]) -> PointRef:
+        """The foot of the perpendicular from ``point`` to ``line``."""
+        ...
+    def marker(self, point: Endpoint, *, radius: float = 0.07) -> Drawable:
+        """A dot in the theme's foreground color that follows a point and hides while it has no position.
+
+        Like the constructed lines it shows once a ``play`` reveals it. A
+        radius that is not a positive number raises ``ValueError``.
+
+        Example:
+            O = scene.geometry.marker(scene.geometry.circumcenter(A, B, C))
+        """
         ...
 
 class Typography:
