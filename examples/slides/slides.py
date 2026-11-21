@@ -7,6 +7,8 @@ and previews play straight through. Every slide shows the code that makes it.
 Present it with `gaanim --present slides.py`, or leave it running on a
 stand's screen with `gaanim --present --auto 8s --loop slides.py`, which
 goes on from each step after eight seconds and starts over at the end.
+`gaanim export slides.py -o handout.pdf --handout 2x3` prints it six slides
+to a sheet, and `--handout notes` one per sheet over its speaker notes.
 """
 
 import math

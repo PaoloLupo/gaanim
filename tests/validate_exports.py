@@ -518,11 +518,22 @@ def export_slides_pdf(
     *,
     repo: Path,
 ) -> dict[str, Any]:
-    """A page for each of the deck's three resting points, and with --notes
-    each slide's notes after it: six pages, all 16:9."""
+    """A page for each of the deck's four resting points (three slides, the
+    second with two steps), and with --notes each slide's notes after it:
+    seven 16:9 pages. --per-slide keeps one page per slide; a 2x3 handout
+    puts the three on one A4 sheet, and --handout notes gives each its own
+    Letter sheet."""
     report: dict[str, Any] = {"mode": "slides-pdf"}
-    for notes, expected in ((False, 3), (True, 6)):
-        artifact = output_dir / ("slides-notes.pdf" if notes else "slides.pdf")
+    a4, letter = (595.276, 841.89), (612.0, 792.0)
+    cases = (
+        ("slides", (), 4, None),
+        ("notes", ("--notes",), 7, None),
+        ("per-slide", ("--per-slide",), 3, None),
+        ("handout", ("--handout", "2x3"), 1, a4),
+        ("handout-notes", ("--handout", "notes", "--paper", "letter"), 3, letter),
+    )
+    for name, flags, expected, sheet in cases:
+        artifact = output_dir / f"slides-{name}.pdf"
         artifact.unlink(missing_ok=True)
         run(
             [
@@ -532,16 +543,22 @@ def export_slides_pdf(
                 "--output",
                 str(artifact),
                 *SIZE_ARGS,
-                *(("--notes",) if notes else ()),
+                *flags,
             ],
             cwd=repo,
         )
         pages, boxes = pdf_pages(artifact)
         if pages != expected:
             raise SmokeFailure(f"{artifact} has {pages} pages, expected {expected}")
-        if not boxes or any(abs(width / height - 16 / 9) > 0.01 for width, height in boxes):
-            raise SmokeFailure(f"{artifact} pages are not 16:9: {boxes}")
-        report["notes" if notes else "slides"] = {
+        # Embedded frames carry boxes of their own; the sheets come first.
+        if sheet is None:
+            if not boxes or any(abs(width / height - 16 / 9) > 0.01 for width, height in boxes):
+                raise SmokeFailure(f"{artifact} pages are not 16:9: {boxes}")
+        elif not any(
+            abs(width - sheet[0]) < 0.5 and abs(height - sheet[1]) < 0.5 for width, height in boxes
+        ):
+            raise SmokeFailure(f"{artifact} has no {sheet} sheet: {boxes}")
+        report[name] = {
             "artifact": str(artifact),
             "bytes": artifact.stat().st_size,
             "pages": pages,

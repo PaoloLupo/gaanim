@@ -481,7 +481,7 @@ La extensión de `--output` elige el formato.
   [`.webp`], [WebP animado. Necesita FFmpeg.], [Sí],
   [`.gif`], [GIF. Necesita FFmpeg.], [No],
   [`.png`], [Secuencia de PNG, un archivo por fotograma. No necesita FFmpeg.], [Sí],
-  [`.pdf`], [Diapositivas: una página por cada pausa de la presentación y otra para el final, con las notas del orador si se piden con `--notes`. No necesita FFmpeg.], [No],
+  [`.pdf`], [Diapositivas: una página por cada pausa de la presentación y otra para el final, con las notas del orador si se piden con `--notes`; o una por diapositiva (`--per-slide`), o varias por hoja para repartir (`--handout`). No necesita FFmpeg.], [No],
   [`.gaanim`], [Paquete de reproducción: todos los fotogramas que dibuja la escena, con sus segmentos, pausas, marcadores y audio, en un archivo que se reproduce, presenta y exporta sin Python.], [No],
 )
 
@@ -508,6 +508,9 @@ número de fotograma desde 0 (`frames/f_%04d.png` escribe `f_0000.png`,
   [`--to <SEGUNDOS|NOMBRE>`], [fin de la escena], [Fin del tramo exportado; un segmento lo termina en su final.],
   [`--frame <SEGUNDOS|NOMBRE>[,…]`], [—], [Escribe exactamente un PNG en cada instante, en lugar de un tramo; un segmento da su primera pausa. Necesita una salida `.png` y no se combina con `--from` ni `--to`.],
   [`--notes`], [desactivado], [Solo PDF: añade tras la última página de cada diapositiva una página con sus notas (`scene.segment(notes=...)`).],
+  [`--per-slide`], [desactivado], [Solo PDF: una página por diapositiva, la de su última pausa, en lugar de una por pausa.],
+  [`--handout <CxR|notes>`], [—], [Solo PDF: las diapositivas en hojas para repartir, una vez cada una: `2x3` pone seis por hoja (columnas por filas, de 1 a 6) y `notes` una por hoja con sus notas debajo (ver #link(<diapositivas-pdf>)[Diapositivas en PDF]).],
+  [`--paper <a4|letter>`], [`a4`], [La hoja de `--handout`.],
   [`--sections <LISTA>`], [todos], [Con `{segment}`, los segmentos que se exportan: nombres de segmentos o claves de `Section`, separados por comas, como en la vista previa.],
   [`--members <RUTAS>`], [todos], [Con un workspace, los miembros que se exportan: rutas o patrones como los de `members`, separados por comas.],
   [`--message-format <FORMATO>`], [`human`], [`json`: mensajes y progreso con su porcentaje en JSON por líneas, sin barra (ver #link(<message-format>)[Mensajes para herramientas]).],
@@ -653,20 +656,40 @@ Con `--notes`, tras la última página de cada diapositiva (cada
 puede buscar y copiar. Una diapositiva sin notas no añade página. `--from`,
 `--to`, `--frame`, `--fps`, `--transparent` y `--encoder` no se aplican.
 
+Con `--per-slide`, cada diapositiva ocupa una sola página: la de su última
+pausa, o el final de la escena para la última diapositiva. Una diapositiva con
+seis pasos deja de ocupar seis páginas casi iguales.
+
+Con `--handout`, el PDF es para repartir o imprimir: hojas A4 (o Letter con
+`--paper letter`) con cada diapositiva una vez, como con `--per-slide`.
+
+- `--handout 2x3` coloca seis diapositivas por hoja, en dos columnas y tres
+  filas, cada una sobre su número y su nombre. Con más columnas que filas
+  (`3x2`) la hoja se pone apaisada.
+- `--handout notes` pone una diapositiva por hoja con sus notas debajo, en
+  texto que se puede buscar, o líneas para escribir si no tiene notas. Por
+  eso no se combina con `--notes`.
+- El pie de cada hoja lleva el título de la charla y el número de hoja.
+
 ```bash
 gaanim export mi-charla --output mi-charla.pdf
 gaanim export mi-charla --output material.pdf --notes
+gaanim export mi-charla --output resumen.pdf --per-slide
+gaanim export mi-charla --output reparto.pdf --handout 2x3
+gaanim export mi-charla --output guion.pdf --handout notes --paper letter
 gaanim export mi-charla.gaanim --output mi-charla.pdf   # sin Python
 ```
 
 Un paquete se exporta a PDF igual, sin ejecutar Python. El diálogo
-*Export* del editor también ofrece el formato PDF, con una casilla para las
-notas.
+*Export* del editor también ofrece el formato PDF: en *Pages* elige una página
+por paso (*Every step*), por diapositiva (*Per slide*), seis por hoja
+(*Handout*) o una por hoja con sus notas (*Notes*), con una casilla para las
+notas y la hoja A4 o Letter de los repartos.
 
 == Paquetes <exportar-paquetes>
 
 Con `--output` terminado en `.gaanim`, `export` graba un paquete de la escena
-completa; `--from`, `--to`, `--transparent`, `--notes` y `--encoder` no se aplican, y
+completa; `--from`, `--to`, `--transparent`, `--notes`, `--per-slide`, `--handout`, `--paper` y `--encoder` no se aplican, y
 `--fps` (60 por defecto) debe ser un entero. Con un paquete como entrada,
 `export` lo renderiza a vídeo o a PDF sin ejecutar Python: acepta los demás formatos y
 opciones, incluidos los tramos con marcadores, y el vídeo tiene la frecuencia

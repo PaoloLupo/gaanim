@@ -284,12 +284,13 @@ fn dispatch_export_mode() -> bool {
             || command.to.is_some()
             || !command.frames.is_empty()
             || command.transparent
-            || command.notes
+            || command.deck != Default::default()
+            || command.paper_given
             || command.encoder != VideoEncoder::Auto
         {
             console::error(
                 "export",
-                "a playback bundle records the whole scene; --from, --to, --frame, --transparent, --notes and --encoder do not apply",
+                "a playback bundle records the whole scene; --from, --to, --frame, --transparent, --notes, --per-slide, --handout, --paper and --encoder do not apply",
             );
             std::process::exit(2);
         }
@@ -381,7 +382,7 @@ fn dispatch_export_mode() -> bool {
         fps: command.fps,
         from: command.from,
         to: command.to,
-        notes: false,
+        deck: Default::default(),
     }) {
         console::error("export", error);
         std::process::exit(1);
@@ -601,14 +602,15 @@ struct ExportWorkerArgs {
     /// `None` means the scene start/end.
     from: Option<ExportBound>,
     to: Option<ExportBound>,
-    /// A PDF deck prints each slide's speaker notes.
-    notes: bool,
+    /// How a PDF deck is printed (`--notes`, `--per-slide`, `--handout`,
+    /// `--paper`).
+    deck: gaanim_export::deck::DeckLayout,
 }
 
 fn parse_export_worker_args(args: &[String]) -> Result<ExportWorkerArgs, String> {
     if args.len() < 4 {
         return Err(
-            "expected: --export-worker <script.py> <output> <draft|standard|production> <mp4|webm|mov|webp|gif|png|gaanim|pdf> [--encoder auto|libx264|nvenc|amf|qsv|vaapi] [--transparent] [--fps <rate>] [--notes]"
+            "expected: --export-worker <script.py> <output> <draft|standard|production> <mp4|webm|mov|webp|gif|png|gaanim|pdf> [--encoder auto|libx264|nvenc|amf|qsv|vaapi] [--transparent] [--fps <rate>] [--notes] [--per-slide] [--handout <CxR|notes>] [--paper a4|letter]"
                 .to_string(),
         );
     }
@@ -626,12 +628,27 @@ fn parse_export_worker_args(args: &[String]) -> Result<ExportWorkerArgs, String>
     let mut fps = None;
     let mut from = None;
     let mut to = None;
-    let mut notes = false;
+    let mut deck = gaanim_export::deck::DeckLayout::default();
     let mut index = 4;
     while index < args.len() {
         match args[index].as_str() {
             "--transparent" => transparent = true,
-            "--notes" => notes = true,
+            "--notes" => deck.notes = true,
+            "--per-slide" => deck.per_slide = true,
+            "--handout" => {
+                index += 1;
+                let value = args
+                    .get(index)
+                    .ok_or_else(|| "--handout requires a value".to_string())?;
+                deck.handout = Some(gaanim_export::deck::Handout::parse(value)?);
+            }
+            "--paper" => {
+                index += 1;
+                let value = args
+                    .get(index)
+                    .ok_or_else(|| "--paper requires a value".to_string())?;
+                deck.paper = gaanim_export::deck::Paper::parse(value)?;
+            }
             "--fps" => {
                 index += 1;
                 let value = args
@@ -703,7 +720,7 @@ fn parse_export_worker_args(args: &[String]) -> Result<ExportWorkerArgs, String>
         fps,
         from,
         to,
-        notes,
+        deck,
     })
 }
 
@@ -732,7 +749,7 @@ fn run_export_worker(worker: ExportWorkerArgs) -> Result<(), String> {
             width: worker.width,
             height: worker.height,
             fit: worker.fit,
-            notes: worker.notes,
+            deck: worker.deck,
             ..Default::default()
         };
         return gaanim_editor::cli::export_slides_pdf(
@@ -1871,7 +1888,7 @@ mod tests {
                 fps: None,
                 from: None,
                 to: None,
-                notes: false,
+                deck: Default::default(),
             }
         );
         let range = [
@@ -1918,7 +1935,29 @@ mod tests {
         let deck = ["talk.py", "talk.pdf", "standard", "pdf", "--notes"].map(str::to_string);
         let deck = parse_export_worker_args(&deck).unwrap();
         assert_eq!(deck.format, "pdf");
-        assert!(deck.notes);
+        assert!(deck.deck.notes);
+        let handout = [
+            "talk.py",
+            "talk.pdf",
+            "standard",
+            "pdf",
+            "--per-slide",
+            "--handout",
+            "2x3",
+            "--paper",
+            "letter",
+        ]
+        .map(str::to_string);
+        let handout = parse_export_worker_args(&handout).unwrap().deck;
+        assert!(handout.per_slide);
+        assert_eq!(
+            handout.handout,
+            Some(gaanim_export::deck::Handout::Grid {
+                columns: 2,
+                rows: 3
+            })
+        );
+        assert_eq!(handout.paper, gaanim_export::deck::Paper::Letter);
         let prores = [
             "scene.py",
             "lower.mov",

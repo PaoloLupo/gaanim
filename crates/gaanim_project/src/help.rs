@@ -368,6 +368,15 @@ const EXPORT: Page = Page {
                     "PDF only: after the last page of each slide, a page with\nits scene.segment(notes=...)",
                 ),
                 (
+                    "--per-slide",
+                    "PDF only: one page per slide, its last step, instead of a\npage per scene.stop()",
+                ),
+                (
+                    "--handout <CxR|notes>",
+                    "PDF only: slides on sheets to hand out, one per slide:\n2x3 puts six on a sheet, notes one over its notes",
+                ),
+                ("--paper <a4|letter>", "The sheet of --handout (default a4)"),
+                (
                     "--message-format <FORMAT>",
                     "human (default) or json: messages and progress with its\npercent as JSON lines on stdout, without the bar",
                 ),
@@ -776,6 +785,9 @@ mod tests {
             ".mov",
             ".pdf",
             "--notes",
+            "--per-slide",
+            "--handout",
+            "--paper",
         ] {
             assert!(export.contains(option), "{option}");
         }

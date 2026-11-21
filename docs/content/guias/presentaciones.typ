@@ -655,6 +655,15 @@ sus notas, donde cada `[stop]` se imprime como una flecha (`→ grafico`).
 gaanim export mi-charla --output mi-charla.pdf --notes
 ```
 
+Para un resumen sin pasos repetidos, `--per-slide` deja una página por
+diapositiva. Para imprimir, `--handout 2x3` pone seis diapositivas por hoja A4
+y `--handout notes` una por hoja con sus notas debajo:
+
+```bash
+gaanim export mi-charla --output reparto.pdf --handout 2x3
+gaanim export mi-charla --output guion.pdf --handout notes
+```
+
 También funciona con un paquete `.gaanim` y desde el diálogo *Export* del
 editor; la #link("/referencia/cli/#diapositivas-pdf")[referencia de la línea
 de comandos] explica las opciones.

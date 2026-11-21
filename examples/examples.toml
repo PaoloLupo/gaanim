@@ -784,7 +784,7 @@ description = "Lottie JSON clips trimmed, looped and sped up, drawn in before th
 
 [[example]]
 path = "slides/slides.py"
-description = "A short deck of segments with slide templates, steps that stop, speaker notes, transitions and a looping stop; it also runs as a kiosk."
+description = "A short deck of segments with slide templates, steps that stop, speaker notes, transitions and a looping stop; it also runs as a kiosk and prints as a handout."
 allow = ["titles"]
 
 [[example]]

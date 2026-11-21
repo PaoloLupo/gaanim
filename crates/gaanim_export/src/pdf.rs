@@ -9,6 +9,7 @@
 use pdf_writer::{Content, Filter, Finish, Name, Pdf, Rect, Ref};
 
 use crate::config::ExportTelemetry;
+use crate::deck::{Handout, Paper};
 use crate::encoder::{ExportError, Result};
 
 /// Report that `done` of a deck's `total` frames are captured: to
@@ -118,6 +119,141 @@ pub fn deck_pdf(pages: Vec<PdfPage>, (width, height): (u32, u32), title: &str) -
     })
 }
 
+/// A slide of a handout: its frame, its number and name, and its notes.
+#[derive(Debug, Clone, PartialEq)]
+pub struct HandoutSlide {
+    /// The frame, as a one-page PDF from [`frame_pdf`].
+    pub frame: Vec<u8>,
+    /// 1-based position of the slide in the deck.
+    pub number: usize,
+    pub name: String,
+    /// Printable notes; empty when the slide has none.
+    pub notes: String,
+}
+
+/// Margin around a handout sheet, in points.
+const SHEET_MARGIN: f64 = 36.0;
+/// Room under a sheet for its footer, in points.
+const SHEET_FOOTER: f64 = 24.0;
+/// Space between the slides of a sheet, in points.
+const SHEET_GUTTER: f64 = 18.0;
+/// Height of a slide's caption on a sheet, in points.
+const SHEET_CAPTION: f64 = 18.0;
+/// Writing lines a handout leaves under a slide without notes.
+const BLANK_NOTE_LINES: usize = 10;
+
+/// Lay out `slides` as a handout titled `title` on `paper`: `handout`'s
+/// grid of slides to a sheet, each over its number and name, or a slide to
+/// a sheet with its notes under it as text (writing lines when it has
+/// none). A grid with more columns than rows turns the sheet sideways. Each
+/// sheet's footer shows the title and the sheet number.
+pub fn handout_pdf(
+    slides: Vec<HandoutSlide>,
+    (width, height): (u32, u32),
+    title: &str,
+    handout: Handout,
+    paper: Paper,
+) -> Result<Vec<u8>> {
+    if width == 0 || height == 0 {
+        return Err(ExportError::General(
+            "a deck's frames must be at least one pixel wide and tall".to_string(),
+        ));
+    }
+    let aspect = f64::from(width) / f64::from(height);
+    let (columns, rows) = match handout {
+        Handout::Grid { columns, rows } => (usize::from(columns), usize::from(rows)),
+        Handout::Notes => (1, 1),
+    };
+    let flipped = columns > rows;
+    let (sheet_width, sheet_height) = match (paper.size(), flipped) {
+        ((width, height), true) => (height, width),
+        (size, false) => size,
+    };
+    let inner_width = sheet_width - 2.0 * SHEET_MARGIN;
+    // A little short of the sheet, so a grid that fills it does not spill
+    // onto the next one by a rounding error.
+    let inner_height = sheet_height - 2.0 * SHEET_MARGIN - SHEET_FOOTER - 2.0;
+    let mut source = format!(
+        "#set document(title: {title})\n\
+         #set page(width: {sheet_width:.3}pt, height: {sheet_height:.3}pt, margin: (x: {SHEET_MARGIN}pt, top: {SHEET_MARGIN}pt, bottom: {bottom}pt), \
+         footer: context {{ set text(size: 8pt, fill: luma(110)); {title}; h(1fr); counter(page).display(\"1 / 1\", both: true) }})\n\
+         #set text(size: 10pt)\n",
+        title = typst_string(title),
+        bottom = SHEET_MARGIN + SHEET_FOOTER,
+    );
+    let caption = |slide: &HandoutSlide| {
+        format!(
+            "text(size: 9pt)[#strong({}) #h(4pt) #({})]",
+            typst_string(&format!("{}.", slide.number)),
+            typst_string(&slide.name)
+        )
+    };
+    let mut files = Vec::new();
+    let mut image = |slide: &HandoutSlide, width: f64| {
+        let path = format!("/slide-{}.pdf", files.len() + 1);
+        let image = format!(
+            "box(stroke: 0.5pt + luma(170), image({}, width: {width:.3}pt, height: {:.3}pt))",
+            typst_string(&path),
+            width / aspect
+        );
+        files.push((path, slide.frame.clone()));
+        image
+    };
+    match handout {
+        Handout::Grid { .. } => {
+            let cell_width = (inner_width - SHEET_GUTTER * (columns - 1) as f64) / columns as f64;
+            let cell_height = (inner_height - SHEET_GUTTER * (rows - 1) as f64) / rows as f64;
+            let image_width = cell_width
+                .min((cell_height - SHEET_CAPTION) * aspect)
+                .max(1.0);
+            for (index, sheet) in slides.chunks(columns * rows).enumerate() {
+                if index > 0 {
+                    source.push_str("#pagebreak()\n");
+                }
+                source.push_str(&format!(
+                    "#grid(columns: ({cell_width:.3}pt,) * {columns}, rows: {cell_height:.3}pt, \
+                     column-gutter: {SHEET_GUTTER}pt, row-gutter: {SHEET_GUTTER}pt,\n"
+                ));
+                for slide in sheet {
+                    source.push_str(&format!(
+                        "  stack(spacing: 5pt, {}, {}),\n",
+                        image(slide, image_width),
+                        caption(slide)
+                    ));
+                }
+                source.push_str(")\n");
+            }
+        }
+        Handout::Notes => {
+            let image_width = inner_width.min(inner_height * 0.5 * aspect);
+            for (index, slide) in slides.iter().enumerate() {
+                if index > 0 {
+                    source.push_str("#pagebreak()\n");
+                }
+                source.push_str(&format!(
+                    "#align(center, {})\n#v(6pt)\n#{}\n#v(14pt)\n",
+                    image(slide, image_width),
+                    caption(slide)
+                ));
+                if slide.notes.trim().is_empty() {
+                    source.push_str(&format!(
+                        "#for _ in range({BLANK_NOTE_LINES}) {{ v(20pt); line(length: 100%, stroke: 0.5pt + luma(190)) }}\n"
+                    ));
+                } else {
+                    source.push_str(&format!(
+                        "#{{ set text(size: 12pt); {}.split(\"\\n\").join(linebreak()) }}\n",
+                        typst_string(&slide.notes)
+                    ));
+                }
+            }
+        }
+    }
+    let fonts = gaanim_text::font::FontRegistry::without_system_fonts();
+    gaanim_text::typst_compiler::compile_typst_pdf(&source, files, &fonts).map_err(|errors| {
+        ExportError::General(format!("could not lay out the PDF: {}", errors.join("; ")))
+    })
+}
+
 /// `text` as a Typst string literal.
 fn typst_string(text: &str) -> String {
     let mut literal = String::with_capacity(text.len() + 2);
@@ -163,5 +299,60 @@ mod tests {
             assert!((width - 960.0).abs() < 0.01, "{width}");
             assert!((height - 540.0).abs() < 0.01, "{height}");
         }
+    }
+
+    fn handout_slides(count: usize) -> Vec<HandoutSlide> {
+        let pixels = [40, 90, 200, 255].repeat(32 * 18);
+        (1..=count)
+            .map(|number| HandoutSlide {
+                frame: frame_pdf(&pixels, 32, 18),
+                number,
+                name: format!("Slide \"{number}\""),
+                notes: if number % 2 == 0 {
+                    "Say this.\nThen ñandú.".to_string()
+                } else {
+                    String::new()
+                },
+            })
+            .collect()
+    }
+
+    fn sheets(bytes: Vec<u8>) -> Vec<(f32, f32)> {
+        let pdf = hayro_syntax::Pdf::new(bytes).unwrap();
+        pdf.pages()
+            .iter()
+            .map(|page| page.render_dimensions())
+            .collect()
+    }
+
+    #[test]
+    fn handouts_lay_out_slides_on_sheets_of_paper() {
+        let grid = Handout::Grid {
+            columns: 2,
+            rows: 3,
+        };
+        let bytes = handout_pdf(handout_slides(10), (32, 18), "Talk", grid, Paper::A4).unwrap();
+        let pages = sheets(bytes);
+        assert_eq!(pages.len(), 2);
+        for (width, height) in pages {
+            assert!((width - 595.276).abs() < 0.1 && (height - 841.89).abs() < 0.1);
+        }
+        // More columns than rows turn the sheet sideways.
+        let wide = Handout::Grid {
+            columns: 3,
+            rows: 2,
+        };
+        let bytes = handout_pdf(handout_slides(6), (32, 18), "Talk", wide, Paper::Letter).unwrap();
+        assert_eq!(sheets(bytes), [(792.0, 612.0)]);
+        // A slide to a sheet with its notes, or lines to write them.
+        let bytes = handout_pdf(
+            handout_slides(3),
+            (32, 18),
+            "Talk",
+            Handout::Notes,
+            Paper::A4,
+        )
+        .unwrap();
+        assert_eq!(sheets(bytes).len(), 3);
     }
 }

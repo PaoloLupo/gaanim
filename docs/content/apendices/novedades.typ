@@ -36,6 +36,16 @@ Sin publicar todavía.
   audiencia y el cursor se oculta. Ver
   #link("/guias/presentaciones/#modo-quiosco")[Modo quiosco].
 
+== PDF para repartir
+
+- `gaanim export mi-charla --output resumen.pdf --per-slide` escribe una
+  página por diapositiva, la de su última pausa, en lugar de una por pausa.
+- `--handout 2x3` pone seis diapositivas por hoja A4 (`--paper letter` para
+  Letter), cada una con su número y su nombre, y `--handout notes` una por
+  hoja con sus notas debajo, en texto que se puede buscar. Las opciones valen
+  también para un paquete `.gaanim` y están en el diálogo *Export*. Ver
+  #link("/referencia/cli/#diapositivas-pdf")[Diapositivas en PDF].
+
 = 0.17.1
 
 Publicada el 23 de octubre de 2026. `scene.viz.map` dibuja mapas: pone

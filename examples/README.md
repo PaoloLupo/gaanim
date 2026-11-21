@@ -331,7 +331,7 @@ Presentations: slides, editorial components, sections and tables.
 
 | Example | Description |
 | --- | --- |
-| [Slides](slides/slides.py) | A short deck of segments with slide templates, steps that stop, speaker notes, transitions and a looping stop; it also runs as a kiosk. |
+| [Slides](slides/slides.py) | A short deck of segments with slide templates, steps that stop, speaker notes, transitions and a looping stop; it also runs as a kiosk and prints as a handout. |
 | [Sections](slides/sections.py) | Agendas in every layout and marker, progress rails in rows and columns with captions, and sections of slides that move them. |
 | [Editorial titles](slides/editorial_titles.py) | Title cards, section headers, banners and lower thirds with their alignments, widths, variants and appearances. |
 | [Editorial components](slides/editorial_components.py) | Badges and chips in every appearance and variant, cards, bullet lists revealed point by point and callouts that point at objects. |
