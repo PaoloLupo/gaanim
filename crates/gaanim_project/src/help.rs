@@ -113,6 +113,14 @@ only says whether there is one",
                     "Monitor used by --present (default: the primary one)",
                 ),
                 (
+                    "--auto <WAIT>",
+                    "With --present, go on from each stop after this wait, e.g. 8s;\na key or a click starts the wait again",
+                ),
+                (
+                    "--loop",
+                    "With --present, start over at the end: with --auto, a kiosk\nwithout Presenter View, playback dock or cursor",
+                ),
+                (
                     "--duration <TIME>",
                     "Planned length of the talk, e.g. 20m or 1h30m: Presenter View\ncounts it down and shows how far ahead or behind you are",
                 ),
@@ -175,6 +183,10 @@ only says whether there is one",
                 (
                     "gaanim --present talk.gaanim",
                     "Present the recording, without Python",
+                ),
+                (
+                    "gaanim --present --auto 8s --loop talk.gaanim",
+                    "Run it by itself on a stand's screen",
                 ),
             ],
         ),
@@ -774,6 +786,8 @@ mod tests {
             "export",
             "--diff",
             "--present",
+            "--auto",
+            "--loop",
             "RUST_LOG",
             "EXAMPLES",
         ] {

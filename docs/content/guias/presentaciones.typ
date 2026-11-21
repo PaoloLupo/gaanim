@@ -431,6 +431,32 @@ se salta al siguiente. Con `gaanim --diff ... --capture-stops` las mismas
 opciones limitan las pausas capturadas (ver
 #link("/guias/capturas-y-comparacion/")[Capturas y comparación visual]).
 
+== Modo quiosco <modo-quiosco>
+
+Para dejar la charla corriendo sola en un stand, un pasillo o la pantalla de
+una sala, dile cuánto esperar en cada pausa y que vuelva a empezar al
+terminar:
+
+```bash
+gaanim --present --auto 8s --loop mi-charla
+gaanim --present --auto 8s --loop mi-charla.gaanim
+```
+
+- `--auto` espera ese tiempo en cada `scene.stop()` y sigue: `8s`, `8`
+  (segundos), `1m30s` o `0:45`. Una pausa con bucle (`loop=`) lo reproduce
+  mientras espera, y una pausa que espera votos sigue igual cuando acaba el
+  tiempo.
+- `--loop` vuelve al principio al llegar al final, tras la misma espera. Solo,
+  sin `--auto`, las pausas siguen esperando a que alguien avance.
+- Cualquier tecla o clic reinicia la espera: quien se acerca puede ir hacia
+  atrás con `←` o adelante con `→` y, cuando se va, la charla sigue sola tras
+  la espera.
+- En quiosco no se abre Presenter View, no aparece la barra de la audiencia y
+  el cursor se oculta. `Esc` sale de la presentación, como siempre.
+- Una charla con toma en vivo grabada (`scene.live_take()`) ya cambia sus
+  pausas por las esperas de la toma: con `--loop` basta para dejarla en
+  bucle.
+
 = La vista del presentador
 
 Con `--present`, la audiencia ve la diapositiva a pantalla completa y tú ves

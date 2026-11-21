@@ -1,5 +1,6 @@
 //! Presenter view hosted in a second native window.
 
+pub mod kiosk;
 mod mirror;
 pub(crate) mod pace;
 pub(crate) mod prompter;
@@ -564,12 +565,14 @@ fn apply_presenter_style(ctx: &egui::Context) {
 }
 
 /// Create the speaker-facing window only for `gaanim --present`.
+/// A kiosk (`--auto`, `--loop`) runs without one.
 pub(crate) fn spawn_presenter_window_system(
     presentation_mode: Res<PresentationMode>,
+    kiosk: Res<kiosk::Kiosk>,
     presenter_windows: Query<(), With<PresenterWindow>>,
     mut commands: Commands,
 ) {
-    if !presentation_mode.active || !presenter_windows.is_empty() {
+    if !presentation_mode.active || kiosk.active() || !presenter_windows.is_empty() {
         return;
     }
 
@@ -1391,6 +1394,7 @@ pub(crate) fn audience_playback_controls_system(
     mut audience_blank: ResMut<AudienceBlank>,
     mut overview: ResMut<PresenterOverviewState>,
     page: Option<Res<crate::host::WebPage>>,
+    kiosk: Res<kiosk::Kiosk>,
     (mut volume, audio_tracks, bundle): (
         ResMut<gaanim_media::PreviewVolume>,
         Option<Res<gaanim_media::PreviewAudioTracks>>,
@@ -1411,8 +1415,9 @@ pub(crate) fn audience_playback_controls_system(
             )
         })
         .unwrap_or((false, false));
+    // A kiosk's screen shows the slides alone.
     if !audience_controls_visible(
-        presentation_mode.active,
+        presentation_mode.active && !kiosk.active(),
         *audience_blank,
         audience_focused,
         audience_controls.pointer_over,

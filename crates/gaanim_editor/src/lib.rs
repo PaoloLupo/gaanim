@@ -23,6 +23,7 @@ mod fps_overlay;
 pub mod frame_capture;
 pub mod frame_profile;
 pub mod host;
+pub use presenter::kiosk::{Kiosk, parse_auto_wait};
 pub use presenter::pace::parse_talk_duration;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod idle;
@@ -290,6 +291,8 @@ impl Plugin for GaanimEditorPlugin {
             .init_resource::<presenter::prompter::PrompterPace>()
             .init_resource::<presenter::AudienceControlsState>()
             .init_resource::<presenter::PresentationTimer>()
+            .init_resource::<presenter::kiosk::Kiosk>()
+            .init_resource::<presenter::kiosk::KioskClock>()
             .init_resource::<fps_overlay::FpsOverlay>()
             .init_resource::<EditorFullscreenState>()
             .init_resource::<PresentationMode>()
@@ -354,6 +357,16 @@ impl Plugin for GaanimEditorPlugin {
                         .after(presentation_escape_system),
                     presentation_escape_system,
                     fps_overlay::fps_overlay_system,
+                ),
+            )
+            .add_systems(
+                Update,
+                (
+                    // After the keys, so a key press restarts the wait first.
+                    presenter::kiosk::kiosk_system
+                        .after(presenter::presentation_input_system)
+                        .before(gaanim_timeline::timeline_playback_system),
+                    presenter::kiosk::kiosk_cursor_system,
                 ),
             )
             .add_systems(Startup, presenter::spawn_presenter_window_system)

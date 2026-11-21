@@ -27,6 +27,15 @@ Sin publicar todavía.
   de su texto; `dim=0.35` atenúa el paso anterior al aparecer el siguiente.
   Ver #link("/referencia/diapositivas/#listas-por-pasos")[Diapositivas].
 
+== Modo quiosco
+
+- `gaanim --present --auto 8s --loop` deja una presentación corriendo sola,
+  desde el script o desde un paquete `.gaanim`: cada pausa sigue tras la
+  espera y al terminar vuelve a empezar. Una tecla o un clic reinician la
+  espera, y en quiosco no se abre Presenter View, no aparece la barra de la
+  audiencia y el cursor se oculta. Ver
+  #link("/guias/presentaciones/#modo-quiosco")[Modo quiosco].
+
 = 0.17.1
 
 Publicada el 23 de octubre de 2026. `scene.viz.map` dibuja mapas: pone

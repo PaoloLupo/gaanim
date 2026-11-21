@@ -76,6 +76,7 @@ pub fn run() {
         monitor: launch.monitor,
         selection: launch.selection.clone(),
         duration: launch.duration,
+        kiosk: launch.kiosk,
         ..Default::default()
     });
     crate::startup::mark("app setup");
@@ -1625,6 +1626,8 @@ struct LaunchArgs {
     /// Planned length of the talk (`--duration`), which Presenter View
     /// counts down.
     duration: Option<std::time::Duration>,
+    /// Run the presentation by itself (`--auto`, `--loop`).
+    kiosk: gaanim_editor::Kiosk,
     /// Where editors control the preview (`--listen`).
     listen: Option<crate::control::ListenAddress>,
 }
@@ -1672,6 +1675,7 @@ fn parse_args() -> LaunchArgs {
             monitor: None,
             selection: Default::default(),
             duration: None,
+            kiosk: Default::default(),
             listen: None,
         };
     }
@@ -1744,6 +1748,7 @@ fn parse_launch_args(args: &[String]) -> Result<LaunchArgs, String> {
     let mut present = false;
     let mut monitor = None;
     let mut duration = None;
+    let mut kiosk = gaanim_editor::Kiosk::default();
     let mut listen = None;
     let mut selection = gaanim_timeline::selection::SegmentSelection::default();
     let mut index = 0;
@@ -1753,6 +1758,14 @@ fn parse_launch_args(args: &[String]) -> Result<LaunchArgs, String> {
         index += 1;
         match arg.as_str() {
             "--present" => present = true,
+            "--loop" => kiosk.looping = true,
+            "--auto" => {
+                let value = args
+                    .get(index)
+                    .ok_or_else(|| "--auto requires a wait at each stop, e.g. 8s".to_string())?;
+                index += 1;
+                kiosk.auto = Some(gaanim_editor::parse_auto_wait(value)?);
+            }
             "--sections" | "--from" => {
                 let value = args
                     .get(index)
@@ -1799,6 +1812,12 @@ fn parse_launch_args(args: &[String]) -> Result<LaunchArgs, String> {
     if monitor.is_some() && !present {
         return Err("--monitor requires --present".to_string());
     }
+    if kiosk.auto.is_some() && !present {
+        return Err("--auto requires --present".to_string());
+    }
+    if kiosk.looping && !present {
+        return Err("--loop requires --present".to_string());
+    }
     if present && script_path.is_none() {
         return Err("--present requires <SCRIPT_OR_PROJECT>".to_string());
     }
@@ -1819,6 +1838,7 @@ fn parse_launch_args(args: &[String]) -> Result<LaunchArgs, String> {
         monitor,
         selection,
         duration,
+        kiosk,
         listen,
     })
 }
@@ -1956,6 +1976,7 @@ mod tests {
                 monitor: Some(1),
                 selection: Default::default(),
                 duration: None,
+                kiosk: Default::default(),
                 listen: None,
             }
         );
@@ -2033,6 +2054,27 @@ mod tests {
     }
 
     #[test]
+    fn parses_kiosk_options() {
+        let args = ["talk", "--present", "--auto", "8s", "--loop"].map(str::to_string);
+        assert_eq!(
+            parse_launch_args(&args).unwrap().kiosk,
+            gaanim_editor::Kiosk {
+                auto: Some(std::time::Duration::from_secs(8)),
+                looping: true,
+            }
+        );
+        for args in [
+            &["talk", "--auto", "8s"][..],
+            &["talk", "--loop"],
+            &["talk", "--present", "--auto"],
+            &["talk", "--present", "--auto", "never"],
+        ] {
+            let args: Vec<String> = args.iter().map(|arg| arg.to_string()).collect();
+            assert!(parse_launch_args(&args).is_err(), "{args:?}");
+        }
+    }
+
+    #[test]
     fn rejects_monitor_without_presentation_mode() {
         let args = ["demo.py", "--monitor", "0"].map(str::to_string);
         assert!(parse_launch_args(&args).is_err());
@@ -2050,6 +2092,7 @@ mod tests {
                 monitor: None,
                 selection: Default::default(),
                 duration: None,
+                kiosk: Default::default(),
                 listen: None,
             }
         );

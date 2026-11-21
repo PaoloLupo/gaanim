@@ -27,6 +27,7 @@ gaanim export mi-video --output exports/video.mp4
 gaanim export mi-charla --output mi-charla.gaanim   # graba un paquete
 gaanim --present --monitor 1 mi-charla   # presenta a pantalla completa
 gaanim --present mi-charla.gaanim        # presenta un paquete, sin Python
+gaanim --present --auto 8s --loop mi-charla.gaanim  # la deja corriendo sola
 gaanim --diff --example mi-video         # compara capturas con un baseline
 gaanim update                            # instala la versión más reciente
 gaanim --version
@@ -54,8 +55,8 @@ necesita el entorno de Python que Gaanim detecta junto al proyecto (ver
 = Previsualizar
 
 ```bash
-gaanim [--present] [--monitor <ÍNDICE>] [--duration <TIEMPO>] [--sections <LISTA>] [--from <NOMBRE>] [--listen <DIRECCIÓN>] <SCRIPT_O_PROYECTO>
-gaanim [--present] [--monitor <ÍNDICE>] [--duration <TIEMPO>] [--sections <LISTA>] [--from <NOMBRE>] [--listen <DIRECCIÓN>] <PAQUETE.gaanim>
+gaanim [--present] [--monitor <ÍNDICE>] [--auto <ESPERA>] [--loop] [--duration <TIEMPO>] [--sections <LISTA>] [--from <NOMBRE>] [--listen <DIRECCIÓN>] <SCRIPT_O_PROYECTO>
+gaanim [--present] [--monitor <ÍNDICE>] [--auto <ESPERA>] [--loop] [--duration <TIEMPO>] [--sections <LISTA>] [--from <NOMBRE>] [--listen <DIRECCIÓN>] <PAQUETE.gaanim>
 ```
 
 Sin argumentos, `gaanim` abre el Inicio: crear un proyecto, abrir una carpeta o
@@ -73,6 +74,8 @@ muestra la cámara grabada.
   [*Opción*], [*Efecto*],
   [`--present`], [Abre la escena en modo presentación: pantalla completa sin bordes para la audiencia y Presenter View para quien presenta. Requiere `<SCRIPT_O_PROYECTO>`.],
   [`--monitor <ÍNDICE>`], [Monitor de la presentación, contado desde `0`. Sin él se usa el monitor principal. Solo es válido junto con `--present`.],
+  [`--auto <ESPERA>`], [Con `--present`, sigue sola tras esperar ese tiempo en cada pausa: `8s`, `8` (segundos), `1m30s` o `0:45`. Una tecla o un clic reinician la espera (ver #link("/guias/presentaciones/#modo-quiosco")[Modo quiosco]).],
+  [`--loop`], [Con `--present`, vuelve a empezar al terminar, tras la espera de `--auto` si la hay. Con cualquiera de las dos opciones no se abre Presenter View, no aparece la barra de la audiencia y el cursor se oculta.],
   [`--duration <TIEMPO>`], [Duración prevista de la charla: `20m`, `1h30m`, `90s`, `20:00` o un número de minutos. Presenter View la cuenta hacia atrás y muestra si vas adelantado o retrasado (ver #link("/guias/presentaciones/#tiempo-de-la-charla")[El tiempo de la charla]).],
   [`--sections <LISTA>`], [Reproduce solo los segmentos indicados, separados por comas, por ejemplo `resultados,cierre`.],
   [`--from <NOMBRE>`], [Empieza en ese segmento y sigue hasta el final. Combinado con `--sections`, recorta la lista a partir de ese nombre.],
