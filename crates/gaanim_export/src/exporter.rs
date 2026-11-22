@@ -216,6 +216,15 @@ fn finish_in_flight(
     Ok(Some(pixels))
 }
 
+/// Export without the scene's background, as `--transparent` does: the
+/// background of the scene, of its theme and of each segment, and the clear
+/// color under them, so only the drawables keep color and the rest is
+/// transparent. The script and its preview keep their background.
+pub fn drop_background(world: &mut World) {
+    world.remove_resource::<gaanim_renderer::pipeline::CanvasBackground>();
+    world.insert_resource(ClearColor(bevy::prelude::Color::NONE));
+}
+
 /// The scene's clear color, which an exported frame is drawn over.
 fn clear_color(world: &World) -> vello::peniko::Color {
     world
@@ -366,6 +375,9 @@ where
         .get_resource_mut::<gaanim_renderer::pipeline::CanvasBackground>()
     {
         background.pixel_size = (config.width, config.height);
+    }
+    if config.transparent {
+        drop_background(app.world_mut());
     }
 
     let timeline_duration = app.world().resource::<Timeline>().cached_duration;
@@ -644,6 +656,9 @@ pub fn export_bundle(bundle_path: &std::path::Path, config: ExportConfig) -> Res
     let render_length = render_end - render_start;
     validate_render_range(render_start, render_end, duration)?;
     let mut renderer = BundleRenderer::new(bundle, config.width, config.height, config.fit)?;
+    if config.transparent {
+        renderer.drop_background();
+    }
 
     let mut encoder = ParallelEncoder::new(EncoderConfig {
         output_path: config.output_path.clone(),
@@ -702,6 +717,11 @@ pub struct BundleRenderer {
 }
 
 impl BundleRenderer {
+    /// Draw without the recorded background (see [`drop_background`]).
+    pub fn drop_background(&mut self) {
+        self.frames.drop_background();
+    }
+
     pub fn new(
         bundle: gaanim_bundle::Bundle,
         width: u32,
@@ -772,6 +792,13 @@ impl FrameRasterizer {
             height,
             fit,
         })
+    }
+
+    /// Draw the frames without the recorded background, as `--transparent`
+    /// exports them (see [`drop_background`]).
+    pub fn drop_background(&mut self) {
+        self.background = None;
+        self.bg_color = vello::peniko::Color::TRANSPARENT;
     }
 
     /// RGBA pixels of `frame`; a motion-blurred frame averages its
@@ -1161,6 +1188,9 @@ where
         .get_resource_mut::<gaanim_renderer::pipeline::CanvasBackground>()
     {
         background.pixel_size = (config.width, config.height);
+    }
+    if config.transparent {
+        drop_background(app.world_mut());
     }
     let setup_ms = capture_started.elapsed().as_secs_f64() * 1000.0;
 

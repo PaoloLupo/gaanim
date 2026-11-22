@@ -503,7 +503,7 @@ número de fotograma desde 0 (`frames/f_%04d.png` escribe `f_0000.png`,
   [`--height <PX>`], [`1080`], [Alto de salida en píxeles. Solo, sin `--width`, el ancho sigue la proporción del marco de la escena.],
   [`--fit <MODO>`], [`error`], [Qué hacer si la proporción de salida no coincide con el marco de la escena: `error` falla, `contain` añade bandas y `cover` recorta los bordes.],
   [`--encoder <CODIFICADOR>`], [`auto`], [Solo MP4: `auto`, `libx264`, `nvenc`, `amf`, `qsv` o `vaapi`.],
-  [`--transparent`], [desactivado], [Conserva el canal alfa en WebM, MOV, WebP y PNG. MP4 y GIF lo rechazan.],
+  [`--transparent`], [desactivado], [Exporta sin el fondo y con canal alfa en WebM, MOV, WebP y PNG. MP4 y GIF lo rechazan.],
   [`--from <SEGUNDOS|NOMBRE>`], [`0`], [Inicio del tramo exportado: segundos, un marcador, un segmento (su inicio) o una pausa.],
   [`--to <SEGUNDOS|NOMBRE>`], [fin de la escena], [Fin del tramo exportado; un segmento lo termina en su final.],
   [`--frame <SEGUNDOS|NOMBRE>[,…]`], [—], [Escribe exactamente un PNG en cada instante, en lugar de un tramo; un segmento da su primera pausa. Necesita una salida `.png` y no se combina con `--from` ni `--to`.],
@@ -529,8 +529,15 @@ codificador explícito no tiene alternativa: si falla, la exportación falla.
 VAAPI nunca se prueba automáticamente, porque un driver defectuoso puede
 bloquear la GPU.
 
-`--transparent` solo tiene efecto si la escena tiene un fondo con alfa, por
-ejemplo `Scene(background="#00000000")`.
+`--transparent` exporta sin el fondo: deja fuera el fondo de la escena, el de
+su tema y el de cada segmento (`scene.segment(..., background=...)`), aunque
+sean opacos o de shader, y solo los objetos conservan su color. El script y la
+vista previa siguen mostrando el fondo, así que la misma escena sirve para un
+vídeo con fondo y para un rótulo que se monta sobre otra imagen. Lo mismo vale
+al exportar un paquete `.gaanim`. Ten en cuenta que un texto claro pensado
+para un fondo oscuro puede no leerse sobre otra imagen, y que los efectos que
+mezclan con el fondo (resplandor, modos de mezcla, post-proceso) cambian de
+aspecto sin él.
 
 == Fotogramas por segundo <fotogramas-por-segundo>
 

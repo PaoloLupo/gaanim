@@ -755,7 +755,7 @@ pub fn export_dialog_system(
             {
                 crate::ui_kit::checkbox(ui, &mut current_transparent, "Keep transparency")
                     .on_hover_text(
-                        "Saves the alpha channel. The scene needs a transparent background, for example Scene(background=\"#00000000\").",
+                        "Exports without the background (the scene's, its theme's and its segments'), keeping the alpha channel, to lay the animation over other footage. The preview keeps the background.",
                     );
             }
             ui.add_space(6.0);
