@@ -606,7 +606,10 @@ conos de sus focos, la profundidad de campo que lo desenfoca y el
 desplazamiento de la lente de la cámara (`screen_offset`), y, durante una
 transición, la cámara con la que sale el segmento anterior. Los valores
 de un volumen y los colores de sus valores van a la tabla de imágenes, una
-vez cada uno.
+vez cada uno. Los segmentos de respaldo (`skip=True`) y los enlaces de
+`link_to`, con el recuadro de cada uno en cada pausa, van en una entrada
+aparte, para que un paquete presentado los siga sin Python; un paquete sin
+ellos no la lleva.
 Gaanim sigue leyendo los formatos 5 a 13 (versiones 0.9 a 0.16 y las de
 desarrollo de la 0.17), así que los paquetes ya publicados siguen abriéndose. Los grabados con
 versiones anteriores a la 0.9 ya no se abren: vuelve a grabarlos desde su
