@@ -345,10 +345,11 @@ def export_alpha_format(
     format_name: str,
     *,
     repo: Path,
+    name: str = "alpha",
 ) -> dict[str, Any]:
-    artifact = output_dir / f"alpha.{format_name}"
+    artifact = output_dir / f"{name}.{format_name}"
     if format_name == "png":
-        for stale_frame in output_dir.glob("alpha_*.png"):
+        for stale_frame in output_dir.glob(f"{name}_*.png"):
             stale_frame.unlink()
     else:
         artifact.unlink(missing_ok=True)
@@ -367,12 +368,12 @@ def export_alpha_format(
         cwd=repo,
     )
     if format_name == "png":
-        frames = sorted(output_dir.glob("alpha_*.png"))
+        frames = sorted(output_dir.glob(f"{name}_*.png"))
         if not frames:
             raise SmokeFailure("Transparent PNG export produced no frames")
         artifact = frames[0]
     validate_alpha(artifact, cwd=repo, format_name=format_name)
-    return {"format": format_name, "artifact": str(artifact), "alpha": "verified"}
+    return {"format": format_name, "artifact": str(artifact), "alpha": "verified", "scene": name}
 
 
 def export_format(
@@ -691,6 +692,20 @@ def main() -> int:
                 output_dir,
                 format_name,
                 repo=repo,
+            )
+            for format_name in args.formats
+            if format_name in ALPHA_FORMATS
+        ]
+        # --transparent drops an opaque background too: the scene's and its
+        # segment's.
+        alpha_reports += [
+            export_alpha_format(
+                executable,
+                repo / "tests/scenes/smoke/export_opaque_alpha_smoke.py",
+                output_dir,
+                format_name,
+                repo=repo,
+                name="opaque-alpha",
             )
             for format_name in args.formats
             if format_name in ALPHA_FORMATS

@@ -36,6 +36,14 @@ Sin publicar todavía.
   audiencia y el cursor se oculta. Ver
   #link("/guias/presentaciones/#modo-quiosco")[Modo quiosco].
 
+== Exportar sin fondo
+
+- `--transparent` exporta siempre sin el fondo: deja fuera el de la escena, el
+  del tema y el de cada segmento, aunque sean opacos, y conserva el canal alfa
+  en WebM, MOV, WebP y PNG. Antes solo funcionaba si la escena ya tenía un
+  fondo transparente. La vista previa sigue mostrando el fondo. Ver
+  #link("/referencia/cli/")[la referencia de la línea de comandos].
+
 == Construcciones con regla y compás
 
 - `scene.geometry` construye intersecciones (`intersect`), perpendiculares,

@@ -356,7 +356,7 @@ const EXPORT: Page = Page {
                 ),
                 (
                     "--transparent",
-                    "Keep the alpha channel (WebM, MOV, WebP, PNG); the scene\nneeds a transparent background",
+                    "Export without the background, keeping the alpha channel\n(WebM, MOV, WebP, PNG): the scene's, its theme's and its\nsegments' backgrounds are left out",
                 ),
                 (
                     "--from <SECONDS|NAME>",

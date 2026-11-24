@@ -118,8 +118,8 @@ están explicados en la sección de problemas de
   con más memoria y, si no basta, falla indicando el fotograma. Prueba una
   resolución menor o reduce la cantidad de objetos translúcidos.
 - *Transparencia:* `--transparent` solo funciona con WebM, MOV, WebP y PNG, y
-  la escena necesita un fondo transparente. Para un editor de vídeo, usa MOV
-  (ProRes 4444): el alfa de WebM se lee mal fuera del navegador.
+  quita el fondo de la escena al exportar, aunque sea opaco. Para un editor de
+  vídeo, usa MOV (ProRes 4444): el alfa de WebM se lee mal fuera del navegador.
 
 = Capturas y comparación
 
