@@ -11,9 +11,79 @@ indica también qué tienes que ajustar en tus escenas al actualizar. Para
 instalar una versión nueva, sigue
 #link("/empezar/instalacion/")[Instalación].
 
-= Próxima versión
+= 0.18.0
 
-Sin publicar todavía.
+Publicada el 24 de noviembre de 2026. `scene.viz` dibuja grafos y árboles con
+su disposición calculada, treemaps y diagramas de Sankey, y arreglos, pilas,
+colas y listas enlazadas para explicar algoritmos; `scene.geometry` construye
+con regla y compás puntos, rectas y circunferencias que siguen a sus puntos.
+El código se anima por diferencias (`code.animate.edit`), los GIF, WebP y PNG
+animados y las secuencias de imágenes se reproducen como vídeos, y
+`scene.colors.accent` lee los colores del tema. Presentar gana listas y tablas
+por pasos, enlaces entre diapositivas y diapositivas de respaldo, puntero
+láser, rotulador y zoom, modo quiosco y PDF para repartir. `--transparent`
+exporta siempre sin el fondo. El editor abre muchos más clips de vídeo con
+mucha menos memoria. Los paquetes siguen en el formato 15. Lee «Al
+actualizar»: algunos nombres de parámetros de Python cambiaron.
+
+== Grafos y árboles
+
+- `scene.viz.graph(nodes=, edges=, layout=)` dibuja redes, árboles y
+  diagramas de nodos con su disposición calculada: `"layered"` (por defecto),
+  `"tree"`, `"circular"` o `"force"`. Cada nodo es un grupo con un círculo y
+  su nombre, y cada arista una línea o flecha que sigue a sus nodos.
+- `graph.animate.to(nodes, edges)`, `add_node`, `remove_node`, `add_edge` y
+  `remove_edge` cambian la estructura y vuelven a disponer el grafo: lo que
+  sigue se mueve a su sitio nuevo y lo que entra o sale aparece o se
+  desvanece. `graph[nombre]` y `graph.edge(a, b)` dan cada pieza. Ver
+  #link("/referencia/visualization/")[Visualización] y el ejemplo nuevo
+  `visualization/graphs`.
+
+== Treemaps y diagramas de Sankey
+
+- `scene.viz.treemap(datos, path=[...], value=...)` reparte un área entre las
+  filas de una tabla con la disposición *squarified*, y
+  `scene.viz.sankey(flujos)` dibuja nodos y flujos con su ancho proporcional.
+- `animate.to(datos_nuevos)` anima un cambio de datos: cada rectángulo y
+  cada flujo se reconoce por su clave. `treemap["Asia/China"]`,
+  `sankey.node(...)` y `sankey.flow(origen, destino)` dan cada pieza. Ejemplos
+  nuevos: `visualization/treemap` y `visualization/sankey`.
+
+== Animar código por diferencias
+
+- `scene.text.code(...)` devuelve un `Code`, que sigue siendo un `Drawable`.
+  `code.animate.edit(fuente_nueva)` lleva el código a otra versión token a
+  token. `code.animate.select(lines=..., text=..., dim=...)`
+  atenúa el resto y `code.animate.highlight(...)` resalta líneas o texto;
+  `code.edit` y `code.select` lo hacen al momento. Ver
+  #link("/referencia/text/")[Texto] y el ejemplo nuevo `text/code_edits`.
+
+== Imágenes animadas y secuencias
+
+- `scene.media.animated_image(ruta)` reproduce un GIF, un WebP o un PNG
+  animado (APNG) como un vídeo sin sonido, en bucle por defecto, y
+  `scene.media.image_sequence(fotogramas, fps=24)` hace lo mismo con un patrón
+  `%04d` o una lista de imágenes. No necesitan FFmpeg, así que funcionan en el
+  playground web, y se graban en los paquetes `.gaanim`. Ver
+  #link("/referencia/medios/")[Medios] y el ejemplo nuevo
+  `media/animated_images`.
+
+== Colores del tema como atributos
+
+- `scene.colors.accent`, `.muted`, `.rule`, `.success`… leen los colores del
+  tema activo con un atributo por papel, que el editor completa y el
+  comprobador de tipos revisa; `scene.colors["marca"]` lee un papel propio.
+  Cada lectura sigue a `set_theme`. `scene.canvas.color(papel)` sigue
+  funcionando. Los ejemplos usan ya `scene.colors`. Ver
+  #link("/referencia/themes/")[Temas].
+
+== Puntos con otro número de vértices
+
+- `animate.points(puntos, path="rigid")` gira, escala y mueve el contorno como
+  una sola pieza y termina exactamente en los puntos dados; `about=` elige el
+  punto de giro. `animate.points` y `Drawable.points` aceptan otro número de
+  puntos que de vértices: repiten vértices en lugar de remuestrear, así que
+  las esquinas se conservan. `path="linear"` sigue siendo el predeterminado.
 
 == Listas y tablas por pasos
 
@@ -92,6 +162,57 @@ Sin publicar todavía.
   hoja con sus notas debajo, en texto que se puede buscar. Las opciones valen
   también para un paquete `.gaanim` y están en el diálogo *Export*. Ver
   #link("/referencia/cli/#diapositivas-pdf")[Diapositivas en PDF].
+
+== Rendimiento
+
+- El editor mantiene como mucho cuatro decodificadores de FFmpeg abiertos en
+  lugar de uno por clip, deja de reintentar cada fotograma un fotograma que no
+  se pudo decodificar y, al exportar o capturar, salta a los fotogramas
+  lejanos en lugar de decodificar desde el principio. En una presentación con
+  16 clips: de 17 a 5 procesos de FFmpeg, de 6,3 GB a 1,6 GB de memoria, y
+  capturar seis pausas pasa de 22,1 s a 5,7 s.
+- Los sistemas de cada fotograma no trabajan cuando nada cambió, la vista
+  previa y la exportación comparten la extracción, la composición y la caché
+  de fragmentos, y los paquetes mueven los elementos de cada fotograma en
+  lugar de copiarlos: buscar, previsualizar, exportar y decodificar paquetes
+  son algo más rápidos, con los mismos píxeles.
+
+== Correcciones
+
+- Las cajas de `layout` con fondo vuelven a tomar su tamaño en escenas sin
+  líneas de seguimiento. Desde una optimización anterior, el fondo se quedaba
+  con su tamaño inicial.
+- `fade_in`, `fade_out`, `write`, `create` y las transformaciones con fundido
+  se aceptan sobre una opacidad reactiva (enlazada): la opacidad que se ve es
+  el valor reactivo por su progreso. `animate.opacity(v)` sigue sin aceptarse
+  ahí, y el error nombra el canal enlazado.
+- `Text.stroke` y `SurroundingRect.stroke` aceptan `scale_with_object`.
+- Un HUD dentro de una capa de paralaje con profundidad de campo ya no sale
+  desenfocado en la vista previa, y al exportar no se pierde el resplandor de
+  un objeto justo fuera del margen.
+- Quitar un efecto como un `Glow` actualiza el dibujo en caché.
+- Los fotogramas descartados de un WebP animado se limpian a transparente.
+
+== Al actualizar
+
+- Algunos parámetros de Python cambiaron de nombre al unificar setters
+  duplicados, y llamarlos con el nombre antiguo falla: `opacity(value=)` en
+  `SurroundingRect` y en las primitivas 3D es `opacity(op=)`,
+  `z_index(value=)` es `z_index(z=)` y `Color.from_hex(s=)` es
+  `Color.from_hex(value=)`. Las llamadas sin nombre no cambian.
+- `--transparent` quita el fondo aunque sea opaco. Si exportabas con
+  `--transparent` una escena con fondo opaco esperando conservarlo, quita la
+  opción.
+- `scene.text.code` devuelve un `Code`, `scene.slides.bullets` un
+  `BulletList` y `scene.slides.table` un `SlideTable`. Los tres siguen siendo
+  un `Drawable`, así que el código que los usaba funciona igual.
+- En la API de Rust se quitan `Tween`, `TweenState`, `PropertyLens`,
+  `SnapshotDiff`, `export_scene`, `ExportConfig::headless`, `FragmentInputs` y
+  `gaanim_render_cache_sweep_system`; `MobjectId` es un componente inmutable y
+  `GaanimRenderCache` se usa por métodos (`fragment`, `fragments`, `len`,
+  `clear`).
+- Los paquetes siguen en el formato 15: los grabados con 0.17 se abren igual.
+  Los que tienen enlaces o diapositivas de respaldo llevan una entrada nueva.
 
 = 0.17.1
 
