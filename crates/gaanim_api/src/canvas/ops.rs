@@ -1292,6 +1292,11 @@ pub enum CanvasEndpoint {
     /// Where the main camera draws another endpoint on the frame, in the
     /// units a HUD drawable is placed in, every frame.
     Screen(Box<CanvasEndpoint>),
+    /// A normalized anchor of the object's projected bounds in HUD units.
+    ScreenBounds {
+        object: ObjectId,
+        anchor: gaanim_core::glam::DVec2,
+    },
     /// A point constructed from other endpoints, as with ruler and compass.
     Construction {
         kind: gaanim_math::Construction,

@@ -2518,10 +2518,28 @@ impl PyCamera {
         Ok((at.x, at.y))
     }
 
-    /// A point that is, every frame, where the main camera draws `target`
-    /// on the frame, in HUD units.
-    fn screen_point(&self, target: &Bound<'_, PyAny>) -> PyResult<PyPointRef> {
+    /// Project an endpoint or an anchor of a drawable's bounds in HUD units.
+    #[pyo3(signature = (target, *, anchor=None))]
+    fn screen_point(
+        &self,
+        target: &Bound<'_, PyAny>,
+        anchor: Option<PyAnchor>,
+    ) -> PyResult<PyPointRef> {
         crate::custom::ensure_authoring_allowed()?;
+        if let Some(anchor) = anchor {
+            let drawable = target.extract::<PyRef<PyDrawable>>().map_err(|_| {
+                pyo3::exceptions::PyTypeError::new_err(
+                    "screen_point(anchor=...) requires a Drawable",
+                )
+            })?;
+            return self
+                .inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .camera_screen_anchor(&drawable.0, anchor.0)
+                .map(PyPointRef)
+                .map_err(pyo3::exceptions::PyValueError::new_err);
+        }
         let target = resolve_reactive_endpoint_3d(target, &self.inner)?;
         Ok(PyPointRef(
             self.inner

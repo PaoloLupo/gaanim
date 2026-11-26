@@ -1262,6 +1262,55 @@ fn endpoint_follow_starts_at_its_cursor() {
 }
 
 #[test]
+fn top_screen_anchor_uses_geometry_and_the_camera_of_the_current_frame() {
+    let mut world = World::new();
+    let bounds = gaanim_math::Bounds3D::new(DVec3::splat(-1.0), DVec3::ONE);
+    let target = world
+        .spawn((
+            SpatialTransform::default(),
+            LocalBounds(bounds),
+            gaanim_scene::LineListData {
+                points: vec![[0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+                indices: None,
+                strip: true,
+                color: gaanim_core::peniko::Color::WHITE,
+                colors: None,
+                revealed: None,
+            },
+        ))
+        .id();
+    let label = world
+        .spawn((
+            SpatialTransform::default(),
+            EndpointFollow {
+                endpoint: TrackingEndpoint::ScreenBounds {
+                    entity: target,
+                    anchor: DVec2::Y,
+                },
+                offset: DVec3::Y * 0.2,
+                offset_space: FollowOffsetSpace::World,
+                since: 0.0,
+            },
+        ))
+        .id();
+    let mut camera = gaanim_math::Camera::ortho_2d_frame(16.0, 9.0, 1920, 1080);
+    camera.set_perspective(0.7, 0.1, 100.0).unwrap();
+    for distance in [10.0, 5.0, 10.0] {
+        camera
+            .look_at(DVec3::Z * distance, DVec3::ZERO, DVec3::Y)
+            .unwrap();
+        world.insert_resource(gaanim_math::ResolvedCamera {
+            camera,
+            viewport: Default::default(),
+        });
+        screen_follow_system(&mut world);
+        let actual = world.get::<SpatialTransform>(label).unwrap().translation;
+        let expected = camera.hud_point(DVec3::Y).extend(0.0) + DVec3::Y * 0.2;
+        assert!(actual.distance(expected) < 1e-9, "{distance}: {actual:?}");
+    }
+}
+
+#[test]
 fn screen_followers_stay_where_the_resolved_camera_draws_their_point() {
     let mut world = World::new();
     world.insert_resource(PlaybackState::default());

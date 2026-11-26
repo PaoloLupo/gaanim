@@ -1045,6 +1045,8 @@ pub enum TrackingEndpoint {
     /// units a HUD drawable is placed in (see
     /// [`gaanim_math::Camera::hud_point`]).
     Screen(Box<TrackingEndpoint>),
+    /// A normalized anchor of the entity's projected bounds in HUD units.
+    ScreenBounds { entity: Entity, anchor: DVec2 },
     /// A point constructed from other endpoints, as with ruler and compass
     /// (see [`gaanim_math::Construction`]); unresolved where it has none.
     Construction {
@@ -1057,7 +1059,7 @@ impl TrackingEndpoint {
     /// Whether this endpoint is, or is built on, a point on the screen.
     pub fn reads_the_screen(&self) -> bool {
         match self {
-            Self::Screen(_) => true,
+            Self::Screen(_) | Self::ScreenBounds { .. } => true,
             Self::Offset { origin, .. } | Self::Polar { origin, .. } => origin.reads_the_screen(),
             Self::Between { from, to, .. } => from.reads_the_screen() || to.reads_the_screen(),
             Self::Rim { toward, .. } => toward.reads_the_screen(),
@@ -2697,11 +2699,13 @@ pub fn resolve_tracking_endpoint(ep: &TrackingEndpoint, world: &World) -> Option
         TrackingEndpoint::MediaPixel { entity, x, y } => media_pixel_point(*entity, *x, *y, world),
         TrackingEndpoint::Screen(point) => {
             let point = resolve_tracking_endpoint(point, world)?;
-            let camera = world
-                .get_resource::<gaanim_math::ResolvedCamera>()
-                .map(|resolved| resolved.camera)
-                .or_else(|| world.get_resource::<gaanim_math::Camera>().copied())?;
-            Some(camera.hud_point(point).extend(0.0))
+            Some(tracking_camera(world)?.hud_point(point).extend(0.0))
+        }
+        TrackingEndpoint::ScreenBounds { entity, anchor } => {
+            let entity = stand_in(*entity, world);
+            let camera = tracking_camera(world)?;
+            let (min, max) = projected_bounds(entity, &camera, world)?;
+            Some((min + (max - min) * ((*anchor + DVec2::ONE) * 0.5)).extend(0.0))
         }
         TrackingEndpoint::Construction { kind, inputs } => {
             let points = inputs
@@ -2711,6 +2715,62 @@ pub fn resolve_tracking_endpoint(ep: &TrackingEndpoint, world: &World) -> Option
             kind.solve(&points).map(|point| point.extend(0.0))
         }
     }
+}
+
+fn tracking_camera(world: &World) -> Option<gaanim_math::Camera> {
+    world
+        .get_resource::<gaanim_math::ResolvedCamera>()
+        .map(|resolved| resolved.camera)
+        .or_else(|| world.get_resource::<gaanim_math::Camera>().copied())
+}
+
+fn projected_bounds(
+    entity: Entity,
+    camera: &gaanim_math::Camera,
+    world: &World,
+) -> Option<(DVec2, DVec2)> {
+    let mut min = DVec2::splat(f64::INFINITY);
+    let mut max = DVec2::splat(f64::NEG_INFINITY);
+    if world.get::<gaanim_scene::GroupMarker>(entity).is_none()
+        && let Some(matrix) = entity_world_matrix(entity, world)
+    {
+        let mut add_point = |point: DVec3| {
+            let hud = camera.hud_point(matrix.transform_point3(point));
+            if hud.is_finite() {
+                min = min.min(hud);
+                max = max.max(hud);
+            }
+        };
+        let vertices = world
+            .get::<gaanim_scene::TriangleMeshData>(entity)
+            .filter(|mesh| mesh.surface.is_none() && !mesh.vertices.is_empty())
+            .map(|mesh| &mesh.vertices)
+            .or_else(|| {
+                world
+                    .get::<gaanim_scene::LineListData>(entity)
+                    .map(|line| &line.points)
+            });
+        if let Some(vertices) = vertices.filter(|points| !points.is_empty()) {
+            // Project the geometry itself so a round mesh's anchor does not
+            // float at the corner of its local box.
+            for vertex in vertices {
+                add_point(DVec3::from_array(vertex.map(f64::from)));
+            }
+        } else if let Some(bounds) = world.get::<LocalBounds>(entity) {
+            for corner in bounds.0.corners() {
+                add_point(corner);
+            }
+        }
+    }
+    if let Some(children) = world.get::<Children>(entity) {
+        for child in children.iter() {
+            if let Some((child_min, child_max)) = projected_bounds(*child, camera, world) {
+                min = min.min(child_min);
+                max = max.max(child_max);
+            }
+        }
+    }
+    (min.is_finite() && max.is_finite()).then_some((min, max))
 }
 
 /// Resolve an endpoint plus an offset expressed in world or endpoint-local axes.

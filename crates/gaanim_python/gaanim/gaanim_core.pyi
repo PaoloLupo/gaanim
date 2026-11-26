@@ -6862,7 +6862,7 @@ class Camera:
             x, y = scene.camera.project((2, 0, 1), top)
         """
         ...
-    def screen_point(self, target: Endpoint) -> PointRef:
+    def screen_point(self, target: Endpoint, *, anchor: AnchorName | Anchor | None = None) -> PointRef:
         """A point that is, every frame, where the main camera draws ``target`` on the frame.
 
         It is in HUD units, so a HUD drawable that follows it stays over
@@ -6872,8 +6872,17 @@ class Camera:
         point or a drawable. A drawable that is not ``hud()`` would place
         the point in the scene instead, where a moving 2D camera shifts it.
 
+        With ``anchor``, the target must be a Drawable in this Scene.
+        The anchor selects an edge, corner or center of its projected
+        bounding rectangle. Native meshes use their vertices. Other
+        drawables use their bounds, and groups include their descendants.
+        A target that is not a Drawable raises TypeError.
+
         Example:
-            tag = scene.text("ball").hud().follow(scene.camera.screen_point(ball), offset=(0, 0.6))
+            tag = scene.text("ball").hud()
+            box = tag.bounds()
+            tag.follow(scene.camera.screen_point(ball, anchor="top"),
+                       offset=(-(box.left + box.right) / 2, 0.2 - box.bottom))
         """
         ...
     def save(self, name: str) -> CameraState: ...

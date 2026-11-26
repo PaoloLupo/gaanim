@@ -6162,6 +6162,22 @@ impl SceneModel {
         PointRef(CanvasEndpoint::Screen(Box::new(target)))
     }
 
+    /// A point on a drawable's projected bounds, recomputed with the main
+    /// camera and returned in HUD units.
+    pub fn camera_screen_anchor(
+        &self,
+        target: &DrawableHandle,
+        anchor: Anchor,
+    ) -> Result<PointRef, &'static str> {
+        if !Arc::ptr_eq(&self.state, &target.state) {
+            return Err("screen_point target must belong to the same Scene");
+        }
+        Ok(PointRef(CanvasEndpoint::ScreenBounds {
+            object: target.id,
+            anchor: anchor.to_offset(),
+        }))
+    }
+
     pub fn camera_to(
         &self,
         state_handle: &CameraStateHandle,
@@ -9520,6 +9536,9 @@ fn endpoint_is_valid(point: &CanvasEndpoint, state: &CanvasState) -> bool {
                 && radius.is_finite()
         }
         CanvasEndpoint::Screen(point) => endpoint_is_valid(point, state),
+        CanvasEndpoint::ScreenBounds { object, anchor } => {
+            state.object_specs.contains_key(object) && anchor.is_finite()
+        }
         CanvasEndpoint::Construction { kind, inputs } => {
             inputs.len() == kind.arity()
                 && inputs.iter().all(|input| endpoint_is_valid(input, state))

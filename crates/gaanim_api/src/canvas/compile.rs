@@ -905,6 +905,14 @@ fn compile_tracking_endpoint(
         CanvasEndpoint::Screen(point) => {
             TrackingEndpoint::Screen(Box::new(compile_tracking_endpoint(point, id_map, states)))
         }
+        CanvasEndpoint::ScreenBounds { object, anchor } => id_map
+            .get(object)
+            .and_then(|runtime| states.get(*runtime))
+            .map(|state| TrackingEndpoint::ScreenBounds {
+                entity: state.entity,
+                anchor: *anchor,
+            })
+            .unwrap_or(TrackingEndpoint::Static(DVec3::ZERO)),
         CanvasEndpoint::Construction { kind, inputs } => TrackingEndpoint::Construction {
             kind: *kind,
             inputs: inputs
