@@ -148,20 +148,19 @@ playground-serve: playground
     {{ system_python }} -m http.server 8001 -d dist/playground
 
 # Build documentation site and PDF (one-shot).
-docs:
-    {{ system_python }} scripts/dev.py build -p gaanim_launcher
+docs: build
     {{ system_python }} scripts/dev.py run -p docs -- compile
 
 # Build documentation PDF explicitly to custom output path.
-docs-pdf output="documentation.pdf":
+docs-pdf output="documentation.pdf": build
     {{ system_python }} scripts/dev.py run -p docs -- compile --pdf-output {{ output }}
 
 # Build documentation site and open in browser.
-docs-open:
+docs-open: build
     {{ system_python }} scripts/dev.py run -p docs -- compile --open
 
 # Watch mode for documentation with live reload.
-docs-watch:
+docs-watch: build
     {{ system_python }} scripts/dev.py run -p docs -- watch
 
 # ---- Doctor -----------------------------------------------------------------

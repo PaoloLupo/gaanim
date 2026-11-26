@@ -1334,6 +1334,7 @@ scene.render()
   kind: "method",
   signature: "compare(i, j, *, color=None, duration=0.6) -> Composition · swap(i, j, *, duration=0.9) -> Composition · insert(index, value, *, duration=0.8) -> Composition · remove(index, *, duration=0.8) -> Composition",
   desc: [`compare` resalta las dos celdas a la vez, en `scene.colors.accent` si no se da otro color. `swap` intercambia dos celdas: la primera sube por encima de la segunda mientras se cruzan, lejos de los índices y los punteros; el mismo índice dos veces lanza `ValueError`. `insert` hace sitio en `index` (`len(arr)` añade al final) y deja caer el valor nuevo; `remove` saca la celda y cierra el hueco. Los índices escritos se añaden o se quitan al final. `animate` conserva además el vocabulario de `Drawable.animate` sobre la estructura inicial.],
+  none,
 )
 
 #api-entry(
@@ -1341,6 +1342,7 @@ scene.render()
   kind: "method",
   signature: "pointer(name, index=0, *, color=None) -> ArrayPointer",
   desc: [Una flecha con nombre bajo la celda `index`, debajo de los índices, en `scene.colors.accent` por defecto. `pointer.animate.move_to(k)` la desliza bajo otra celda (`len(arr)` queda pasado el final) y `pointer.index` dice dónde está. Añádela después de colocar el arreglo. Un nombre vacío lanza `ValueError`.],
+  none,
 )
 
 #api-entry(

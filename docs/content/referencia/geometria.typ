@@ -1041,6 +1041,7 @@ rectas, circunferencias y marcas se muestran cuando un `play` las revela.
   kind: "factory",
   signature: "intersect(a, b, *, which=0) -> PointRef · circumcenter(A, B, C) -> PointRef · incenter(A, B, C) -> PointRef · centroid(A, B, C) -> PointRef · foot(P, line) -> PointRef",
   desc: [Puntos reactivos que no se dibujan, para usarlos como extremos o marcarlos con `marker`. `intersect` corta dos rectas, una recta y una circunferencia o dos circunferencias: con una circunferencia, `which=0` es el punto más cercano al primer punto de la recta y `1` el otro; entre dos circunferencias, a la izquierda (`0`) o a la derecha (`1`) de la recta del primer centro al segundo. `circumcenter` es el centro de la circunferencia por los tres puntos, `incenter` el de la inscrita, `centroid` el baricentro y `foot` el pie de la perpendicular desde `P`. Un `which` distinto de 0 o 1 lanza `ValueError`; algo que no es una recta ni una circunferencia, `TypeError`.],
+  none,
 )
 
 #api-entry(
@@ -1072,6 +1073,7 @@ scene.render()
   kind: "factory",
   signature: "circle_through(A, B, C) -> ConstructedCircle · circle_around(center, through) -> ConstructedCircle · marker(point, *, radius=0.07) -> Drawable",
   desc: [`circle_through` es la circunferencia por tres puntos, oculta mientras están alineados; `circle_around`, la de centro `center` que pasa por un punto o tiene un radio en unidades de la escena. `center` y `on` dan su centro y un punto de ella. `marker` es un punto del color `foreground` del tema que sigue a un punto y se oculta mientras no tiene posición. Un radio que no sea positivo lanza `ValueError`.],
+  none,
 )
 
 == Dibujos axonométricos
