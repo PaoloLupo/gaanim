@@ -12,7 +12,10 @@
 use bevy::prelude::*;
 use gaanim_api::host::ReloadPayload;
 use gaanim_core::console;
-use gaanim_editor::cli::{ExportBound, ExportCommand, parse_export_seconds, validate_export_range};
+use gaanim_editor::cli::{
+    ExportBound, ExportCommand, parse_export_seconds, resolve_frame_selection,
+    validate_export_range,
+};
 use gaanim_export::encoder::VideoEncoder;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
@@ -1574,15 +1577,36 @@ fn dispatch_diff_mode() -> bool {
             console::hint(crate::python::install_hint());
             std::process::exit(2);
         });
-        if parsed.capture_stops {
-            capture_stop_snapshots(
-                python,
-                &script,
-                capture_dir,
-                parsed.stops.as_deref(),
-                &parsed.selection,
-                parsed.height,
-            );
+        if parsed.capture_stops || !parsed.frames.is_empty() {
+            let canvas = (python.load_script_canvas)(&script).unwrap_or_else(|error| {
+                console::error("diff", error);
+                std::process::exit(2);
+            });
+            if parsed.capture_stops {
+                capture_stop_snapshots(
+                    canvas,
+                    capture_dir,
+                    parsed.stops.as_deref(),
+                    &parsed.selection,
+                    parsed.height,
+                );
+            } else {
+                let result = resolve_frame_selection(&canvas, &parsed.frames).and_then(|times| {
+                    let selectors: Vec<_> = parsed.frames.iter().map(ToString::to_string).collect();
+                    gaanim_diff::capture_selected_frames(
+                        canvas,
+                        capture_dir,
+                        &selectors,
+                        &times,
+                        parsed.height,
+                    )
+                    .map_err(|error| error.to_string())
+                });
+                if let Err(error) = result {
+                    console::error("diff", format!("frame capture failed: {error}"));
+                    std::process::exit(2);
+                }
+            }
         } else if let Err(error) =
             (python.capture_script_snapshots)(&script, capture_dir, parsed.height)
         {
@@ -1599,19 +1623,14 @@ fn dispatch_diff_mode() -> bool {
     })
 }
 
-/// Run the script like `gaanim check` and capture the frame shown at each stop.
+/// Capture the frame shown at each selected stop.
 fn capture_stop_snapshots(
-    python: &gaanim_editor::python_plugin::PythonPlugin,
-    script: &Path,
+    canvas: gaanim_api::canvas::SceneModel,
     capture_dir: &Path,
     stops: Option<&[usize]>,
     selection: &gaanim_timeline::selection::SegmentSelection,
     height: Option<u32>,
 ) {
-    let canvas = (python.load_script_canvas)(script).unwrap_or_else(|error| {
-        console::error("diff", error);
-        std::process::exit(2);
-    });
     let selected;
     let stops = if selection.is_empty() {
         stops

@@ -822,6 +822,7 @@ en el navegador. Las capturas de
   [`--bless`], [Guarda la captura como baseline y termina. Sobrescribe el baseline anterior.],
   [`--capture-only`], [Escribe solo `current/` y termina, sin comparar.],
   [`--no-capture`], [Compara los PNG que ya están en `current/`.],
+  [`--frame <SEGUNDOS|NOMBRE>[,…]`], [Captura instantes de un script o proyecto que llama a `scene.render()`. Admite segundos, marcadores, segmentos o pausas, como `export --frame`. Puede repetirse. Es incompatible con `--capture-stops`, sus filtros y `--no-capture`.],
   [`--capture-stops`], [Captura el fotograma de cada `scene.stop()` en lugar de los tiempos de `scene.snapshots`; el script no necesita cambios.],
   [`--stops <LISTA>`], [Con `--capture-stops`, solo esas pausas: números y rangos contados desde 1, como `3-7,12`.],
   [`--sections <LISTA>`, `--from <NOMBRE>`], [Con `--capture-stops`, solo las pausas de esos segmentos, con las mismas reglas que al previsualizar.],
@@ -833,13 +834,14 @@ en el navegador. Las capturas de
   [`--max-changed-ratio <0..1>`], [Fracción de píxeles distintos que se tolera.],
 )
 
-Sin `--capture-stops`, el script elige los instantes: cuando existe la
+Sin `--frame` ni `--capture-stops`, el script elige los instantes: cuando existe la
 variable de entorno `GAANIM_SNAPSHOTS`, debe llamar a
 #link("/referencia/scene/#api-scene-snapshots")[`scene.snapshots`] con esa ruta.
 
 ```bash
 gaanim --diff --example escenas/intro.py --bless
 gaanim --diff --example escenas/intro.py --pixel-threshold 4
+gaanim --diff --example escenas/intro.py --frame 0,climax --capture-only
 gaanim --diff --example mi-charla --capture-stops --stops 3-7 --capture-only
 ```
 
