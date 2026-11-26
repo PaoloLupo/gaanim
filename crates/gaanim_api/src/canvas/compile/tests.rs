@@ -6012,6 +6012,60 @@ fn move_along_travels_backwards_when_start_exceeds_end() {
 }
 
 #[test]
+fn move_along_a_3d_guide_seeks_with_its_moving_group() {
+    let mut canvas = SceneModel::new(640, 360);
+    let route = canvas
+        .polyline_3d(vec![[0.0, 0.0, 0.0], [4.0, 0.0, 0.0], [4.0, 0.0, 2.0]])
+        .move_to_3d(0.0, 1.0, 0.0);
+    let ball = canvas.sphere(0.2, 8, 4, Default::default()).unwrap();
+    let group = canvas.group_about(&[&route, &ball], DVec3::ZERO);
+    let travel = ball
+        .animate()
+        .move_along_with(
+            &route,
+            crate::anim::PathFollowOptions {
+                orient: None,
+                start: 0.75,
+                end: 0.25,
+            },
+        )
+        .unwrap()
+        .duration(2.0)
+        .rate_func(gaanim_math::RateFunc::Linear);
+    let shift = group
+        .animate()
+        .move_to_3d(0.0, 0.0, 3.0)
+        .duration(2.0)
+        .rate_func(gaanim_math::RateFunc::Linear);
+    canvas.play(vec![travel, shift]);
+    let (mut world, mut timeline) = compiled_world(&canvas);
+    let ball = world
+        .query_filtered::<Entity, With<gaanim_scene::TriangleMeshData>>()
+        .single(&world)
+        .unwrap();
+    let route = world
+        .query_filtered::<Entity, With<gaanim_scene::LineListData>>()
+        .single(&world)
+        .unwrap();
+    for (time, point) in [
+        (1.0, DVec3::new(3.0, 0.0, 0.0)),
+        (2.0, DVec3::new(1.5, 0.0, 0.0)),
+        (0.25, DVec3::new(4.0, 0.0, 0.125)),
+        (1.0, DVec3::new(3.0, 0.0, 0.0)),
+    ] {
+        timeline.seek(&mut world, time);
+        let matrix =
+            |entity| gaanim_animation::updaters::entity_world_matrix(entity, &world).unwrap();
+        let expected = matrix(route).transform_point3(point);
+        let actual = matrix(ball).transform_point3(DVec3::ZERO);
+        assert!(
+            actual.distance(expected) < 1e-6,
+            "{time}: {actual:?} vs {expected:?}"
+        );
+    }
+}
+
+#[test]
 fn move_along_keeps_the_declared_state_until_it_starts() {
     let mut canvas = SceneModel::new(640, 360);
     let route = canvas.polyline(&[(-6.0, -2.0), (0.0, 2.0), (6.0, -2.0)]);

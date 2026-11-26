@@ -10787,6 +10787,17 @@ impl SceneModel {
                 path_target: path_target.map(|id| *id_map.get(&id).unwrap_or(&id)),
                 follow: *follow,
             },
+            AnimationType::MoveAlongPolyline3D {
+                path_target,
+                points,
+                start,
+                end,
+            } => AnimationType::MoveAlongPolyline3D {
+                path_target: *id_map.get(path_target)?,
+                points: points.clone(),
+                start: *start,
+                end: *end,
+            },
             AnimationType::TranslateToAnchorPoint { point } => {
                 let mut point = *point;
                 point.object = *id_map.get(&point.object)?;

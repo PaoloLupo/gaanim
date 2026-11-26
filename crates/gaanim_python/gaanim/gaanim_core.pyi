@@ -2492,6 +2492,12 @@ class Anim:
         A solid ``arrow`` or ``curved_arrow`` is followed along its axis from
         tail to tip rather than around its silhouette.
 
+        A ``polyline_3d`` with fixed coordinates moves the drawable's origin
+        along its visible line. Its transform relative to the mover's parent
+        is sampled when the animation is authored. Group both drawables to
+        move the orbit and its follower together. A reactive 3D polyline or
+        ``orient=True`` with a 3D polyline raises ``ValueError``.
+
         With ``orient=True`` the drawable's rotation follows the path tangent
         plus ``rotate_offset`` radians, so a plane or arrow points where it
         goes. ``start`` and ``end`` select the travelled portion as arc-length

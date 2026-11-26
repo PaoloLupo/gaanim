@@ -1661,6 +1661,7 @@ fn animation_channels(anim: &Anim) -> Vec<String> {
         | TranslateBy { .. }
         | MoveAlongPath { .. }
         | MoveAlongPath3D { .. }
+        | MoveAlongPolyline3D { .. }
         | Wiggle { .. } => "translation",
         RotateTo { .. } | RotateBy { .. } | RotateBy3D { .. } => "rotation",
         ScaleTo { .. }

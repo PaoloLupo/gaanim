@@ -672,6 +672,13 @@ pub enum AnimationType {
     MoveAlongPath3D {
         points: Vec<DVec3>,
     },
+    /// Follow a visible 3D line strip over an arc-length interval.
+    MoveAlongPolyline3D {
+        path_target: ObjectId,
+        points: Vec<[f32; 3]>,
+        start: f64,
+        end: f64,
+    },
     /// Grow a solid arrow from its tail. The tip travels along the straight
     /// or curved spine while the head keeps its authored proportions and the
     /// stroke width stays constant. Non-arrow targets fall back to `Create`.

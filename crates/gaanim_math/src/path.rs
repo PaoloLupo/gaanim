@@ -485,6 +485,31 @@ pub fn get_point_on_polyline(points: &[DVec3], alpha: f64) -> DVec3 {
     points.last().copied().unwrap_or(first)
 }
 
+/// The portion between two normalized arc-length fractions, preserving bends.
+pub fn polyline_portion(points: &[DVec3], start: f64, end: f64) -> Vec<DVec3> {
+    if points.len() < 2 {
+        return points.to_vec();
+    }
+    let (from, to) = (start.min(end), start.max(end));
+    let total: f64 = points
+        .windows(2)
+        .map(|pair| pair[0].distance(pair[1]))
+        .sum();
+    let mut portion = vec![get_point_on_polyline(points, from)];
+    let mut distance = 0.0;
+    for pair in points.windows(2) {
+        distance += pair[0].distance(pair[1]);
+        if distance > from * total && distance < to * total {
+            portion.push(pair[1]);
+        }
+    }
+    portion.push(get_point_on_polyline(points, to));
+    if start > end {
+        portion.reverse();
+    }
+    portion
+}
+
 /// Trims a path to a range [from_alpha, to_alpha] proportionally.
 /// This is used to extract a sliding window (destello) along a curve for ShowPassingFlash.
 pub fn get_subpath_range(path: &BezPath, from_alpha: f64, to_alpha: f64) -> BezPath {
