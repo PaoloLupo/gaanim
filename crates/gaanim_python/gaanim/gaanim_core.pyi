@@ -9630,8 +9630,17 @@ class Geometry:
     def cube(self, size: float = 2.0, *, material: Optional[Material3D] = None) -> Primitive3D:
         """Create a centered cube with flat faces."""
         ...
-    def sphere(self, radius: float = 1.0, *, segments: int = 32, rings: int = 16, material: Optional[Material3D] = None) -> Primitive3D:
-        """Create a smooth-shaded UV sphere."""
+    def sphere(self, radius: float = 1.0, *, segments: int = 32, rings: int = 16, material: Optional[Material3D] = None, color_at: Callable[[float, float], ColorLike] | None = None) -> Primitive3D:
+        """Create a smooth-shaded UV sphere.
+
+        ``color_at(latitude, longitude)`` runs once per mesh vertex at construction.
+        Angles are in radians. Latitude runs from +π/2 at +Y to -π/2 at -Y.
+        Longitude starts at +X and increases toward +Z in [0, 2π). The seam
+        and poles use longitude zero. The returned colors replace the base
+        color and interpolate across triangles while keeping material shading.
+        A nonpositive or nonfinite radius, fewer than three segments, or fewer
+        than two rings raises ValueError. Callback exceptions propagate.
+        """
         ...
     def cylinder(self, radius: float = 1.0, height: float = 2.0, *, segments: int = 32, caps: bool = True, material: Optional[Material3D] = None) -> Primitive3D:
         """Create a Y-up cylinder."""

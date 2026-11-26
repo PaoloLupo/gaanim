@@ -246,12 +246,7 @@ pub fn sphere(
     material: Material3D,
 ) -> Result<TriangleMeshData, Primitive3DError> {
     let radius = dimension(radius)?;
-    if segments < 3 {
-        return Err(Primitive3DError::InvalidSegments);
-    }
-    if rings < 2 {
-        return Err(Primitive3DError::InvalidRings);
-    }
+    validate_sphere_resolution(segments, rings)?;
     let mut vertices = Vec::new();
     let mut normals = Vec::new();
     let mut uvs = Vec::new();
@@ -279,6 +274,38 @@ pub fn sphere(
         }
     }
     Ok(mesh(vertices, indices, normals, uvs, material))
+}
+
+fn validate_sphere_resolution(segments: u32, rings: u32) -> Result<(), Primitive3DError> {
+    if segments < 3 {
+        return Err(Primitive3DError::InvalidSegments);
+    }
+    if rings < 2 {
+        return Err(Primitive3DError::InvalidRings);
+    }
+    Ok(())
+}
+
+/// Latitude and longitude in radians, in the same order as the UV sphere's
+/// vertices. The poles and repeated seam use canonical longitudes.
+pub fn sphere_color_samples(
+    radius: f64,
+    segments: u32,
+    rings: u32,
+) -> Result<impl Iterator<Item = (f64, f64)>, Primitive3DError> {
+    dimension(radius)?;
+    validate_sphere_resolution(segments, rings)?;
+    Ok((0..=rings).flat_map(move |ring| {
+        let latitude = std::f64::consts::PI * (0.5 - f64::from(ring) / f64::from(rings));
+        (0..=segments).map(move |segment| {
+            let longitude = if ring == 0 || ring == rings {
+                0.0
+            } else {
+                TAU * f64::from(segment % segments) / f64::from(segments)
+            };
+            (latitude, longitude)
+        })
+    }))
 }
 
 pub fn cylinder(
@@ -870,6 +897,19 @@ pub fn revolve(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sphere_color_samples_match_the_uv_grid() {
+        use std::f64::consts::FRAC_PI_2;
+
+        let samples: Vec<_> = sphere_color_samples(1.0, 4, 2).unwrap().collect();
+        let sphere = sphere(1.0, 4, 2, Material3D::default()).unwrap();
+        assert_eq!(samples.len(), sphere.vertices.len());
+        assert_eq!(samples[..5], [(FRAC_PI_2, 0.0); 5]);
+        assert_eq!(samples[6], (0.0, FRAC_PI_2));
+        assert_eq!(samples[5], samples[9]);
+        assert_eq!(samples[10..], [(-FRAC_PI_2, 0.0); 5]);
+    }
     use std::collections::HashMap;
 
     fn assert_valid(mesh: &TriangleMeshData) {

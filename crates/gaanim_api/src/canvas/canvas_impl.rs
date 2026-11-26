@@ -2489,6 +2489,11 @@ pub struct SceneModel {
     pub(crate) camera_hold_probes: Arc<HashMap<(usize, u8), gaanim_core::glam::DVec3>>,
 }
 
+fn mesh_vertex_color(color: Color) -> [f32; 4] {
+    let rgba = color.to_rgba8();
+    [rgba.r, rgba.g, rgba.b, rgba.a].map(|channel| f32::from(channel) / 255.0)
+}
+
 impl SceneModel {
     /// Create a scene of `width` x `height` logical units using the default
     /// [`CanvasTheme::DEFAULT_NAME`] theme and its background.
@@ -4280,6 +4285,23 @@ impl SceneModel {
         )?)))
     }
 
+    /// A UV sphere with one color per vertex in `sphere_color_samples` order.
+    pub fn sphere_with_colors(
+        &mut self,
+        radius: f64,
+        segments: u32,
+        rings: u32,
+        material: gaanim_scene::Material3D,
+        colors: Vec<Color>,
+    ) -> Result<DrawableHandle, primitives3d::Primitive3DError> {
+        let mut mesh = primitives3d::sphere(radius, segments, rings, material)?;
+        if colors.len() != mesh.vertices.len() {
+            return Err(primitives3d::Primitive3DError::InvalidColors);
+        }
+        mesh.colors = Some(colors.into_iter().map(mesh_vertex_color).collect());
+        Ok(self.spawn(SpawnKind::Primitive3D(mesh)))
+    }
+
     pub fn cylinder(
         &mut self,
         radius: f64,
@@ -4432,15 +4454,7 @@ impl SceneModel {
         material: gaanim_scene::Material3D,
     ) -> Result<DrawableHandle, primitives3d::Primitive3DError> {
         let vertices: Vec<DVec3> = vertices.iter().copied().map(DVec3::from_array).collect();
-        let colors = colors.map(|colors| {
-            colors
-                .iter()
-                .map(|color| {
-                    let rgba = color.to_rgba8();
-                    [rgba.r, rgba.g, rgba.b, rgba.a].map(|channel| f32::from(channel) / 255.0)
-                })
-                .collect()
-        });
+        let colors = colors.map(|colors| colors.into_iter().map(mesh_vertex_color).collect());
         let mesh = primitives3d::custom_mesh(&vertices, triangles, colors, material)?;
         Ok(self.spawn(SpawnKind::Primitive3D(mesh)))
     }
