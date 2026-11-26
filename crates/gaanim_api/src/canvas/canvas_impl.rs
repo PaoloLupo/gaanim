@@ -6670,10 +6670,27 @@ impl SceneModel {
     // -- Time controls --
 
     pub fn wait(&mut self, dur: f64) {
+        self.wait_with_site(dur, super::timeline_index::authoring_site());
+    }
+
+    pub(super) fn wait_with_site(
+        &mut self,
+        dur: f64,
+        site: Option<gaanim_core::console::ScriptLocation>,
+    ) {
+        let duration = dur.max(0.0);
         let mut guard = self.state.lock().expect("canvas state poisoned");
         guard.freeze_spawn_specs();
-        guard.active_mut().cursor += dur.max(0.0);
-        guard.active_mut().ops.push(Op::Wait(dur.max(0.0)));
+        let segment = guard.active_mut();
+        let start = segment.cursor;
+        segment.cursor += duration;
+        segment.ops.push(Op::Wait(duration));
+        if let Some(site) = site
+            && duration > 0.0
+        {
+            let wait = (segment.id, start, segment.cursor, site);
+            guard.authored_timeline.waits.push(wait);
+        }
     }
 
     /// Set the tempo: `bpm` beats per minute, beat 0 at `offset` seconds of
@@ -6770,7 +6787,7 @@ impl SceneModel {
                 cursor - target
             ));
         }
-        self.wait((target - cursor).max(0.0));
+        self.wait_with_site(target - cursor, None);
         Ok(())
     }
 
@@ -6789,7 +6806,7 @@ impl SceneModel {
                 cursor - time
             ));
         }
-        self.wait((time - cursor).max(0.0));
+        self.wait_with_site(time - cursor, None);
         Ok(())
     }
 
@@ -7449,10 +7466,10 @@ impl SceneModel {
                 .map_or(0.0, |transition| transition.duration() - segment.cursor)
         };
         if entering > 1e-9 {
-            self.wait(entering);
+            self.wait_with_site(entering, None);
         }
         if let Some(hold) = self.live_take_hold() {
-            self.wait(hold);
+            self.wait_with_site(hold, None);
             return Ok(());
         }
         let site = super::timeline_index::authoring_site();

@@ -530,7 +530,7 @@ const INSPECT: Page = Page {
             &[
                 "segments and the Section that generated them, with start and end",
                 "stops, markers, voiceovers and the live take, with their times",
-                "with --json, every play too: what an editor needs to go from a line to a time",
+                "with --json, the times and script lines of plays and waits",
             ],
         ),
         Block::Rows(

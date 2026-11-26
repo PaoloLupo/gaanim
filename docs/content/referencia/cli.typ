@@ -395,15 +395,17 @@ hay línea:
   "markers": [{"name": "climax", "time": 20.0, "file": "C:/charla/main.py", "line": 31}],
   "voiceovers": [{"key": "intro", "start": 0.0, "end": 6.2, "file": "C:/charla/main.py", "line": 10}],
   "live_take": null,
-  "plays": [{"start": 0.0, "end": 1.5, "file": "C:/charla/main.py", "line": 11}]
+  "plays": [{"start": 0.0, "end": 1.5, "file": "C:/charla/main.py", "line": 11}],
+  "waits": [{"start": 1.5, "end": 4.5, "file": "C:/charla/main.py", "line": 12}]
 }
 ```
 
 `section` es la clave del `Section` que generó el segmento, y `sections` da
 cada clave una vez, del inicio de su primer segmento al final del último.
-`plays` tiene cada `play` con su inicio y su final: con ellos un editor pasa
-de una línea al instante que muestra. Un paquete `.gaanim` no guarda líneas,
-así que `inspect` solo acepta scripts y proyectos.
+`plays` permite a un editor saltar al instante final de cada `scene.play`.
+`waits` da el inicio y el final de cada `scene.wait` de duración positiva
+para que un editor resalte su línea durante la reproducción. Un paquete
+`.gaanim` no guarda líneas, así que `inspect` solo acepta scripts y proyectos.
 
 = `gaanim project` <gaanim-project>
 

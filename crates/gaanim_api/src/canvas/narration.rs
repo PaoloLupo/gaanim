@@ -462,7 +462,7 @@ impl SceneModel {
         if let Some(time) = time {
             let now = self.current_time();
             if time > now {
-                self.wait(time - now);
+                self.wait_with_site(time - now, None);
             }
         }
         Ok(source)
@@ -493,7 +493,7 @@ impl SceneModel {
         }
         let remaining = self.voiceover_remaining(handle);
         if remaining > 0.0 {
-            self.wait(remaining);
+            self.wait_with_site(remaining, None);
         }
         self.narration.finished[handle.0] = true;
     }
@@ -578,7 +578,7 @@ impl SceneModel {
         let end = self.narration_end();
         let now = self.current_time();
         if end > now + 1e-9 {
-            self.wait(end - now);
+            self.wait_with_site(end - now, None);
         }
         self.narration.finished.fill(true);
     }

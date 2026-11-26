@@ -1,6 +1,6 @@
 //! Where in the script each part of the timeline was authored, with its
-//! times: segments, stops, markers, voiceovers, the live take and every
-//! `play`. `gaanim inspect` prints it, and an editor follows the cursor
+//! times: segments, stops, markers, voiceovers, the live take, plays and
+//! waits. `gaanim inspect` prints it, and an editor follows the cursor
 //! with it.
 //!
 //! Lines are recorded only while [`track_script_lines`] is on, like the
@@ -16,6 +16,9 @@ use gaanim_core::console::ScriptLocation;
 use super::SceneModel;
 use super::segment::SegmentId;
 
+/// A span's segment, its start and end within that segment, and its line.
+type AuthoredSpan = (SegmentId, f64, f64, ScriptLocation);
+
 /// The script lines of the timeline's parts, kept out of the operations
 /// like the drawables' lines: moving a line must not change what a reload
 /// reuses.
@@ -27,9 +30,8 @@ pub(crate) struct AuthoredTimeline {
     pub markers: HashMap<String, ScriptLocation>,
     /// Voiceovers and the live take, by key.
     pub takes: HashMap<String, ScriptLocation>,
-    /// Each `play`: its segment, its start and end in the segment, and its
-    /// line.
-    pub plays: Vec<(SegmentId, f64, f64, ScriptLocation)>,
+    pub plays: Vec<AuthoredSpan>,
+    pub waits: Vec<AuthoredSpan>,
 }
 
 /// The script line of the authoring call being made, when lines are
@@ -71,7 +73,7 @@ pub struct IndexedMarker {
 }
 
 /// A span of the timeline authored by one call: a voiceover, the live take
-/// or a `play`. `key` names a take; a `play` has none.
+/// or a play or wait. Only takes carry a `key`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct IndexedSpan {
     pub key: Option<String>,
@@ -90,6 +92,8 @@ pub struct TimelineIndex {
     pub voiceovers: Vec<IndexedSpan>,
     pub live_take: Option<IndexedSpan>,
     pub plays: Vec<IndexedSpan>,
+    /// Explicit `scene.wait` calls with a script location and positive duration.
+    pub waits: Vec<IndexedSpan>,
 }
 
 impl TimelineIndex {
@@ -154,7 +158,7 @@ impl SceneModel {
         }
     }
 
-    /// The timeline's segments, stops, markers, takes and plays with their
+    /// The timeline's segments, stops, markers, takes, plays and waits with their
     /// times and, while lines are tracked, the script line of each.
     pub fn timeline_index(&self) -> TimelineIndex {
         let manifest = self.segment_manifest();
@@ -211,27 +215,30 @@ impl SceneModel {
             .live
             .as_ref()
             .map(|live| take(&live.key, live.start_time, live.duration));
-        let mut plays: Vec<IndexedSpan> = authored
-            .plays
-            .iter()
-            .filter_map(|(segment, start, end, location)| {
-                let offset = starts.get(segment)?;
-                Some(IndexedSpan {
-                    key: None,
-                    start: offset + start,
-                    end: offset + end,
-                    location: Some(location.clone()),
+        let index_spans = |spans: &[AuthoredSpan]| {
+            let mut spans: Vec<IndexedSpan> = spans
+                .iter()
+                .filter_map(|(segment, start, end, location)| {
+                    let offset = starts.get(segment)?;
+                    Some(IndexedSpan {
+                        key: None,
+                        start: offset + start,
+                        end: offset + end,
+                        location: Some(location.clone()),
+                    })
                 })
-            })
-            .collect();
-        plays.sort_by(|left, right| left.start.total_cmp(&right.start));
+                .collect();
+            spans.sort_by(|left, right| left.start.total_cmp(&right.start));
+            spans
+        };
         TimelineIndex {
             duration: manifest.duration(),
             segments,
             markers,
             voiceovers,
             live_take,
-            plays,
+            plays: index_spans(&authored.plays),
+            waits: index_spans(&authored.waits),
         }
     }
 }
@@ -291,6 +298,7 @@ mod tests {
                     location: at("helpers.py", 5),
                 },
             ],
+            waits: Vec::new(),
         };
         let file = Path::new("main.py");
         // A segment stands for its first stop, else its end.
@@ -315,7 +323,8 @@ mod tests {
         scene.stop(Some("titulo".into())).unwrap();
         scene.wait(1.0);
         scene.segment("results · 1 · 1 · Datos", None).unwrap();
-        scene.wait(0.5);
+        scene.wait_with_site(0.5, at("helpers.py", 12));
+        scene.wait_with_site(0.0, at("helpers.py", 13));
         scene.marker("climax").unwrap();
         scene.wait(0.5);
         scene.stop(None).unwrap();
@@ -350,7 +359,16 @@ mod tests {
         assert_eq!(stops, [(Some("titulo"), 1.0), (None, 3.0)]);
         assert_eq!(index.markers[0].name, "climax");
         assert_eq!(index.markers[0].time, 2.5);
-        // Without tracked lines, nothing carries a location.
+        assert_eq!(
+            index.waits,
+            [IndexedSpan {
+                key: None,
+                start: 2.0,
+                end: 2.5,
+                location: at("helpers.py", 12),
+            }]
+        );
+        // Segments authored without tracked lines carry no location.
         assert!(
             index
                 .segments

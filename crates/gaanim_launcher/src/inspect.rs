@@ -160,6 +160,7 @@ pub(crate) fn index_json(script: &Path, index: &TimelineIndex) -> Value {
         "voiceovers": index.voiceovers.iter().map(span_json).collect::<Vec<_>>(),
         "live_take": index.live_take.as_ref().map(span_json),
         "plays": index.plays.iter().map(span_json).collect::<Vec<_>>(),
+        "waits": index.waits.iter().map(span_json).collect::<Vec<_>>(),
     })
 }
 
@@ -307,6 +308,12 @@ mod tests {
                 end: 1.0,
                 location: Some(ScriptLocation::new("/talk/main.py", 5)),
             }],
+            waits: vec![IndexedSpan {
+                key: None,
+                start: 1.0,
+                end: 2.0,
+                location: Some(ScriptLocation::new("/talk/main.py", 7)),
+            }],
         }
     }
 
@@ -347,6 +354,10 @@ mod tests {
         assert!(value["live_take"].is_null());
         assert_eq!(value["plays"][0]["end"], 1.0);
         assert!(value["plays"][0].get("key").is_none());
+        assert_eq!(
+            value["waits"],
+            json!([{ "start": 1.0, "end": 2.0, "file": "/talk/main.py", "line": 7 }])
+        );
     }
 
     #[test]
