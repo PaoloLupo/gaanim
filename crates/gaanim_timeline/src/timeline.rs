@@ -3513,11 +3513,14 @@ impl Timeline {
             self.delayed_world_matrix(world, context, follow.source, leader_time, depth + 1)
                 .map(|leader| follow.position(leader))
         } else if let Some(follow) = endpoint {
+            let anchor = world
+                .get::<gaanim_scene::LocalBounds>(context.probe)
+                .and_then(|bounds| follow.local_anchor(&bounds.0));
             let offset = |basis: gaanim_core::glam::DMat4| match follow.offset_space {
                 FollowOffsetSpace::World => follow.offset,
                 FollowOffsetSpace::Local => basis.transform_vector3(follow.offset),
             };
-            match &follow.endpoint {
+            let position = match &follow.endpoint {
                 TrackingEndpoint::Entity(leader) => context
                     .object_of
                     .get(leader)
@@ -3532,7 +3535,12 @@ impl Timeline {
                     follow.offset_space,
                     world,
                 ),
-            }
+            };
+            position.map(|position| {
+                anchor.map_or(position, |anchor| {
+                    position - matrix.transform_vector3(anchor)
+                })
+            })
         } else if let Some((source, axes, offset)) = binding {
             context
                 .object_of

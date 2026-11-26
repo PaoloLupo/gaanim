@@ -2022,7 +2022,7 @@ mark = scene.text("A").hud().move_to(x, y)
   kind: "method",
   params: (
     (name: "target", type: "Endpoint", default: none, desc: [Punto 3D, objeto o punto de anclaje. Con `anchor`, debe ser un `Drawable` de la escena.]),
-    (name: "anchor", type: "AnchorName | Anchor | None", default: "None", desc: [Borde, esquina o centro del rectángulo proyectado, por ejemplo `"top"`. Con `None` se proyecta el punto original.]),
+    (name: "anchor", type: "AnchorName | Anchor | None", default: "None", desc: [Borde, esquina o centro del rectángulo proyectado, por ejemplo `Anchor.TOP` o `"top"`. Con `None` se proyecta el punto original.]),
   ),
   returns: (type: "PointRef", desc: [Punto que está, en cada fotograma, donde la cámara principal dibuja `target`, en unidades HUD.]),
   desc: [Un objeto `hud()` que lo sigue con `follow` mantiene su posición relativa en pantalla aunque la cámara o el objeto se muevan. Las mallas nativas proyectan sus vértices. Los demás objetos proyectan sus cajas, y un grupo abarca las proyecciones de sus miembros. En el ejemplo, el borde inferior del rótulo queda a 0.2 unidades HUD del borde superior de la esfera.],
@@ -2032,10 +2032,10 @@ mark = scene.text("A").hud().move_to(x, y)
 >>>scene = Scene(frame=(16, 9))
 ball = scene.geometry.sphere(0.3).move_to_3d(2, 1, 0)
 tag = scene.text("pelota").hud()
-box = tag.bounds()
 tag.follow(
-    scene.camera.screen_point(ball, anchor="top"),
-    offset=(-(box.left + box.right) / 2, 0.2 - box.bottom),
+    scene.camera.screen_point(ball, anchor=Anchor.TOP),
+    anchor=Anchor.BOTTOM,
+    offset=(0, 0.2),
 )
 scene.camera.perspective(0.7)
 scene.camera.look_at(eye=(6, 4, 8), target=(0, 0, 0))

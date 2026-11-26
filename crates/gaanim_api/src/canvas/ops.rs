@@ -11,7 +11,7 @@ use gaanim_animation::{ReactiveFunction, ScalarSource};
 use gaanim_core::ObjectId;
 use gaanim_core::glam::{DQuat, DVec2, DVec3};
 use gaanim_core::peniko::Color;
-use gaanim_layout::LayoutConstraint;
+use gaanim_layout::{Anchor, LayoutConstraint};
 use gaanim_renderer::background::BackgroundPaint;
 use gaanim_renderer::post_process::PostProcessOverride;
 use gaanim_timeline::transition::TransitionType;
@@ -926,6 +926,7 @@ pub(crate) enum Op {
         endpoint: CanvasEndpoint,
         offset: DVec3,
         offset_space: FollowOffsetSpace,
+        anchor: Option<Anchor>,
     },
     /// Add a term to the displacement field `target` and everything in it
     /// are deformed by: `lattice` weighed by `gate` and `scale`.

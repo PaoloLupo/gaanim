@@ -5684,7 +5684,7 @@ class Drawable:
             drawable.follow_to(source, (0.0, 0.0))
         """
         ...
-    def follow(self, source: Endpoint, *, offset: tuple[float, float] = (0.0, 0.0), offset_space: Literal["world", "local"] = "world", delay: float = 0.0) -> Self:
+    def follow(self, source: Endpoint, *, offset: tuple[float, float] = (0.0, 0.0), offset_space: Literal["world", "local"] = "world", delay: float = 0.0, anchor: AnchorName | Anchor | None = None) -> Self:
         """Follow any endpoint in the same frame and return this drawable.
 
         World offsets remain screen-aligned; local offsets rotate and scale with
@@ -5692,6 +5692,11 @@ class Drawable:
         The drawable stays hidden until its entry animation is played. Without
         ``delay`` the follow starts at the cursor, so earlier animations of this
         drawable still play.
+
+        With ``anchor``, the selected point on this drawable's local bounds
+        follows the source plus the offset. For a HUD label following a
+        projected point, the offset is in HUD units. Supplying an anchor
+        with a positive ``delay`` raises ValueError.
 
         ``delay`` (seconds) places this drawable where a Drawable ``source``
         was ``delay`` seconds earlier, like After Effects'
@@ -6880,9 +6885,8 @@ class Camera:
 
         Example:
             tag = scene.text("ball").hud()
-            box = tag.bounds()
-            tag.follow(scene.camera.screen_point(ball, anchor="top"),
-                       offset=(-(box.left + box.right) / 2, 0.2 - box.bottom))
+            tag.follow(scene.camera.screen_point(ball, anchor=Anchor.TOP),
+                       anchor=Anchor.BOTTOM, offset=(0, 0.2))
         """
         ...
     def save(self, name: str) -> CameraState: ...

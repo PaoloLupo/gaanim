@@ -1044,6 +1044,7 @@ pub(crate) struct AuthoredFollow {
     pub endpoint: crate::canvas::CanvasEndpoint,
     pub offset: DVec3,
     pub offset_space: gaanim_animation::FollowOffsetSpace,
+    pub anchor: Option<gaanim_layout::Anchor>,
 }
 
 /// A dynamic camera clip waiting for the rest of its `play`: once every

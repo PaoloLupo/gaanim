@@ -1210,6 +1210,8 @@ pub struct EndpointFollow {
     pub endpoint: TrackingEndpoint,
     pub offset: DVec3,
     pub offset_space: FollowOffsetSpace,
+    /// The follower's normalized local bounds anchor, when given.
+    pub anchor: Option<DVec2>,
     /// Timeline time the follow starts at, the cursor where it was set:
     /// before it the drawable keeps its authored transform.
     pub since: f64,
@@ -1219,6 +1221,12 @@ impl EndpointFollow {
     /// Whether the follow places its drawable at timeline time `time`.
     pub fn holds_at(&self, time: f64) -> bool {
         time + 1e-9 >= self.since
+    }
+
+    /// The selected point in the follower's own geometry.
+    pub fn local_anchor(&self, bounds: &gaanim_math::Bounds3D) -> Option<DVec3> {
+        self.anchor
+            .map(|anchor| bounds.center() + bounds.size() * 0.5 * anchor.extend(0.0))
     }
 }
 
@@ -3140,10 +3148,13 @@ fn follow_endpoints(world: &mut World, wanted: impl Fn(&TrackingEndpoint) -> boo
                 endpoint_basis(&follow.endpoint, world).transform_vector3(follow.offset)
             }
         };
-        updates.push((entity, position));
+        let anchor = world
+            .get::<LocalBounds>(entity)
+            .and_then(|bounds| follow.local_anchor(&bounds.0));
+        updates.push((entity, position, anchor));
     }
-    for (entity, world_position) in updates {
-        let local = world
+    for (entity, world_position, anchor) in updates {
+        let mut local = world
             .get::<ChildOf>(entity)
             .map(|relation| relation.parent())
             .and_then(|parent| entity_world_matrix(parent, world))
@@ -3151,6 +3162,11 @@ fn follow_endpoints(world: &mut World, wanted: impl Fn(&TrackingEndpoint) -> boo
             .map(|matrix| matrix.inverse().transform_point3(world_position))
             .unwrap_or(world_position);
         if let Some(mut transform) = world.get_mut::<SpatialTransform>(entity) {
+            if let Some(anchor) = anchor {
+                let mut placement = *transform;
+                placement.translation = DVec3::ZERO;
+                local -= placement.to_mat4().transform_point3(anchor);
+            }
             transform.translation = local;
         }
     }

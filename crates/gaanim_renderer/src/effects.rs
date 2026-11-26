@@ -855,6 +855,7 @@ mod camera_view_follow_tests {
                     endpoint: gaanim_animation::TrackingEndpoint::Entity(target),
                     offset: DVec3::ZERO,
                     offset_space: gaanim_animation::FollowOffsetSpace::World,
+                    anchor: None,
                     since: 0.0,
                 },
             ))

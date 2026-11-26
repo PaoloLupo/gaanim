@@ -7503,6 +7503,7 @@ impl SceneModel {
                                 endpoint: CanvasEndpoint::Entity(*source),
                                 offset: *offset,
                                 offset_space: gaanim_animation::FollowOffsetSpace::World,
+                                anchor: None,
                             },
                         );
                     }
@@ -7513,6 +7514,7 @@ impl SceneModel {
                     endpoint,
                     offset,
                     offset_space,
+                    anchor,
                 } => {
                     if let Some(target_id) = id_map.get(target).copied()
                         && let Some(target_state) = builder.states.get(target_id)
@@ -7528,6 +7530,7 @@ impl SceneModel {
                                 ),
                                 offset: *offset,
                                 offset_space: *offset_space,
+                                anchor: anchor.map(|anchor| anchor.to_offset()),
                                 since: builder.current_time,
                             });
                         builder.authored_follows.insert(
@@ -7536,6 +7539,7 @@ impl SceneModel {
                                 endpoint: endpoint.clone(),
                                 offset: *offset,
                                 offset_space: *offset_space,
+                                anchor: *anchor,
                             },
                         );
                     }
@@ -9770,7 +9774,7 @@ impl SceneModel {
             CanvasEndpoint::Static(position) => Some((*position, DMat4::IDENTITY)),
             CanvasEndpoint::Entity(id) => {
                 let runtime = *id_map.get(id)?;
-                builder.states.get(runtime)?;
+                let state = builder.states.get(runtime)?;
                 if let Some(follow) = builder.authored_follows.get(&runtime) {
                     let (origin, basis) = point(&follow.endpoint)?;
                     let offset = match follow.offset_space {
@@ -9779,7 +9783,10 @@ impl SceneModel {
                             basis.transform_vector3(follow.offset)
                         }
                     };
-                    return Some((origin + offset, basis));
+                    let anchor_shift = follow.anchor.map_or(DVec3::ZERO, |anchor| {
+                        world(runtime).transform_vector3(anchor.get_point(&state.bounds))
+                    });
+                    return Some((origin + offset - anchor_shift, basis));
                 }
                 let matrix = world(runtime);
                 Some((matrix.transform_point3(DVec3::ZERO), matrix))

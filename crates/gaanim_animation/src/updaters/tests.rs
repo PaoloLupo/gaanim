@@ -1245,6 +1245,7 @@ fn endpoint_follow_starts_at_its_cursor() {
                 endpoint: TrackingEndpoint::Static(DVec3::new(4.0, 2.0, 0.0)),
                 offset: DVec3::ZERO,
                 offset_space: FollowOffsetSpace::World,
+                anchor: None,
                 since: 2.0,
             },
         ))
@@ -1262,7 +1263,7 @@ fn endpoint_follow_starts_at_its_cursor() {
 }
 
 #[test]
-fn top_screen_anchor_uses_geometry_and_the_camera_of_the_current_frame() {
+fn a_followers_bottom_keeps_its_gap_from_the_projected_top() {
     let mut world = World::new();
     let bounds = gaanim_math::Bounds3D::new(DVec3::splat(-1.0), DVec3::ONE);
     let target = world
@@ -1281,7 +1282,11 @@ fn top_screen_anchor_uses_geometry_and_the_camera_of_the_current_frame() {
         .id();
     let label = world
         .spawn((
-            SpatialTransform::default(),
+            SpatialTransform {
+                anchor: DVec3::new(0.1, 0.15, 0.0),
+                ..Default::default()
+            },
+            LocalBounds(gaanim_math::Bounds3D::new_2d(-0.4, -0.1, 0.0, 0.2)),
             EndpointFollow {
                 endpoint: TrackingEndpoint::ScreenBounds {
                     entity: target,
@@ -1289,13 +1294,14 @@ fn top_screen_anchor_uses_geometry_and_the_camera_of_the_current_frame() {
                 },
                 offset: DVec3::Y * 0.2,
                 offset_space: FollowOffsetSpace::World,
+                anchor: Some(DVec2::NEG_Y),
                 since: 0.0,
             },
         ))
         .id();
     let mut camera = gaanim_math::Camera::ortho_2d_frame(16.0, 9.0, 1920, 1080);
     camera.set_perspective(0.7, 0.1, 100.0).unwrap();
-    for distance in [10.0, 5.0, 10.0] {
+    for (distance, scale) in [(10.0, 1.0), (5.0, 2.0), (10.0, 1.0)] {
         camera
             .look_at(DVec3::Z * distance, DVec3::ZERO, DVec3::Y)
             .unwrap();
@@ -1303,8 +1309,13 @@ fn top_screen_anchor_uses_geometry_and_the_camera_of_the_current_frame() {
             camera,
             viewport: Default::default(),
         });
+        world.get_mut::<SpatialTransform>(label).unwrap().scale = DVec3::splat(scale);
         screen_follow_system(&mut world);
-        let actual = world.get::<SpatialTransform>(label).unwrap().translation;
+        let actual = world
+            .get::<SpatialTransform>(label)
+            .unwrap()
+            .to_mat4()
+            .transform_point3(DVec3::new(-0.2, -0.1, 0.0));
         let expected = camera.hud_point(DVec3::Y).extend(0.0) + DVec3::Y * 0.2;
         assert!(actual.distance(expected) < 1e-9, "{distance}: {actual:?}");
     }
@@ -1336,6 +1347,7 @@ fn screen_followers_stay_where_the_resolved_camera_draws_their_point() {
                 },
                 offset: DVec3::ZERO,
                 offset_space: FollowOffsetSpace::World,
+                anchor: None,
                 since: 0.0,
             },
         ))
@@ -1347,6 +1359,7 @@ fn screen_followers_stay_where_the_resolved_camera_draws_their_point() {
                 endpoint: TrackingEndpoint::Static(point),
                 offset: DVec3::ZERO,
                 offset_space: FollowOffsetSpace::World,
+                anchor: None,
                 since: 0.0,
             },
         ))
@@ -1371,6 +1384,7 @@ fn endpoint_follow_converts_world_position_into_parent_space() {
                 endpoint: TrackingEndpoint::Static(DVec3::new(30.0, 50.0, 0.0)),
                 offset: DVec3::new(2.0, -3.0, 0.0),
                 offset_space: FollowOffsetSpace::World,
+                anchor: None,
                 since: 0.0,
             },
         ))
@@ -1391,6 +1405,7 @@ fn position_bindings_read_a_source_positioned_by_follow() {
                 endpoint: TrackingEndpoint::Static(DVec3::new(3.0, 4.0, 0.0)),
                 offset: DVec3::ZERO,
                 offset_space: FollowOffsetSpace::World,
+                anchor: None,
                 since: 0.0,
             },
         ))
@@ -1410,6 +1425,7 @@ fn position_bindings_read_a_source_positioned_by_follow() {
                 endpoint: TrackingEndpoint::Static(DVec3::new(-5.0, 6.0, 0.0)),
                 offset: DVec3::ZERO,
                 offset_space: FollowOffsetSpace::World,
+                anchor: None,
                 since: 0.0,
             },
         ))
