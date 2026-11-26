@@ -569,7 +569,7 @@ const DIFF: Page = Page {
             &[
                 (
                     "-e, --example <SCRIPT>",
-                    "Capture and compare one script; it calls\nscene.snapshots(...) when GAANIM_SNAPSHOTS is set.\nA playback bundle (.gaanim) captures its stops,\nwithout Python",
+                    "Capture and compare one script. By default it calls\nscene.snapshots(...) when GAANIM_SNAPSHOTS is set.\nA playback bundle (.gaanim) captures its stops,\nwithout Python",
                 ),
                 (
                     "--tests-root <DIR>",
@@ -581,6 +581,10 @@ const DIFF: Page = Page {
                 ),
                 ("--capture-only", "Capture into current/ and exit"),
                 ("--no-capture", "Reuse the existing current/ snapshots"),
+                (
+                    "--frame <SECONDS|NAME>[,…]",
+                    "Capture selected script frames, as in export --frame",
+                ),
                 (
                     "--capture-stops",
                     "Capture the frame at every scene.stop() instead",

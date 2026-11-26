@@ -88,6 +88,39 @@ pub fn capture_canvas_sized(
     capture_canvas_as(canvas, output_dir, times, &ids, height)
 }
 
+/// Capture CLI-selected frames, keeping their identity when a named
+/// selector resolves to a different time in a later revision of the scene.
+pub fn capture_selected_frames(
+    canvas: SceneModel,
+    output_dir: &Path,
+    selectors: &[String],
+    times: &[f64],
+    height: Option<u32>,
+) -> Result<SnapshotManifest> {
+    if selectors.len() != times.len() {
+        return Err(DiffError::InvalidInput(
+            "each frame selector must have a resolved timestamp".to_string(),
+        ));
+    }
+    let ids: Vec<_> = selectors
+        .iter()
+        .enumerate()
+        .map(|(index, selector)| {
+            let name = file_slug(selector);
+            let name = &name[..name.len().min(64)];
+            let hash = blake3::hash(selector.as_bytes()).to_hex();
+            format!("seek_{index:04}_{name}_{}", &hash[..12])
+        })
+        .collect();
+    let manifest = capture_canvas_as(canvas, output_dir, times, &ids, height)?;
+    match fs::remove_file(output_dir.join(STOPS_FILE)) {
+        Ok(()) => (),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
+        Err(error) => return Err(error.into()),
+    }
+    Ok(manifest)
+}
+
 /// The frame size of the snapshots in `directory`, from its manifest.
 pub fn snapshot_size(directory: &Path) -> Option<(u32, u32)> {
     let manifest: SnapshotManifest =

@@ -1142,6 +1142,7 @@ fn traced_path_seek_samples_followed_sources_like_playback() {
                 endpoint: gaanim_animation::TrackingEndpoint::Entity(leader),
                 offset: gaanim_core::glam::DVec3::ZERO,
                 offset_space: gaanim_animation::FollowOffsetSpace::World,
+                anchor: None,
                 since: 0.0,
             },
         ))

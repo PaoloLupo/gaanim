@@ -1044,6 +1044,7 @@ pub(crate) struct AuthoredFollow {
     pub endpoint: crate::canvas::CanvasEndpoint,
     pub offset: DVec3,
     pub offset_space: gaanim_animation::FollowOffsetSpace,
+    pub anchor: Option<gaanim_layout::Anchor>,
 }
 
 /// A dynamic camera clip waiting for the rest of its `play`: once every
@@ -2426,7 +2427,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             AnimationType::CameraViewPop { out: true, .. } => "PopOut",
             AnimationType::CameraViewPop { out: false, .. } => "PopIn",
             AnimationType::DrawBorderThenFill { .. } => "DrawFill",
-            AnimationType::MoveAlongPath { .. } | AnimationType::MoveAlongPath3D { .. } => "Follow",
+            AnimationType::MoveAlongPath { .. }
+            | AnimationType::MoveAlongPath3D { .. }
+            | AnimationType::MoveAlongPolyline3D { .. } => "Follow",
             AnimationType::GrowArrow => "Arrow",
             AnimationType::SignalFloat { .. } => "Signal",
             AnimationType::ShowPassingFlash { .. } => "ShowPassingFlash",
@@ -4425,7 +4428,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             self.play_move_along_path_internal(anim, track);
             return;
         }
-        if matches!(anim.anim_type, AnimationType::MoveAlongPath3D { .. }) {
+        if matches!(
+            anim.anim_type,
+            AnimationType::MoveAlongPath3D { .. } | AnimationType::MoveAlongPolyline3D { .. }
+        ) {
             self.play_move_along_path_3d_internal(anim, track);
             return;
         }
@@ -4766,6 +4772,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             | AnimationType::DrawBorderThenFill { .. }
             | AnimationType::MoveAlongPath { .. }
             | AnimationType::MoveAlongPath3D { .. }
+            | AnimationType::MoveAlongPolyline3D { .. }
             | AnimationType::Transform { .. }
             | AnimationType::ReplacementTransform { .. }
             | AnimationType::MagicMove { .. }
@@ -8697,6 +8704,34 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     fn play_move_along_path_3d_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
         let points = match &anim.anim_type {
             AnimationType::MoveAlongPath3D { points } => points.clone(),
+            AnimationType::MoveAlongPolyline3D {
+                path_target,
+                points,
+                start,
+                end,
+            } => {
+                let Some(guide) = self.states.get(*path_target) else {
+                    return;
+                };
+                let parent = self.states.get(anim.target).and_then(|state| state.parent);
+                let route_to_parent = if parent == guide.parent {
+                    // A shared parent can move while the clip plays, even at zero scale.
+                    guide.transform.to_mat4()
+                } else {
+                    let world = self.world_matrix_3d(*path_target);
+                    let parent_world = parent.map_or(gaanim_core::glam::DMat4::IDENTITY, |id| {
+                        self.world_matrix_3d(id)
+                    });
+                    parent_world.inverse() * world
+                };
+                let points: Vec<_> = points
+                    .iter()
+                    .map(|point| {
+                        route_to_parent.transform_point3(DVec3::from_array(point.map(f64::from)))
+                    })
+                    .collect();
+                gaanim_math::path::polyline_portion(&points, *start, *end)
+            }
             _ => unreachable!(),
         };
         if points.len() < 2 || points.iter().any(|point| !point.is_finite()) {

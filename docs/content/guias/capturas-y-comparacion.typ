@@ -28,6 +28,18 @@ Por ejemplo, `escenas/intro.py` usa automáticamente
 
 = Flujo normal
 
+Para un script que llama a `scene.render()`, puedes elegir los instantes
+desde el comando. `--frame` acepta segundos y los mismos nombres que
+`gaanim export --frame`. Usa la misma lista y orden al guardar la
+versión aprobada y al comparar. Un marcador puede cambiar de instante
+entre las dos versiones y seguirá correspondiendo a la misma captura.
+
+```bash
+gaanim --diff --example escenas/intro.py --frame 0,climax --capture-only
+```
+
+Para fijar los instantes dentro del script, usa `scene.snapshots`.
+
 + Elige los instantes que quieres capturar. El script llama a
   `scene.snapshots(...)` cuando existe la variable de entorno
   `GAANIM_SNAPSHOTS`; `gaanim --diff` la define y ejecuta la captura sin abrir

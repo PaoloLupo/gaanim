@@ -1661,6 +1661,7 @@ fn animation_channels(anim: &Anim) -> Vec<String> {
         | TranslateBy { .. }
         | MoveAlongPath { .. }
         | MoveAlongPath3D { .. }
+        | MoveAlongPolyline3D { .. }
         | Wiggle { .. } => "translation",
         RotateTo { .. } | RotateBy { .. } | RotateBy3D { .. } => "rotation",
         ScaleTo { .. }
@@ -2487,6 +2488,11 @@ pub struct SceneModel {
     /// only the run time moves, by hold and endpoint (see
     /// `runtime::with_run_time_holds`).
     pub(crate) camera_hold_probes: Arc<HashMap<(usize, u8), gaanim_core::glam::DVec3>>,
+}
+
+fn mesh_vertex_color(color: Color) -> [f32; 4] {
+    let rgba = color.to_rgba8();
+    [rgba.r, rgba.g, rgba.b, rgba.a].map(|channel| f32::from(channel) / 255.0)
 }
 
 impl SceneModel {
@@ -4280,6 +4286,23 @@ impl SceneModel {
         )?)))
     }
 
+    /// A UV sphere with one color per vertex in `sphere_color_samples` order.
+    pub fn sphere_with_colors(
+        &mut self,
+        radius: f64,
+        segments: u32,
+        rings: u32,
+        material: gaanim_scene::Material3D,
+        colors: Vec<Color>,
+    ) -> Result<DrawableHandle, primitives3d::Primitive3DError> {
+        let mut mesh = primitives3d::sphere(radius, segments, rings, material)?;
+        if colors.len() != mesh.vertices.len() {
+            return Err(primitives3d::Primitive3DError::InvalidColors);
+        }
+        mesh.colors = Some(colors.into_iter().map(mesh_vertex_color).collect());
+        Ok(self.spawn(SpawnKind::Primitive3D(mesh)))
+    }
+
     pub fn cylinder(
         &mut self,
         radius: f64,
@@ -4432,15 +4455,7 @@ impl SceneModel {
         material: gaanim_scene::Material3D,
     ) -> Result<DrawableHandle, primitives3d::Primitive3DError> {
         let vertices: Vec<DVec3> = vertices.iter().copied().map(DVec3::from_array).collect();
-        let colors = colors.map(|colors| {
-            colors
-                .iter()
-                .map(|color| {
-                    let rgba = color.to_rgba8();
-                    [rgba.r, rgba.g, rgba.b, rgba.a].map(|channel| f32::from(channel) / 255.0)
-                })
-                .collect()
-        });
+        let colors = colors.map(|colors| colors.into_iter().map(mesh_vertex_color).collect());
         let mesh = primitives3d::custom_mesh(&vertices, triangles, colors, material)?;
         Ok(self.spawn(SpawnKind::Primitive3D(mesh)))
     }
@@ -6145,6 +6160,22 @@ impl SceneModel {
     /// follows it stays over `target` however the camera moves.
     pub fn camera_screen_point(&self, target: CanvasEndpoint) -> PointRef {
         PointRef(CanvasEndpoint::Screen(Box::new(target)))
+    }
+
+    /// A point on a drawable's projected bounds, recomputed with the main
+    /// camera and returned in HUD units.
+    pub fn camera_screen_anchor(
+        &self,
+        target: &DrawableHandle,
+        anchor: Anchor,
+    ) -> Result<PointRef, &'static str> {
+        if !Arc::ptr_eq(&self.state, &target.state) {
+            return Err("screen_point target must belong to the same Scene");
+        }
+        Ok(PointRef(CanvasEndpoint::ScreenBounds {
+            object: target.id,
+            anchor: anchor.to_offset(),
+        }))
     }
 
     pub fn camera_to(
@@ -9505,6 +9536,9 @@ fn endpoint_is_valid(point: &CanvasEndpoint, state: &CanvasState) -> bool {
                 && radius.is_finite()
         }
         CanvasEndpoint::Screen(point) => endpoint_is_valid(point, state),
+        CanvasEndpoint::ScreenBounds { object, anchor } => {
+            state.object_specs.contains_key(object) && anchor.is_finite()
+        }
         CanvasEndpoint::Construction { kind, inputs } => {
             inputs.len() == kind.arity()
                 && inputs.iter().all(|input| endpoint_is_valid(input, state))

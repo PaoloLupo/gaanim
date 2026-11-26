@@ -1304,8 +1304,25 @@ scene.render()
 #api-entry(
   name: "Geometry.sphere",
   kind: "factory",
-  desc: [Esfera UV con sombreado suave; `segments` y `rings` controlan la resolución.],
-  none,
+  desc: [Esfera UV con sombreado suave. `segments` (al menos 3) y `rings` (al menos 2) controlan la resolución.
+  `color_at(latitud, longitud)` se llama una vez por vértice al construirla. La latitud va de
+  $pi/2$ en +Y a $-pi/2$ en −Y. La longitud va de +X hacia +Z en radianes entre 0 y $2 pi$,
+  con cero en la costura y los polos. Los colores sustituyen al color base, se interpolan
+  entre vértices y conservan el sombreado del material.],
+  [
+```python
+from gaanim import Scene
+
+scene = Scene()
+scene.camera.perspective(0.7)
+scene.camera.look_at(eye=(0, 2, 8), target=(0, 0, 0))
+scene.geometry.sphere(
+    color_at=lambda lat, lon: scene.colors.accent if lat > 0 else scene.colors.muted,
+)
+scene.wait(1)
+scene.render()
+```
+  ],
 )
 
 #api-entry(

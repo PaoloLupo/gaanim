@@ -905,6 +905,14 @@ fn compile_tracking_endpoint(
         CanvasEndpoint::Screen(point) => {
             TrackingEndpoint::Screen(Box::new(compile_tracking_endpoint(point, id_map, states)))
         }
+        CanvasEndpoint::ScreenBounds { object, anchor } => id_map
+            .get(object)
+            .and_then(|runtime| states.get(*runtime))
+            .map(|state| TrackingEndpoint::ScreenBounds {
+                entity: state.entity,
+                anchor: *anchor,
+            })
+            .unwrap_or(TrackingEndpoint::Static(DVec3::ZERO)),
         CanvasEndpoint::Construction { kind, inputs } => TrackingEndpoint::Construction {
             kind: *kind,
             inputs: inputs
@@ -7495,6 +7503,7 @@ impl SceneModel {
                                 endpoint: CanvasEndpoint::Entity(*source),
                                 offset: *offset,
                                 offset_space: gaanim_animation::FollowOffsetSpace::World,
+                                anchor: None,
                             },
                         );
                     }
@@ -7505,6 +7514,7 @@ impl SceneModel {
                     endpoint,
                     offset,
                     offset_space,
+                    anchor,
                 } => {
                     if let Some(target_id) = id_map.get(target).copied()
                         && let Some(target_state) = builder.states.get(target_id)
@@ -7520,6 +7530,7 @@ impl SceneModel {
                                 ),
                                 offset: *offset,
                                 offset_space: *offset_space,
+                                anchor: anchor.map(|anchor| anchor.to_offset()),
                                 since: builder.current_time,
                             });
                         builder.authored_follows.insert(
@@ -7528,6 +7539,7 @@ impl SceneModel {
                                 endpoint: endpoint.clone(),
                                 offset: *offset,
                                 offset_space: *offset_space,
+                                anchor: *anchor,
                             },
                         );
                     }
@@ -9762,7 +9774,7 @@ impl SceneModel {
             CanvasEndpoint::Static(position) => Some((*position, DMat4::IDENTITY)),
             CanvasEndpoint::Entity(id) => {
                 let runtime = *id_map.get(id)?;
-                builder.states.get(runtime)?;
+                let state = builder.states.get(runtime)?;
                 if let Some(follow) = builder.authored_follows.get(&runtime) {
                     let (origin, basis) = point(&follow.endpoint)?;
                     let offset = match follow.offset_space {
@@ -9771,7 +9783,10 @@ impl SceneModel {
                             basis.transform_vector3(follow.offset)
                         }
                     };
-                    return Some((origin + offset, basis));
+                    let anchor_shift = follow.anchor.map_or(DVec3::ZERO, |anchor| {
+                        world(runtime).transform_vector3(anchor.get_point(&state.bounds))
+                    });
+                    return Some((origin + offset - anchor_shift, basis));
                 }
                 let matrix = world(runtime);
                 Some((matrix.transform_point3(DVec3::ZERO), matrix))
@@ -10786,6 +10801,17 @@ impl SceneModel {
                 path: path.clone(),
                 path_target: path_target.map(|id| *id_map.get(&id).unwrap_or(&id)),
                 follow: *follow,
+            },
+            AnimationType::MoveAlongPolyline3D {
+                path_target,
+                points,
+                start,
+                end,
+            } => AnimationType::MoveAlongPolyline3D {
+                path_target: *id_map.get(path_target)?,
+                points: points.clone(),
+                start: *start,
+                end: *end,
             },
             AnimationType::TranslateToAnchorPoint { point } => {
                 let mut point = *point;

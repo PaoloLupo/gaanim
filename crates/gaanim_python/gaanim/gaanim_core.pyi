@@ -2492,6 +2492,12 @@ class Anim:
         A solid ``arrow`` or ``curved_arrow`` is followed along its axis from
         tail to tip rather than around its silhouette.
 
+        A ``polyline_3d`` with fixed coordinates moves the drawable's origin
+        along its visible line. Its transform relative to the mover's parent
+        is sampled when the animation is authored. Group both drawables to
+        move the orbit and its follower together. A reactive 3D polyline or
+        ``orient=True`` with a 3D polyline raises ``ValueError``.
+
         With ``orient=True`` the drawable's rotation follows the path tangent
         plus ``rotate_offset`` radians, so a plane or arrow points where it
         goes. ``start`` and ``end`` select the travelled portion as arc-length
@@ -5678,7 +5684,7 @@ class Drawable:
             drawable.follow_to(source, (0.0, 0.0))
         """
         ...
-    def follow(self, source: Endpoint, *, offset: tuple[float, float] = (0.0, 0.0), offset_space: Literal["world", "local"] = "world", delay: float = 0.0) -> Self:
+    def follow(self, source: Endpoint, *, offset: tuple[float, float] = (0.0, 0.0), offset_space: Literal["world", "local"] = "world", delay: float = 0.0, anchor: AnchorName | Anchor | None = None) -> Self:
         """Follow any endpoint in the same frame and return this drawable.
 
         World offsets remain screen-aligned; local offsets rotate and scale with
@@ -5686,6 +5692,11 @@ class Drawable:
         The drawable stays hidden until its entry animation is played. Without
         ``delay`` the follow starts at the cursor, so earlier animations of this
         drawable still play.
+
+        With ``anchor``, the selected point on this drawable's local bounds
+        follows the source plus the offset. For a HUD label following a
+        projected point, the offset is in HUD units. Supplying an anchor
+        with a positive ``delay`` raises ValueError.
 
         ``delay`` (seconds) places this drawable where a Drawable ``source``
         was ``delay`` seconds earlier, like After Effects'
@@ -6856,7 +6867,7 @@ class Camera:
             x, y = scene.camera.project((2, 0, 1), top)
         """
         ...
-    def screen_point(self, target: Endpoint) -> PointRef:
+    def screen_point(self, target: Endpoint, *, anchor: AnchorName | Anchor | None = None) -> PointRef:
         """A point that is, every frame, where the main camera draws ``target`` on the frame.
 
         It is in HUD units, so a HUD drawable that follows it stays over
@@ -6866,8 +6877,16 @@ class Camera:
         point or a drawable. A drawable that is not ``hud()`` would place
         the point in the scene instead, where a moving 2D camera shifts it.
 
+        With ``anchor``, the target must be a Drawable in this Scene.
+        The anchor selects an edge, corner or center of its projected
+        bounding rectangle. Native meshes use their vertices. Other
+        drawables use their bounds, and groups include their descendants.
+        A target that is not a Drawable raises TypeError.
+
         Example:
-            tag = scene.text("ball").hud().follow(scene.camera.screen_point(ball), offset=(0, 0.6))
+            tag = scene.text("ball").hud()
+            tag.follow(scene.camera.screen_point(ball, anchor=Anchor.TOP),
+                       anchor=Anchor.BOTTOM, offset=(0, 0.2))
         """
         ...
     def save(self, name: str) -> CameraState: ...
@@ -9630,8 +9649,17 @@ class Geometry:
     def cube(self, size: float = 2.0, *, material: Optional[Material3D] = None) -> Primitive3D:
         """Create a centered cube with flat faces."""
         ...
-    def sphere(self, radius: float = 1.0, *, segments: int = 32, rings: int = 16, material: Optional[Material3D] = None) -> Primitive3D:
-        """Create a smooth-shaded UV sphere."""
+    def sphere(self, radius: float = 1.0, *, segments: int = 32, rings: int = 16, material: Optional[Material3D] = None, color_at: Callable[[float, float], ColorLike] | None = None) -> Primitive3D:
+        """Create a smooth-shaded UV sphere.
+
+        ``color_at(latitude, longitude)`` runs once per mesh vertex at construction.
+        Angles are in radians. Latitude runs from +π/2 at +Y to -π/2 at -Y.
+        Longitude starts at +X and increases toward +Z in [0, 2π). The seam
+        and poles use longitude zero. The returned colors replace the base
+        color and interpolate across triangles while keeping material shading.
+        A nonpositive or nonfinite radius, fewer than three segments, or fewer
+        than two rings raises ValueError. Callback exceptions propagate.
+        """
         ...
     def cylinder(self, radius: float = 1.0, height: float = 2.0, *, segments: int = 32, caps: bool = True, material: Optional[Material3D] = None) -> Primitive3D:
         """Create a Y-up cylinder."""

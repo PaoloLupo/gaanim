@@ -145,8 +145,8 @@ scene.play(ball.animate.move_to(4, 0).path_arc(math.pi / 3))
   name: "Anim.move_along",
   kind: "method",
   params: (
-    (name: "target", type: "Drawable", default: none, desc: [Objeto cuyo contorno se recorre: círculo, rectángulo, curva, polilínea… Se muestrea su geometría de mundo. Una `arrow` o `curved_arrow` sólida se recorre por su eje, de la cola a la punta.]),
-    (name: "orient", type: "bool", default: "False", desc: [Gira el objeto con la tangente del camino.]),
+    (name: "target", type: "Drawable", default: none, desc: [Dibujo que define el recorrido, como un círculo, rectángulo, curva o polilínea. Una `arrow` o `curved_arrow` sólida se recorre por su eje. Una `polyline_3d` de coordenadas fijas se recorre por su línea.]),
+    (name: "orient", type: "bool", default: "False", desc: [Gira el objeto con la tangente del camino. Solo se admite con trayectorias 2D.]),
     (name: "rotate_offset", type: "float", default: "0.0", desc: [Radianes que se suman a la tangente al orientar.]),
     (name: "start, end", type: "float", default: "0.0, 1.0", desc: [Tramo recorrido, en fracciones de longitud de arco en `[0, 1]`. `start > end` lo recorre al revés; valores iguales o fuera de rango lanzan `ValueError`.]),
   ),
@@ -164,6 +164,26 @@ scene.play([dot.animate.move_along(circle).duration(2.0).easing(Easing.LINEAR)])
 scene.render()
 ```
 ]
+
+Con `polyline_3d`, el punto que recorre la guía es el origen del objeto.
+La animación toma la transformación de la guía respecto al padre del objeto
+al programar el movimiento. Agrupa la guía y el objeto para mover ambos a la
+vez durante el recorrido.
+
+```python
+from math import cos, sin, tau
+from gaanim import Easing, Scene
+
+scene = Scene()
+scene.camera.perspective(0.7)
+scene.camera.look_at(eye=(0, 5, 8), target=(0, 0, 0))
+angles = [tau * i / 64 for i in range(65)]
+orbit = scene.geometry.polyline_3d([(2 * cos(a), 0, 2 * sin(a)) for a in angles])
+moon = scene.geometry.sphere(0.2).move_to_3d(2, 0, 0)
+scene.geometry.group(orbit, moon, origin=(0, 0, 0))
+scene.play(moon.animate.move_along(orbit, end=0.75).easing(Easing.LINEAR), duration=2)
+scene.render()
+```
 
 #api-entry(
   name: "Anim.scale_to",

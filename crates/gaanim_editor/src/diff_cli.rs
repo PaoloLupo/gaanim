@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 
 use gaanim_core::console;
 
+use crate::cli::{ExportBound, parse_frame_selection};
+
 #[derive(Debug)]
 pub struct DiffModeArgs {
     pub baseline: PathBuf,
@@ -17,6 +19,8 @@ pub struct DiffModeArgs {
     pub bless: bool,
     /// Capture every `scene.stop(...)` instead of the script's `scene.snapshots`.
     pub capture_stops: bool,
+    /// Exact seconds or names to capture from a script, as in `export --frame`.
+    pub frames: Vec<ExportBound>,
     /// 1-based stops to capture; `None` captures all of them.
     pub stops: Option<Vec<usize>>,
     /// With `--capture-stops`, only stops inside these segments or sections.
@@ -208,6 +212,7 @@ pub fn parse_diff_mode_args(args: &[String]) -> Result<Option<DiffModeArgs>, Str
     let mut capture_only = false;
     let mut bless = false;
     let mut capture_stops = false;
+    let mut frames = Vec::new();
     let mut stops = None;
     let mut selection = gaanim_timeline::selection::SegmentSelection::default();
     let mut height = None;
@@ -244,6 +249,7 @@ pub fn parse_diff_mode_args(args: &[String]) -> Result<Option<DiffModeArgs>, Str
             "--capture-only" => capture_only = true,
             "--bless" => bless = true,
             "--capture-stops" => capture_stops = true,
+            "--frame" => frames.extend(parse_frame_selection(Some(value(&mut index)?))?),
             "--stops" => {
                 stops = Some(
                     gaanim_diff::parse_stop_selection(value(&mut index)?)
@@ -279,6 +285,20 @@ pub fn parse_diff_mode_args(args: &[String]) -> Result<Option<DiffModeArgs>, Str
     let bundle = example
         .as_deref()
         .is_some_and(crate::bundle_player::is_bundle_path);
+    if !frames.is_empty() {
+        if example.is_none() || bundle {
+            return Err("--frame requires --example <SCRIPT_OR_PROJECT>".to_string());
+        }
+        if capture == Some(false) {
+            return Err("--frame cannot be combined with --no-capture".to_string());
+        }
+        if capture_stops || stops.is_some() || !selection.is_empty() {
+            return Err(
+                "--frame cannot be combined with --capture-stops, --stops, --from or --sections"
+                    .to_string(),
+            );
+        }
+    }
     if stops.is_some() && !capture_stops && !bundle {
         return Err("--stops requires --capture-stops".to_string());
     }
@@ -316,6 +336,7 @@ pub fn parse_diff_mode_args(args: &[String]) -> Result<Option<DiffModeArgs>, Str
             capture_only,
             bless,
             capture_stops,
+            frames,
             stops,
             selection,
             height,
@@ -346,6 +367,7 @@ pub fn parse_diff_mode_args(args: &[String]) -> Result<Option<DiffModeArgs>, Str
         capture_only: false,
         bless: false,
         capture_stops: false,
+        frames,
         stops: None,
         selection,
         height: None,
@@ -536,6 +558,52 @@ mod tests {
         ]
         .map(str::to_string);
         assert!(parse_diff_mode_args(&bless).is_err());
+    }
+
+    #[test]
+    fn frame_capture_uses_export_selectors_and_can_repeat_the_flag() {
+        let args = [
+            "--example",
+            "scene.py",
+            "--frame",
+            r"0,Tiempo\, lugar",
+            "--frame",
+            "1",
+            "--capture-only",
+        ]
+        .map(str::to_string);
+        let parsed = parse_diff_mode_args(&args).unwrap().unwrap();
+        assert_eq!(
+            parsed.frames,
+            vec![
+                ExportBound::Seconds(0.0),
+                ExportBound::Name("Tiempo, lugar".into()),
+                ExportBound::Seconds(1.0),
+            ],
+        );
+        assert!(parsed.capture && parsed.capture_only);
+    }
+
+    #[test]
+    fn frame_capture_requires_a_script_and_an_unambiguous_capture_mode() {
+        let reject = |args: &[&str]| {
+            let args: Vec<_> = args.iter().map(|arg| arg.to_string()).collect();
+            assert!(parse_diff_mode_args(&args).unwrap_err().contains("--frame"));
+        };
+        reject(&["--frame", "0"]);
+        reject(&["--example", "talk.gaanim", "--frame", "0"]);
+        let base = ["--example", "scene.py", "--frame"];
+        for tail in [
+            &["-1"][..],
+            &["0,,1"],
+            &["0", "--capture-stops"],
+            &["0", "--stops", "1"],
+            &["0", "--sections", "talk"],
+            &["0", "--from", "talk"],
+            &["0", "--no-capture"],
+        ] {
+            reject(&[&base[..], tail].concat());
+        }
     }
 
     #[test]

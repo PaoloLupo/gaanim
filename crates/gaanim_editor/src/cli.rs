@@ -48,6 +48,21 @@ pub fn parse_export_seconds(flag: &str, value: Option<&String>) -> Result<Export
     }
 }
 
+/// The seconds and names accepted by `--frame` in export and diff.
+pub fn parse_frame_selection(value: Option<&str>) -> Result<Vec<ExportBound>, String> {
+    // Names may contain commas written as `\,`, as in --sections.
+    let list = value
+        .and_then(|list| gaanim_timeline::selection::SegmentSelection::parse_list(list).ok())
+        .ok_or_else(|| {
+            "--frame requires seconds or names separated by commas, e.g. \
+             3,11.4,Results (write \\, for a comma inside a name)"
+                .to_string()
+        })?;
+    list.iter()
+        .map(|name| parse_export_seconds("--frame", Some(name)))
+        .collect()
+}
+
 pub fn validate_export_range(
     from: Option<&ExportBound>,
     to: Option<&ExportBound>,
@@ -286,6 +301,21 @@ pub fn resolve_export_bound(
         Some(ExportBound::Seconds(seconds)) => Ok(Some(*seconds)),
         Some(ExportBound::Name(name)) => names.resolve(role, name).map(Some),
     }
+}
+
+/// Resolve the exact instants selected by `--frame`, in command-line order.
+pub fn resolve_frame_selection(
+    canvas: &gaanim_api::canvas::SceneModel,
+    frames: &[ExportBound],
+) -> Result<Vec<f64>, String> {
+    let names = TimelineNames::of_canvas(canvas);
+    frames
+        .iter()
+        .map(|bound| match bound {
+            ExportBound::Seconds(seconds) => Ok(*seconds),
+            ExportBound::Name(name) => names.resolve(BoundRole::Frame, name),
+        })
+        .collect()
 }
 
 /// Resolve both ends of an export range and check their order.
@@ -540,22 +570,9 @@ impl ExportCommand {
                 }
                 "--frame" => {
                     index += 1;
-                    // Names may contain commas written as `\,`, as in `--sections`.
-                    let list = args
-                        .get(index)
-                        .and_then(|list| {
-                            gaanim_timeline::selection::SegmentSelection::parse_list(list).ok()
-                        })
-                        .ok_or_else(|| {
-                            "--frame requires seconds or names separated by commas, e.g. \
-                             3,11.4,Results (write \\, for a comma inside a name)"
-                                .to_string()
-                        })?;
-                    for value in list {
-                        command
-                            .frames
-                            .push(parse_export_seconds("--frame", Some(&value))?);
-                    }
+                    command
+                        .frames
+                        .extend(parse_frame_selection(args.get(index).map(String::as_str))?);
                 }
                 flag @ ("--from" | "--to") => {
                     index += 1;
@@ -901,15 +918,7 @@ pub fn export_frames(
     command: &ExportCommand,
     output: &str,
 ) -> Result<Vec<PathBuf>, String> {
-    let names = TimelineNames::of_canvas(&canvas);
-    let times = command
-        .frames
-        .iter()
-        .map(|bound| {
-            resolve_export_bound(BoundRole::Frame, Some(bound), &names)
-                .map(|time| time.expect("a --frame bound is present"))
-        })
-        .collect::<Result<Vec<f64>, String>>()?;
+    let times = resolve_frame_selection(&canvas, &command.frames)?;
     let mut config = ExportConfig::new(output).with_quality(quality_preset(&command.quality));
     (config.width, config.height) = command.output_size(canvas.frame.aspect_ratio());
     config.fit = command.fit;

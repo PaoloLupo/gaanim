@@ -343,6 +343,7 @@ impl CameraViewHandle {
                 endpoint,
                 offset,
                 offset_space: FollowOffsetSpace::World,
+                anchor: None,
             });
     }
 

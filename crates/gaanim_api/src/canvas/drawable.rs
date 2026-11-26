@@ -286,6 +286,7 @@ pub(crate) fn wipe_mask(
         },
         offset: DVec3::ZERO,
         offset_space: gaanim_animation::FollowOffsetSpace::World,
+        anchor: None,
     });
     ops.push(Op::SetClip {
         target,
@@ -3277,6 +3278,17 @@ impl DrawableHandle {
         offset: DVec3,
         offset_space: gaanim_animation::FollowOffsetSpace,
     ) -> Self {
+        self.follow_from_anchor(endpoint, offset, offset_space, None)
+    }
+
+    /// Keep `anchor` of this drawable on the endpoint plus the offset.
+    pub fn follow_from_anchor(
+        &self,
+        endpoint: crate::canvas::CanvasEndpoint,
+        offset: DVec3,
+        offset_space: gaanim_animation::FollowOffsetSpace,
+        anchor: Option<Anchor>,
+    ) -> Self {
         self.defer_visibility_until_play();
         self.state
             .lock()
@@ -3288,6 +3300,7 @@ impl DrawableHandle {
                 endpoint,
                 offset,
                 offset_space,
+                anchor,
             });
         self.clone()
     }

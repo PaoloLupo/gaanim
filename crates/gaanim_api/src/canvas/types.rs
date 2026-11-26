@@ -2992,6 +2992,36 @@ impl Anim {
         if !self.belongs_to(&target.state) {
             return Err("path targets must belong to the same Scene");
         }
+        let spec = target.spec.lock().expect("object spec poisoned");
+        match &spec.kind {
+            SpawnKind::Polyline3D { points, .. } => {
+                if target.id == self.inner.target {
+                    return Err("a drawable cannot follow its own polyline_3d");
+                }
+                if follow.orient.is_some() {
+                    return Err("orient=True requires a 2D path");
+                }
+                if !((0.0..=1.0).contains(&follow.start)
+                    && (0.0..=1.0).contains(&follow.end)
+                    && follow.start != follow.end)
+                {
+                    return Err("move_along requires start and end in [0, 1] with start != end");
+                }
+                if points.len() < 2 || !points.iter().flatten().all(|value| value.is_finite()) {
+                    return Err("move_along requires at least two finite 3D points");
+                }
+                return Ok(self.effect(AnimationType::MoveAlongPolyline3D {
+                    path_target: target.id,
+                    points: points.clone(),
+                    start: follow.start,
+                    end: follow.end,
+                }));
+            }
+            SpawnKind::ReactivePolyline3D { .. } => {
+                return Err("move_along requires fixed coordinates for a polyline_3d");
+            }
+            _ => {}
+        }
         Ok(self.effect(AnimationType::MoveAlongPath {
             path: gaanim_core::kurbo::BezPath::new(),
             path_target: Some(target.id),

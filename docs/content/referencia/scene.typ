@@ -2020,18 +2020,27 @@ mark = scene.text("A").hud().move_to(x, y)
 #api-entry(
   name: "Camera.screen_point",
   kind: "method",
-  params: ((name: "target", type: "Endpoint", default: none, desc: [Punto 3D, objeto o punto de anclaje.]),),
+  params: (
+    (name: "target", type: "Endpoint", default: none, desc: [Punto 3D, objeto o punto de anclaje. Con `anchor`, debe ser un `Drawable` de la escena.]),
+    (name: "anchor", type: "AnchorName | Anchor | None", default: "None", desc: [Borde, esquina o centro del rectángulo proyectado, por ejemplo `Anchor.TOP` o `"top"`. Con `None` se proyecta el punto original.]),
+  ),
   returns: (type: "PointRef", desc: [Punto que está, en cada fotograma, donde la cámara principal dibuja `target`, en unidades HUD.]),
-  desc: [Un objeto `hud()` que lo sigue con `follow` queda sobre `target` aunque la cámara se mueva, gire o mire en perspectiva: una etiqueta de pantalla para un objeto 3D. Con un objeto que no es `hud()`, el punto quedaría en la escena, donde una cámara 2D que se mueve lo desplaza.],
+  desc: [Un objeto `hud()` que lo sigue con `follow` mantiene su posición relativa en pantalla aunque la cámara o el objeto se muevan. Las mallas nativas proyectan sus vértices. Los demás objetos proyectan sus cajas, y un grupo abarca las proyecciones de sus miembros. En el ejemplo, el borde inferior del rótulo queda a 0.2 unidades HUD del borde superior de la esfera.],
 )[
 ```python
 >>>from gaanim import *
 >>>scene = Scene(frame=(16, 9))
 ball = scene.geometry.sphere(0.3).move_to_3d(2, 1, 0)
-tag = scene.text("pelota").hud().follow(scene.camera.screen_point(ball), offset=(0, 0.6))
+tag = scene.text("pelota").hud()
+tag.follow(
+    scene.camera.screen_point(ball, anchor=Anchor.TOP),
+    anchor=Anchor.BOTTOM,
+    offset=(0, 0.2),
+)
 scene.camera.perspective(0.7)
 scene.camera.look_at(eye=(6, 4, 8), target=(0, 0, 0))
 scene.play([tag.animate.fade_in(), scene.camera.animate.orbit(0.6, 0)], duration=2)
+scene.render()
 ```
 ]
 

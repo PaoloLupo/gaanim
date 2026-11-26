@@ -1326,7 +1326,13 @@ series muestreadas, consulta `add_updater_fn` y `drive_from_samples` en
 #api-entry(
   name: "Drawable.follow",
   kind: "method",
-  params: ((name: "source", type: "Endpoint", default: none, desc: [Drawable, `AnchorPoint`, `PointRef` o tupla.]), (name: "offset", type: "tuple[float, float]", default: "(0.0, 0.0)", desc: [Desplazamiento respecto a la fuente.]), (name: "offset_space", type: "str", default: "\"world\"", desc: [`"world"` mantiene el desplazamiento alineado con la pantalla; `"local"` lo rota y escala con la fuente.]), (name: "delay", type: "float", default: "0.0", desc: [Segundos de retardo: el objeto va donde estaba `source` hace `delay` segundos. Con un valor positivo `source` debe ser un Drawable.])),
+  params: (
+    (name: "source", type: "Endpoint", default: none, desc: [Drawable, `AnchorPoint`, `PointRef` o tupla.]),
+    (name: "offset", type: "tuple[float, float]", default: "(0.0, 0.0)", desc: [Desplazamiento respecto a la fuente. Para un punto proyectado seguido desde el HUD, se mide en unidades HUD.]),
+    (name: "offset_space", type: "str", default: "\"world\"", desc: [`"world"` mantiene el desplazamiento alineado con la pantalla; `"local"` lo rota y escala con la fuente.]),
+    (name: "delay", type: "float", default: "0.0", desc: [Segundos de retardo: el objeto va donde estaba `source` hace `delay` segundos. Con un valor positivo `source` debe ser un Drawable.]),
+    (name: "anchor", type: "AnchorName | Anchor | None", default: "None", desc: [Punto de la caja local del seguidor que se coloca en la fuente más el desplazamiento. Acepta nombres como `"bottom"` o constantes como `Anchor.BOTTOM`. Requiere `delay=0`.]),
+  ),
   desc: [Sigue cualquier extremo en el mismo fotograma y devuelve el objeto. Con `delay` copia al líder con retardo, como `valueAtTime(time - delay)` de After Effects: encadena seguidores con retardos crecientes para estelas y colas (_overlapping action_). Las animaciones del líder se evalúan de nuevo en `t - delay` en cada fotograma, así que un seek a cualquier instante reproduce la estela sin estado acumulado. El líder puede seguir a su vez a otro objeto (`follow` con o sin retardo, `follow_to`, `attach_to`), así que los seguidores de seguidores forman cadenas; hasta que el segmento actual lleva `delay` segundos, el seguidor espera en la posición del líder al inicio del segmento. Offsets o retardos no finitos, retardos negativos o modos inválidos lanzan `ValueError`; un retardo positivo con una fuente que no es Drawable lanza `TypeError`.],
 )[
 ```python

@@ -368,6 +368,7 @@ mod tests {
                     endpoint: TrackingEndpoint::Static(expected),
                     offset: DVec3::ZERO,
                     offset_space: FollowOffsetSpace::World,
+                    anchor: None,
                     since: 0.0,
                 },
             ))
@@ -485,6 +486,7 @@ mod tests {
                     endpoint: TrackingEndpoint::Entity(marker),
                     offset: DVec3::ZERO,
                     offset_space: FollowOffsetSpace::World,
+                    anchor: None,
                     since: 0.0,
                 },
             ))

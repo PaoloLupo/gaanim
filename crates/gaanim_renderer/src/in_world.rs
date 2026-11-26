@@ -1193,6 +1193,7 @@ mod tests {
             },
             offset: DVec3::ZERO,
             offset_space: FollowOffsetSpace::World,
+            anchor: None,
             since,
         };
         world.entity_mut(mask).insert(follow(0.0));

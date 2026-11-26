@@ -122,9 +122,9 @@ impl Bounds3D {
         }
     }
 
-    /// Transforms the bounding box using a 4×4 double-precision matrix (for 3D).
-    pub fn transform_mat4(&self, mat: &gaanim_core::glam::DMat4) -> Self {
-        let corners = [
+    /// The eight corners of this box, including coincident corners of flat boxes.
+    pub fn corners(&self) -> [DVec3; 8] {
+        [
             DVec3::new(self.min.x, self.min.y, self.min.z),
             DVec3::new(self.min.x, self.min.y, self.max.z),
             DVec3::new(self.min.x, self.max.y, self.min.z),
@@ -133,10 +133,14 @@ impl Bounds3D {
             DVec3::new(self.max.x, self.min.y, self.max.z),
             DVec3::new(self.max.x, self.max.y, self.min.z),
             DVec3::new(self.max.x, self.max.y, self.max.z),
-        ];
+        ]
+    }
+
+    /// Transforms the bounding box using a 4×4 double-precision matrix (for 3D).
+    pub fn transform_mat4(&self, mat: &gaanim_core::glam::DMat4) -> Self {
         let mut min = DVec3::splat(f64::INFINITY);
         let mut max = DVec3::splat(f64::NEG_INFINITY);
-        for c in corners {
+        for c in self.corners() {
             let t = mat.transform_point3(c);
             min = min.min(t);
             max = max.max(t);

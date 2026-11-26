@@ -2518,10 +2518,28 @@ impl PyCamera {
         Ok((at.x, at.y))
     }
 
-    /// A point that is, every frame, where the main camera draws `target`
-    /// on the frame, in HUD units.
-    fn screen_point(&self, target: &Bound<'_, PyAny>) -> PyResult<PyPointRef> {
+    /// Project an endpoint or an anchor of a drawable's bounds in HUD units.
+    #[pyo3(signature = (target, *, anchor=None))]
+    fn screen_point(
+        &self,
+        target: &Bound<'_, PyAny>,
+        anchor: Option<PyAnchor>,
+    ) -> PyResult<PyPointRef> {
         crate::custom::ensure_authoring_allowed()?;
+        if let Some(anchor) = anchor {
+            let drawable = target.extract::<PyRef<PyDrawable>>().map_err(|_| {
+                pyo3::exceptions::PyTypeError::new_err(
+                    "screen_point(anchor=...) requires a Drawable",
+                )
+            })?;
+            return self
+                .inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .camera_screen_anchor(&drawable.0, anchor.0)
+                .map(PyPointRef)
+                .map_err(pyo3::exceptions::PyValueError::new_err);
+        }
         let target = resolve_reactive_endpoint_3d(target, &self.inner)?;
         Ok(PyPointRef(
             self.inner
@@ -5621,7 +5639,7 @@ impl PyGeometry {
         Py::new(py, PyPrimitive3D::initializer(handle))
     }
 
-    #[pyo3(signature = (radius=1.0, *, segments=32, rings=16, material=None))]
+    #[pyo3(signature = (radius=1.0, *, segments=32, rings=16, material=None, color_at=None))]
     fn sphere<'py>(
         &self,
         py: Python<'py>,
@@ -5629,19 +5647,33 @@ impl PyGeometry {
         segments: u32,
         rings: u32,
         material: Option<PyMaterial3D>,
+        color_at: Option<&Bound<'py, PyAny>>,
     ) -> PyResult<Py<PyPrimitive3D>> {
         crate::custom::ensure_authoring_allowed()?;
-        let handle = self
-            .inner
-            .lock()
-            .expect("scene canvas poisoned")
-            .sphere(
-                radius,
-                segments,
-                rings,
-                material.map(|value| value.0).unwrap_or_default(),
+        let material = material.map(|value| value.0).unwrap_or_default();
+        let invalid = |error: gaanim_objects::primitives3d::Primitive3DError| {
+            pyo3::exceptions::PyValueError::new_err(error.to_string())
+        };
+        // Evaluate user code before taking the scene lock.
+        let colors = if let Some(color_at) = color_at {
+            let samples =
+                gaanim_objects::primitives3d::sphere_color_samples(radius, segments, rings)
+                    .map_err(invalid)?;
+            Some(
+                samples
+                    .map(|sample| Ok(color_at.call1(sample)?.extract::<PyColor>()?.0))
+                    .collect::<PyResult<Vec<_>>>()?,
             )
-            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        } else {
+            None
+        };
+        let mut scene = self.inner.lock().expect("scene canvas poisoned");
+        let handle = match colors {
+            Some(colors) => scene.sphere_with_colors(radius, segments, rings, material, colors),
+            None => scene.sphere(radius, segments, rings, material),
+        }
+        .map_err(invalid)?;
+        drop(scene);
         Py::new(py, PyPrimitive3D::initializer(handle))
     }
 
