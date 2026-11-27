@@ -13,18 +13,21 @@ instalar una versión nueva, sigue
 
 = 0.18.0
 
-Publicada el 24 de noviembre de 2026. `scene.viz` dibuja grafos y árboles con
-su disposición calculada, treemaps y diagramas de Sankey, y arreglos, pilas,
-colas y listas enlazadas para explicar algoritmos; `scene.geometry` construye
-con regla y compás puntos, rectas y circunferencias que siguen a sus puntos.
+`scene.viz` dibuja grafos y árboles con su disposición calculada, treemaps y
+diagramas de Sankey, y arreglos, pilas, colas y listas enlazadas para explicar
+algoritmos. `scene.geometry` construye con regla y compás puntos, rectas y
+circunferencias que siguen a sus puntos.
 El código se anima por diferencias (`code.animate.edit`), los GIF, WebP y PNG
 animados y las secuencias de imágenes se reproducen como vídeos, y
 `scene.colors.accent` lee los colores del tema. Presentar gana listas y tablas
 por pasos, enlaces entre diapositivas y diapositivas de respaldo, puntero
-láser, rotulador y zoom, modo quiosco y PDF para repartir. `--transparent`
-exporta siempre sin el fondo. El editor abre muchos más clips de vídeo con
-mucha menos memoria. Los paquetes siguen en el formato 15. Lee «Al
-actualizar»: algunos nombres de parámetros de Python cambiaron.
+láser, rotulador y zoom, modo quiosco y PDF para repartir. En 3D, puedes
+colorear esferas por vértice, recorrer polilíneas y fijar etiquetas HUD a los
+bordes proyectados. `--diff --frame` captura instantes que eliges desde la
+terminal y `--transparent` exporta siempre sin el fondo. El editor abre
+muchos más clips de vídeo con mucha menos memoria. Los paquetes siguen en el
+formato 15. Lee «Al actualizar» para consultar los nombres de parámetros de
+Python que cambiaron.
 
 == Grafos y árboles
 
@@ -124,6 +127,25 @@ actualizar»: algunos nombres de parámetros de Python cambiaron.
   respuesta se oculta en lugar de fallar. Ver
   #link("/referencia/geometria/#construcciones")[Construcciones con regla y compás].
 
+== Esferas, recorridos 3D y etiquetas HUD
+
+- `scene.geometry.sphere(color_at=...)` llama a `color_at(latitud, longitud)`
+  una vez por vértice, con los ángulos en radianes. Los colores se interpolan
+  en la superficie y conservan el sombreado del material. Ver
+  #link("/referencia/geometria/#api-geometry-sphere")[`Geometry.sphere`].
+- `animate.move_along(guía)` recorre una `polyline_3d` de coordenadas fijas.
+  `start` y `end` eligen el tramo como fracciones de longitud de arco. Agrupa
+  la guía y el objeto para moverlos juntos durante el recorrido. La
+  orientación por tangente (`orient=True`) se admite en trayectorias 2D. Ver
+  #link("/referencia/animations/#api-anim-move-along")[`Anim.move_along`].
+- `scene.camera.screen_point(objeto, anchor=Anchor.TOP)` sigue el borde
+  superior del rectángulo proyectado por la cámara. Con
+  `etiqueta.hud().follow(punto, anchor=Anchor.BOTTOM, offset=(0, 0.2))`, el
+  borde inferior de la etiqueta queda a 0.2 unidades HUD por encima. El
+  anclaje del seguidor requiere `delay=0`. Ver
+  #link("/referencia/scene/#api-camera-screen-point")[`Camera.screen_point`] y
+  #link("/referencia/drawable/#api-drawable-follow")[`Drawable.follow`].
+
 == Estructuras de datos
 
 - `scene.viz.array` dibuja un arreglo con índices y punteros con nombre, y
@@ -162,6 +184,19 @@ actualizar»: algunos nombres de parámetros de Python cambiaron.
   hoja con sus notas debajo, en texto que se puede buscar. Las opciones valen
   también para un paquete `.gaanim` y están en el diálogo *Export*. Ver
   #link("/referencia/cli/#diapositivas-pdf")[Diapositivas en PDF].
+
+== Comparación visual e integración con editores
+
+- `gaanim --diff --example escena.py --frame 0,climax` captura fotogramas de
+  un script o proyecto que llama a `scene.render()`. `--frame` admite
+  segundos, marcadores, segmentos y pausas. Mantén los mismos selectores en
+  el mismo orden al guardar la referencia y al comparar. Una captura con
+  nombre conserva su identidad aunque cambie su instante. Ver
+  #link("/guias/capturas-y-comparacion/")[Capturas y comparación visual].
+- `gaanim inspect --json` incluye `waits` con el inicio, el final, el archivo
+  y la línea de cada `scene.wait` de duración positiva. El editor puede
+  resaltar la línea mientras se reproduce ese intervalo. Ver
+  #link("/referencia/cli/#gaanim-inspect")[`gaanim inspect`].
 
 == Rendimiento
 

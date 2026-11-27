@@ -26,19 +26,26 @@ Por ejemplo, `escenas/intro.py` usa automáticamente
 `tests/visual/escenas/intro/`. No hace falta escribir las rutas de
 `baseline`, `current` ni `report`.
 
-= Flujo normal
+= Elegir fotogramas desde la terminal
 
-Para un script que llama a `scene.render()`, puedes elegir los instantes
-desde el comando. `--frame` acepta segundos y los mismos nombres que
-`gaanim export --frame`. Usa la misma lista y orden al guardar la
-versión aprobada y al comparar. Un marcador puede cambiar de instante
-entre las dos versiones y seguirá correspondiendo a la misma captura.
+Para un script o proyecto que llama a `scene.render()`, `--frame` acepta
+segundos y nombres de marcadores, segmentos o pausas, igual que
+`gaanim export --frame`. El primer comando escribe solo las capturas para
+revisarlas. Una vez aprobadas, guarda la referencia con `--bless` y usa la
+misma lista de selectores, en el mismo orden, para comparar después de un
+cambio. Un marcador puede cambiar de instante entre las dos versiones y
+seguirá correspondiendo a la misma captura.
 
 ```bash
 gaanim --diff --example escenas/intro.py --frame 0,climax --capture-only
+gaanim --diff --example escenas/intro.py --frame 0,climax --bless
+gaanim --diff --example escenas/intro.py --frame 0,climax
 ```
 
-Para fijar los instantes dentro del script, usa `scene.snapshots`.
+= Fijar los fotogramas en el script <flujo-normal>
+
+Usa `scene.snapshots` para guardar los instantes de captura en el código de
+la escena.
 
 + Elige los instantes que quieres capturar. El script llama a
   `scene.snapshots(...)` cuando existe la variable de entorno

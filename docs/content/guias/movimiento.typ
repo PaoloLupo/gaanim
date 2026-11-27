@@ -361,11 +361,17 @@ breve para señalar un error, no una capa continua.
 
 == Trayectorias y arcos
 
-`animate.move_along(camino)` recorre el contorno de cualquier drawable. Con
-`orient=True` el objeto gira con la tangente, así un avión apunta hacia donde
-vuela; `rotate_offset` corrige la orientación de tu dibujo y `start`/`end`
-eligen el tramo recorrido. Para un recorrido a velocidad constante usa
-`Easing.LINEAR`.
+`animate.move_along(camino)` mueve el objeto por una trayectoria. Una flecha
+sólida se recorre por su eje, de la cola a la punta. En trayectorias 2D,
+`orient=True` gira el objeto con la tangente para que, por ejemplo, un avión
+apunte hacia donde vuela. `rotate_offset` ajusta ese giro. `start` y `end`
+eligen el tramo en fracciones de longitud de arco. Para recorrerlo a
+velocidad constante, usa `Easing.LINEAR`.
+
+Para una órbita en 3D, crea una `scene.geometry.polyline_3d` con coordenadas
+fijas. El origen del objeto recorre la línea y conserva su orientación.
+Agrupa la órbita y el objeto para moverlos juntos durante la animación. Ver
+#link("/referencia/animations/#api-anim-move-along")[`Anim.move_along`].
 
 Un `move_to` en línea recta puede verse mecánico. `.path_arc(ángulo)` lo curva
 en un arco circular que gira `ángulo` radianes (positivo es antihorario).
